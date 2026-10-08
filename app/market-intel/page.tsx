@@ -147,7 +147,7 @@ export default function MarketIntelPage() {
         const [latestData, obsData, acq, fil, warnData, mult, log] = await Promise.all([
           getJSON<LatestMap>("/api/market/latest"),
           getJSON<MiIndicatorObs[]>(
-            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE"
+            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE,AZ_SPEND_WELFARE,AZ_SPEND_EDUCATION,AZ_SPEND_INSURANCE,AZ_SPEND_HIGHWAYS,AZ_SPEND_CORRECTIONS,AZ_SPEND_HEALTH"
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
@@ -249,6 +249,36 @@ export default function MarketIntelPage() {
       .sort((a, b) => (a.date < b.date ? -1 : 1));
   }, [warn, fiveYearCutoff]);
 
+  const spendRows = useMemo(() => {
+    const cats: { id: string; label: string }[] = [
+      { id: "AZ_SPEND_WELFARE", label: "Public welfare" },
+      { id: "AZ_SPEND_EDUCATION", label: "Education" },
+      { id: "AZ_SPEND_INSURANCE", label: "Insurance trust" },
+      { id: "AZ_SPEND_HIGHWAYS", label: "Highways" },
+      { id: "AZ_SPEND_CORRECTIONS", label: "Corrections" },
+      { id: "AZ_SPEND_HEALTH", label: "Health" },
+    ];
+    const ids = ["AZ_STATE_EXPENDITURE", ...cats.map((c) => c.id)];
+    const rows = seriesToRows(
+      obs.filter((o) => ids.includes(o.seriesId)),
+      ids
+    );
+    const toB = (v: unknown) => (typeof v === "number" ? Math.round(v / 1e5) / 10 : null);
+    return rows.map((r) => {
+      const out: Record<string, string | number | null> = { date: r.date.slice(0, 4) };
+      let sum = 0;
+      for (const c of cats) {
+        const v = toB(r[c.id]);
+        out[c.label] = v;
+        if (v !== null) sum += v;
+      }
+      const total = toB(r.AZ_STATE_EXPENDITURE);
+      out["Other"] = total !== null ? Math.round((total - sum) * 10) / 10 : null;
+      out["Total"] = total;
+      return out;
+    });
+  }, [obs]);
+
   const budgetRows = useMemo(() => {
     // Annual Census data (2017+) — show the full range, not the 5-yr window.
     const rows = seriesToRows(
@@ -297,6 +327,20 @@ export default function MarketIntelPage() {
     if (kind === "filings") setFilings((a) => a.map((x) => (x.id === id ? { ...x, status: status as MiFiling["status"] } : x)));
   };
 
+  /** Dismiss a major-event headline (persists on the underlying record). */
+  const dismissHeadline = async (h: { source: "acquisitions" | "filings" | "warn"; rawId: string }) => {
+    if (h.source === "warn") {
+      await fetch("/api/market/warn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: h.rawId, status: "dismissed" }),
+      });
+      setWarn((w) => w.map((x) => (x.id === h.rawId ? { ...x, status: "dismissed" } : x)));
+    } else {
+      await setStatus(h.source, h.rawId, "dismissed");
+    }
+  };
+
   const filteredFilings = filingCat === "all" ? filings : filings.filter((f) => f.category === filingCat);
   const visibleAcq = acquisitions.filter((a) => a.status !== "dismissed" && a.eventType !== "bankruptcy");
 
@@ -332,7 +376,7 @@ export default function MarketIntelPage() {
   }, [multiples, multBand, multMetric]);
 
   const headlines = useMemo(() => {
-    const items: { id: string; kind: string; title: string; detail: string; date: string; url: string }[] = [];
+    const items: { id: string; kind: string; title: string; detail: string; date: string; url: string; source: "acquisitions" | "filings" | "warn"; rawId: string }[] = [];
     const fmtVal = (v: number | null) =>
       v === null ? "" : v >= 1e9 ? ` · $${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? ` · $${Math.round(v / 1e6)}M` : "";
     for (const a of acquisitions) {
@@ -344,6 +388,8 @@ export default function MarketIntelPage() {
           detail: `${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}`,
           date: a.announcedDate,
           url: a.sourceUrl,
+          source: "acquisitions",
+          rawId: a.id,
         });
       }
     }
@@ -356,6 +402,8 @@ export default function MarketIntelPage() {
           detail: `${f.form}${f.azCompany ? " · AZ company" : " · National"}`,
           date: f.filingDate,
           url: f.url,
+          source: "filings",
+          rawId: f.id,
         });
       }
     }
@@ -380,12 +428,14 @@ export default function MarketIntelPage() {
           detail: `${a.acquirer && a.target && t === "acquisition" ? `${a.acquirer} → ${a.target} · ` : ""}${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}${fmtVal(a.dealValue ?? null)}`,
           date: a.announcedDate,
           url: a.sourceUrl,
+          source: "acquisitions",
+          rawId: a.id,
         });
       }
     }
     // Large layoffs
     const bigWarn = warn
-      .filter((w) => (w.headcount ?? 0) >= 300)
+      .filter((w) => (w.headcount ?? 0) >= 300 && w.status !== "dismissed")
       .sort((x, y) => (y.noticeDate || "").localeCompare(x.noticeDate || ""))
       .slice(0, 2);
     for (const w of bigWarn) {
@@ -396,6 +446,8 @@ export default function MarketIntelPage() {
         detail: `${w.headcount} affected · ${w.location}${w.industry ? ` · ${w.industry}` : ""}`,
         date: w.noticeDate,
         url: "",
+        source: "warn",
+        rawId: w.id,
       });
     }
     // Dedupe: the same event is often ingested several times (multiple news
@@ -489,19 +541,31 @@ export default function MarketIntelPage() {
                       ? "text-blue-700 dark:text-blue-400"
                       : "text-amber-700 dark:text-amber-400";
                 return (
-                  <a
+                  <div
                     key={h.id}
-                    href={h.url || undefined}
-                    target={h.url ? "_blank" : undefined}
-                    rel="noreferrer"
-                    className={`rounded-xl border p-4 transition hover:shadow-md ${style}`}
+                    className={`relative rounded-xl border p-4 transition hover:shadow-md ${style}`}
                   >
-                    <p className={`text-xs font-semibold uppercase tracking-wider ${label}`}>{h.kind}</p>
-                    <p className="mt-1 text-base font-bold text-[#0d1f3c] dark:text-white">{h.title}</p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-white/50">
-                      {h.detail}{h.date ? ` · ${fmtDate(h.date)}` : ""}
-                    </p>
-                  </a>
+                    <a
+                      href={h.url || undefined}
+                      target={h.url ? "_blank" : undefined}
+                      rel="noreferrer"
+                      className="block"
+                    >
+                      <p className={`text-xs font-semibold uppercase tracking-wider ${label}`}>{h.kind}</p>
+                      <p className="mt-1 pr-5 text-base font-bold text-[#0d1f3c] dark:text-white">{h.title}</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-white/50">
+                        {h.detail}{h.date ? ` · ${fmtDate(h.date)}` : ""}
+                      </p>
+                    </a>
+                    <button
+                      onClick={() => dismissHeadline(h)}
+                      aria-label={`Dismiss ${h.title}`}
+                      title="Dismiss"
+                      className="absolute right-2 top-2 rounded-full px-1.5 py-0.5 text-sm leading-none text-slate-400 transition hover:bg-black/5 hover:text-slate-700 dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -635,6 +699,61 @@ export default function MarketIntelPage() {
               </tbody>
             </table>
           </div>
+        </div>
+        <div className={`${chartCard} mt-4`}>
+          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Where the Spending Goes</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+            State expenditure by function, $B · Census. Public welfare is mostly Medicaid (AHCCCS); insurance trust is mainly state employee retirement payouts. &quot;Other&quot; covers everything else — debt interest, administration, police, natural resources, and smaller functions.
+          </p>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={spendRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} />
+                <YAxis tick={{ fontSize: 11, fill: tick }} />
+                <Tooltip
+                  contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                  formatter={(v, name) => [`$${v}B`, name]}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="Public welfare" stackId="spend" fill={blue} />
+                <Bar dataKey="Education" stackId="spend" fill={gold} />
+                <Bar dataKey="Insurance trust" stackId="spend" fill={green} />
+                <Bar dataKey="Highways" stackId="spend" fill={orange} />
+                <Bar dataKey="Corrections" stackId="spend" fill="#a855f7" />
+                <Bar dataKey="Health" stackId="spend" fill="#14b8a6" />
+                <Bar dataKey="Other" stackId="spend" fill="#94a3b8" radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          {spendRows.length > 0 && (
+            <div className={`${tableWrap} mt-4`}>
+              <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                  <th className={th}>Category ({spendRows[spendRows.length - 1].date})</th><th className={th}>Amount</th><th className={th}>Share</th>
+                </tr></thead>
+                <tbody>
+                  {["Public welfare", "Education", "Insurance trust", "Highways", "Corrections", "Health", "Other"].map((label) => {
+                    const last = spendRows[spendRows.length - 1];
+                    const v = last[label] as number | null;
+                    const total = last["Total"] as number | null;
+                    return (
+                      <tr key={label} className="border-b border-slate-100 dark:border-white/5">
+                        <td className={`${td} font-medium`}>{label}</td>
+                        <td className={td}>{v !== null ? `$${v}B` : "—"}</td>
+                        <td className={td}>{v !== null && total ? `${Math.round((v / total) * 1000) / 10}%` : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="border-t-2 border-slate-200 dark:border-white/15">
+                    <td className={`${td} font-bold`}>Total expenditure</td>
+                    <td className={`${td} font-bold`}>{spendRows[spendRows.length - 1]["Total"] !== null ? `$${spendRows[spendRows.length - 1]["Total"]}B` : "—"}</td>
+                    <td className={td}>100%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
         </Section>
 
