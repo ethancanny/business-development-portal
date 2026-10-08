@@ -285,6 +285,8 @@ export default function MarketIntelPage() {
 
   const headlines = useMemo(() => {
     const items: { id: string; kind: string; title: string; detail: string; date: string; url: string }[] = [];
+    const fmtVal = (v: number | null) =>
+      v === null ? "" : v >= 1e9 ? ` · $${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? ` · $${Math.round(v / 1e6)}M` : "";
     for (const a of acquisitions) {
       if (a.eventType === "bankruptcy" && a.status !== "dismissed") {
         items.push({
@@ -309,20 +311,29 @@ export default function MarketIntelPage() {
         });
       }
     }
-    // Latest AZ acquisitions
-    const recentAcq = acquisitions
-      .filter((a) => a.eventType !== "bankruptcy" && a.status !== "dismissed" && a.announcedDate)
-      .sort((x, y) => (y.announcedDate || "").localeCompare(x.announcedDate || ""))
-      .slice(0, 3);
-    for (const a of recentAcq) {
-      items.push({
-        id: `acq-${a.id}`,
-        kind: "Acquisition",
-        title: a.target || a.acquirer || "Unnamed deal",
-        detail: `${a.acquirer && a.target ? `${a.acquirer} → ${a.target}` : a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}`,
-        date: a.announcedDate,
-        url: a.sourceUrl,
-      });
+    const byType = (t: string, n: number) =>
+      acquisitions
+        .filter((a) => a.eventType === t && a.status !== "dismissed" && a.announcedDate)
+        .sort((x, y) => (y.announcedDate || "").localeCompare(x.announcedDate || ""))
+        .slice(0, n);
+    const kindLabel: Record<string, string> = {
+      acquisition: "Acquisition",
+      expansion: "Expansion",
+      contract: "Contract Award",
+      relocation: "Relocation",
+      ipo: "IPO",
+    };
+    for (const t of ["acquisition", "expansion", "contract", "relocation", "ipo"] as const) {
+      for (const a of byType(t, 2)) {
+        items.push({
+          id: `${t}-${a.id}`,
+          kind: kindLabel[t],
+          title: t === "acquisition" ? a.target || a.acquirer || "Unnamed deal" : a.target || "Unnamed",
+          detail: `${a.acquirer && a.target && t === "acquisition" ? `${a.acquirer} → ${a.target} · ` : ""}${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}${fmtVal(a.dealValue ?? null)}`,
+          date: a.announcedDate,
+          url: a.sourceUrl,
+        });
+      }
     }
     // Large layoffs
     const bigWarn = warn
@@ -339,7 +350,7 @@ export default function MarketIntelPage() {
         url: "",
       });
     }
-    return items.sort((x, y) => (y.date || "").localeCompare(x.date || "")).slice(0, 8);
+    return items.sort((x, y) => (y.date || "").localeCompare(x.date || "")).slice(0, 12);
   }, [acquisitions, filings, warn]);
 
   const chartCard = "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60";
@@ -392,16 +403,22 @@ export default function MarketIntelPage() {
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {headlines.map((h) => {
                 const isBankruptcy = h.kind === "Bankruptcy" || h.kind === "8-K Bankruptcy";
+                const isDeal = h.kind === "Acquisition" || h.kind === "IPO";
+                const isGrowth = h.kind === "Expansion" || h.kind === "Contract Award" || h.kind === "Relocation";
                 const style = isBankruptcy
                   ? "border-red-200 bg-red-50/60 dark:border-red-500/25 dark:bg-red-500/10"
-                  : h.kind === "Acquisition"
+                  : isDeal
                     ? "border-emerald-200 bg-emerald-50/60 dark:border-emerald-500/25 dark:bg-emerald-500/10"
-                    : "border-amber-200 bg-amber-50/60 dark:border-amber-500/25 dark:bg-amber-500/10";
+                    : isGrowth
+                      ? "border-blue-200 bg-blue-50/60 dark:border-blue-500/25 dark:bg-blue-500/10"
+                      : "border-amber-200 bg-amber-50/60 dark:border-amber-500/25 dark:bg-amber-500/10";
                 const label = isBankruptcy
                   ? "text-red-700 dark:text-red-400"
-                  : h.kind === "Acquisition"
+                  : isDeal
                     ? "text-emerald-700 dark:text-emerald-400"
-                    : "text-amber-700 dark:text-amber-400";
+                    : isGrowth
+                      ? "text-blue-700 dark:text-blue-400"
+                      : "text-amber-700 dark:text-amber-400";
                 return (
                   <a
                     key={h.id}

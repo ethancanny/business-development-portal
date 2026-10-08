@@ -322,6 +322,99 @@ export async function ingestNews(): Promise<number> {
   return total;
 }
 
+/* ---------------- Economic-event news (expansions, contracts, relocations, IPOs) ---------------- */
+
+type EconEventType = "expansion" | "contract" | "relocation" | "ipo";
+
+const ECONOMIC_EVENT_QUERIES: { eventType: EconEventType; q: string; verbs: RegExp }[] = [
+  {
+    eventType: "expansion",
+    q: 'Arizona (semiconductor OR chip OR "data center" OR manufacturing) (expansion OR "new fab" OR groundbreaking OR "new facility" OR "new plant") when:30d',
+    verbs: /\b(expansion|expands|opens|opening|groundbreaking|new facility|new plant|\bfab\b)\b/i,
+  },
+  {
+    eventType: "expansion",
+    q: '(Phoenix OR Scottsdale OR Tempe OR Chandler OR Tucson) (headquarters OR "distribution center") (opens OR opening OR expansion) when:30d',
+    verbs: /\b(opens|opening|expansion|headquarters|distribution center)\b/i,
+  },
+  {
+    eventType: "contract",
+    q: 'Arizona (defense OR aerospace) (contract ("awarded" OR "award" OR wins)) when:30d',
+    verbs: /\b(awarded|award|wins|contract)\b/i,
+  },
+  {
+    eventType: "relocation",
+    q: 'company (relocating OR relocation OR "moving headquarters") (Arizona OR Phoenix OR Scottsdale) when:30d',
+    verbs: /\b(relocat|moving|headquarters)\b/i,
+  },
+  {
+    eventType: "ipo",
+    q: 'Arizona (company OR startup) (IPO OR "goes public" OR "files for IPO") when:30d',
+    verbs: /\b(IPO|goes public|public offering|files for IPO)\b/i,
+  },
+];
+
+/** Extract a dollar value from a headline, in USD. */
+function parseHeadlineValue(headline: string): number | null {
+  const m = headline.match(/\$([\d,.]+)\s*(billion|million|trillion|\bb\b|\bm\b)/i);
+  if (!m) return null;
+  const num = parseFloat(m[1].replace(/,/g, ""));
+  if (!Number.isFinite(num)) return null;
+  const unit = m[2].toLowerCase();
+  const mult = unit.startsWith("b") ? 1e9 : unit.startsWith("t") ? 1e12 : 1e6;
+  return Math.round(num * mult);
+}
+
+/** Best-effort company/subject extraction: text before the event verb, cleaned up. */
+function parseEventSubject(headline: string, verbs: RegExp): string {
+  const h = headline.replace(/\s+-\s+[^-]+$/, "").trim(); // strip " - Publisher"
+  const idx = h.search(verbs);
+  const subject = (idx > 0 ? h.slice(0, idx) : h).trim()
+    .replace(/^(the|a)\s+/i, "")
+    .replace(/[,.;:]+$/, "");
+  return subject.length > 80 ? subject.slice(0, 80).trim() : subject;
+}
+
+export async function ingestEconomicEvents(): Promise<number> {
+  let total = 0;
+  const seen = new Set<string>();
+  for (const { eventType, q, verbs } of ECONOMIC_EVENT_QUERIES) {
+    const url =
+      `https://news.google.com/rss/search?q=${encodeURIComponent(q)}` + `&hl=en-US&gl=US&ceid=US:en`;
+    let xml = "";
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" } });
+      if (!res.ok) continue;
+      xml = await res.text();
+    } catch {
+      continue;
+    }
+    const rows: AcquisitionInput[] = [];
+    for (const item of parseRss(xml)) {
+      if (!item.link || seen.has(item.link)) continue;
+      seen.add(item.link);
+      if (!verbs.test(item.title)) continue;
+      // skip obvious bankruptcy noise in expansion/contract feeds
+      if (/\b(bankruptcy|chapter 11)\b/i.test(item.title)) continue;
+      const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
+      rows.push({
+        acquirer: "",
+        target: parseEventSubject(item.title, verbs),
+        industry: classifyIndustry(item.title),
+        dealValue: parseHeadlineValue(item.title),
+        announcedDate: announced,
+        sourceUrl: item.link,
+        publisher: item.source,
+        eventType,
+      });
+    }
+    total += await upsertAcquisitions(rows);
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  await logSync("econ_events", "ok", total, `Google News: ${ECONOMIC_EVENT_QUERIES.length} economic-event queries`);
+  return total;
+}
+
 /* ---------------- Bankruptcy news (private-company Chapter 11s) ---------------- */
 
 const BANKRUPTCY_NEWS_QUERIES = [
@@ -750,7 +843,7 @@ export async function ingestCensusStateFin(): Promise<number> {
 
 /* ---------------- Orchestrator ---------------- */
 
-export type IngestSource = "indicators" | "filings" | "news" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "all";
+export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "all";
 
 export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -758,6 +851,7 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["indicators", ingestIndicators],
     ["filings", ingestFilings],
     ["news", ingestNews],
+    ["econ_events", ingestEconomicEvents],
     ["bankruptcy_news", ingestBankruptcyNews],
     ["warn", ingestWarn],
     ["entities", ingestEntities],
