@@ -9,7 +9,7 @@ const METRICS: { id: Metric; label: string; format: (v: number) => string }[] = 
   { id: "income", label: "Median Income", format: (v) => `$${Math.round(v / 1000)}k` },
   { id: "age", label: "Median Age", format: (v) => `${Math.round(v)} yrs` },
   { id: "homeval", label: "Median Home Value", format: (v) => `$${Math.round(v / 1000)}k` },
-  { id: "growth", label: "Pop. Growth ’19–’23", format: (v) => `${v > 0 ? "+" : ""}${Math.round(v)}%` },
+  { id: "growth", label: "Pop. Growth ’20–’24", format: (v) => `${v > 0 ? "+" : ""}${Math.round(v)}%` },
 ];
 
 // Color scales (5 steps, light → dark)
@@ -179,7 +179,7 @@ export default function ValleyDemographics() {
           ["Median age", p.age ? `${p.age.toFixed(1)} yrs` : "—"],
           ["Median income", p.income ? `$${p.income.toLocaleString()}` : "—"],
           ["Median home value", p.homeval ? `$${p.homeval.toLocaleString()}` : "—"],
-          ["Pop. growth ’19–’23", p.growth !== undefined ? `${p.growth > 0 ? "+" : ""}${p.growth.toFixed(1)}%` : "—"],
+          ["Pop. growth ’20–’24", p.growth !== undefined ? `${p.growth > 0 ? "+" : ""}${p.growth.toFixed(1)}%` : "—"],
         ]
           .map(([k, v]) => `<div style="display:flex;justify-content:space-between;gap:12px;font-size:11px"><span style="color:#64748b">${k}</span><b style="color:#0d1f3c">${v}</b></div>`)
           .join("");
@@ -311,8 +311,8 @@ export default function ValleyDemographics() {
           ? `${stats.tracts.toLocaleString()} ${county.countyName} census tracts · ${county.vintage}${
               metric === "growth"
                 ? stats.withGrowth > 0
-                  ? ` · growth for ${stats.withGrowth} tracts with stable boundaries`
-                  : " · growth layer is Maricopa-only for now"
+                  ? ` · growth vs 2020 Census for ${stats.withGrowth} tracts`
+                  : " · growth unavailable for this county"
                 : ""
             } · Drag to pan — click the map, then scroll to zoom. Click a tract for details.`
           : "Source: US Census Bureau, American Community Survey 5-year."}
