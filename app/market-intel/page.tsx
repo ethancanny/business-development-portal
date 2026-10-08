@@ -231,7 +231,7 @@ export default function MarketIntelPage() {
   }, [multiples, multBand, multMetric]);
 
   const headlines = useMemo(() => {
-    const items: { id: string; kind: string; title: string; detail: string; date: string; url: string; industry: string }[] = [];
+    const items: { id: string; kind: string; title: string; detail: string; date: string; url: string }[] = [];
     for (const a of acquisitions) {
       if (a.eventType === "bankruptcy" && a.status !== "dismissed") {
         items.push({
@@ -241,7 +241,6 @@ export default function MarketIntelPage() {
           detail: `${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}`,
           date: a.announcedDate,
           url: a.sourceUrl,
-          industry: a.industry,
         });
       }
     }
@@ -254,12 +253,41 @@ export default function MarketIntelPage() {
           detail: `${f.form}${f.azCompany ? " · AZ company" : " · National"}`,
           date: f.filingDate,
           url: f.url,
-          industry: "",
         });
       }
     }
-    return items.sort((x, y) => (y.date || "").localeCompare(x.date || "")).slice(0, 6);
-  }, [acquisitions, filings]);
+    // Latest AZ acquisitions
+    const recentAcq = acquisitions
+      .filter((a) => a.eventType !== "bankruptcy" && a.status !== "dismissed" && a.announcedDate)
+      .sort((x, y) => (y.announcedDate || "").localeCompare(x.announcedDate || ""))
+      .slice(0, 3);
+    for (const a of recentAcq) {
+      items.push({
+        id: `acq-${a.id}`,
+        kind: "Acquisition",
+        title: a.target || a.acquirer || "Unnamed deal",
+        detail: `${a.acquirer && a.target ? `${a.acquirer} → ${a.target}` : a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}`,
+        date: a.announcedDate,
+        url: a.sourceUrl,
+      });
+    }
+    // Large layoffs
+    const bigWarn = warn
+      .filter((w) => (w.headcount ?? 0) >= 300)
+      .sort((x, y) => (y.noticeDate || "").localeCompare(x.noticeDate || ""))
+      .slice(0, 2);
+    for (const w of bigWarn) {
+      items.push({
+        id: `warn-${w.id}`,
+        kind: "Major layoffs",
+        title: w.employer,
+        detail: `${w.headcount} affected · ${w.location}${w.industry ? ` · ${w.industry}` : ""}`,
+        date: w.noticeDate,
+        url: "",
+      });
+    }
+    return items.sort((x, y) => (y.date || "").localeCompare(x.date || "")).slice(0, 8);
+  }, [acquisitions, filings, warn]);
 
   const chartCard = "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60";
   const tableWrap = "overflow-x-auto rounded-xl border border-slate-200 dark:border-white/10";
@@ -306,7 +334,7 @@ export default function MarketIntelPage() {
         {headlines.length > 0 && (
           <div className="mb-6">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[#0d1f3c] dark:text-white">
-              Major events <span className="ml-1 rounded-full bg-red-500/15 px-2 py-0.5 text-xs normal-case text-red-700 dark:text-red-400">bankruptcies & distress</span>
+              Major events <span className="ml-1 rounded-full bg-red-500/15 px-2 py-0.5 text-xs normal-case text-red-700 dark:text-red-400">AZ headlines</span>
             </h2>
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {headlines.map((h) => (

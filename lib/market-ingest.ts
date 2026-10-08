@@ -326,7 +326,6 @@ export async function ingestNews(): Promise<number> {
 const BANKRUPTCY_NEWS_QUERIES = [
   '"Arizona" (bankruptcy OR "chapter 11") when:30d',
   '"files for bankruptcy" (Phoenix OR Scottsdale OR Tucson OR Mesa OR Chandler OR Tempe) when:30d',
-  '"files for chapter 11" when:7d', // national majors, fresh only
 ];
 
 /** "Salad and Go files for Chapter 11 bankruptcy" -> "Salad and Go" */
