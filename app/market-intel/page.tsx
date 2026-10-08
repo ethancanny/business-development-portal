@@ -97,6 +97,13 @@ export default function MarketIntelPage() {
   const [filingCat, setFilingCat] = useState("all");
   const [multMetric, setMultMetric] = useState<"ebitda" | "revenue">("revenue");
   const [multBand, setMultBand] = useState("EV $5–25M");
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
   const [warn, setWarn] = useState<MiWarnNotice[]>([]);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [syncLog, setSyncLog] = useState<MiSyncLog[]>([]);
@@ -272,8 +279,10 @@ export default function MarketIntelPage() {
     return Array.from(byInd.values())
       .map((m) => {
         const [top, sub] = m.industry.split("—").map((s) => s.trim());
+        const prettySub = sub ? prettify(sub) : m.industry;
         return {
-          industry: sub ? `${top}: ${prettify(sub)}` : m.industry,
+          industry: sub ? `${top}: ${prettySub}` : m.industry,
+          short: prettySub,
           full: m.industry,
           value: multMetric === "ebitda" ? m.evEbitdaMedian : m.evRevenueMedian,
           notes: m.notes,
@@ -595,7 +604,12 @@ export default function MarketIntelPage() {
               <BarChart data={multChartData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 0 }}>
                 <CartesianGrid stroke={grid} strokeDasharray="3 3" />
                 <XAxis type="number" tick={{ fontSize: 11, fill: tick }} />
-                <YAxis type="category" dataKey="industry" width={230} tick={{ fontSize: 12, fill: tick }} />
+                <YAxis
+                  type="category"
+                  dataKey={isMobile ? "short" : "industry"}
+                  width={isMobile ? 118 : 230}
+                  tick={{ fontSize: isMobile ? 11 : 12, fill: tick }}
+                />
                 <Tooltip
                   contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
                   formatter={(v, _name, props) => [`${v}x`, (props?.payload as { full?: string })?.full || ""]}

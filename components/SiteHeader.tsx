@@ -19,6 +19,7 @@ export default function SiteHeader() {
   const router = useRouter();
   const { theme, toggle } = useTheme();
   const [userName, setUserName] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -29,9 +30,36 @@ export default function SiteHeader() {
       .catch(() => {});
   }, [pathname]);
 
+  // Close the mobile menu on navigation.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
+  };
+
+  const navLink = (href: string, label: string, mobile = false) => {
+    const active =
+      href === "/"
+        ? pathname === "/"
+        : pathname === href || pathname.startsWith(href + "/");
+    return (
+      <Link
+        key={href}
+        href={href}
+        className={`rounded-lg font-semibold transition ${
+          mobile ? "block px-4 py-3 text-base" : "px-3 py-1.5 text-sm"
+        } ${
+          active
+            ? "bg-[#b8975a] text-[#0d1f3c]"
+            : "text-[#e8dfc8] hover:bg-white/10 hover:text-white"
+        }`}
+      >
+        {label}
+      </Link>
+    );
   };
 
   // The login page has its own branding; keep the chrome out of the way there.
@@ -51,40 +79,12 @@ export default function SiteHeader() {
               Business Development Portal
             </span>
           </Link>
-          <nav className="flex items-center gap-1">
-            {NAV.map((item) => {
-              const active =
-                item.href === "/"
-                  ? pathname === "/"
-                  : pathname === item.href ||
-                    pathname.startsWith(item.href + "/");
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-                    active
-                      ? "bg-[#b8975a] text-[#0d1f3c]"
-                      : "text-[#e8dfc8] hover:bg-white/10 hover:text-white"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
+          <nav className="hidden items-center gap-1 md:flex">
+            {NAV.map((item) => navLink(item.href, item.label))}
           </nav>
         </div>
-        <div className="flex items-center gap-3">
-          <Link
-            href={AUDIT.href}
-            className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-              pathname === AUDIT.href || pathname.startsWith(AUDIT.href + "/")
-                ? "bg-[#b8975a] text-[#0d1f3c]"
-                : "text-[#e8dfc8] hover:bg-white/10 hover:text-white"
-            }`}
-          >
-            {AUDIT.label}
-          </Link>
+        <div className="hidden items-center gap-3 md:flex">
+          {navLink(AUDIT.href, AUDIT.label)}
           <span className="hidden h-5 w-px bg-[#b8975a]/40 sm:block" />
           {userName && (
             <span className="hidden text-xs text-[#c8bfa8] sm:block">
@@ -122,7 +122,56 @@ export default function SiteHeader() {
             Log out
           </button>
         </div>
+        {/* Mobile menu button */}
+        <button
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+          aria-expanded={menuOpen}
+          className="rounded-lg border border-[#b8975a]/60 px-3 py-2 text-[#e8dfc8] transition hover:bg-white/10 md:hidden"
+        >
+          <svg viewBox="0 0 20 20" className="h-5 w-5" fill="currentColor">
+            {menuOpen ? (
+              <path
+                fillRule="evenodd"
+                d="M4.3 4.3a1 1 0 0 1 1.4 0L10 8.6l4.3-4.3a1 1 0 1 1 1.4 1.4L11.4 10l4.3 4.3a1 1 0 0 1-1.4 1.4L10 11.4l-4.3 4.3a1 1 0 0 1-1.4-1.4L8.6 10 4.3 5.7a1 1 0 0 1 0-1.4Z"
+                clipRule="evenodd"
+              />
+            ) : (
+              <path
+                fillRule="evenodd"
+                d="M3 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm0 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm0 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Z"
+                clipRule="evenodd"
+              />
+            )}
+          </svg>
+        </button>
       </div>
+      {/* Mobile dropdown */}
+      {menuOpen && (
+        <nav className="border-t border-[#b8975a]/30 px-4 pb-4 pt-2 md:hidden">
+          <div className="flex flex-col gap-1">
+            {NAV.map((item) => navLink(item.href, item.label, true))}
+            {navLink(AUDIT.href, AUDIT.label, true)}
+          </div>
+          <div className="mt-3 flex items-center gap-2 border-t border-[#b8975a]/30 pt-3">
+            <button
+              onClick={toggle}
+              className="flex-1 rounded-lg border border-[#b8975a]/60 px-3 py-2.5 text-sm font-semibold text-[#e8dfc8]"
+            >
+              {theme === "dark" ? "☀️ Day mode" : "🌙 Night mode"}
+            </button>
+            <button
+              onClick={logout}
+              className="flex-1 rounded-lg border border-[#b8975a]/60 px-3 py-2.5 text-sm font-semibold text-[#e8dfc8]"
+            >
+              Log out
+            </button>
+          </div>
+          {userName && (
+            <p className="mt-2 text-center text-xs text-[#c8bfa8]">{userName}</p>
+          )}
+        </nav>
+      )}
       <div className="h-0.5 bg-[#b8975a]" />
     </header>
   );
