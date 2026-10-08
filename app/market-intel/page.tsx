@@ -423,9 +423,10 @@ export default function MarketIntelPage() {
 
   /** Section event strips: recent major events relevant to each section. */
   const dismissEvent = (a: MiAcquisition) => setStatus("acquisitions", a.id, "dismissed");
+  const stripCutoff = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
   const recentEvents = (pred: (a: MiAcquisition) => boolean, n = 3) =>
     acquisitions
-      .filter((a) => a.status !== "dismissed" && a.announcedDate && pred(a))
+      .filter((a) => a.status !== "dismissed" && a.announcedDate && a.announcedDate >= stripCutoff && pred(a))
       .sort((x, y) => (y.announcedDate || "").localeCompare(x.announcedDate || ""))
       .slice(0, n);
   const policyEvents = recentEvents((a) => a.eventType === "policy");
@@ -495,11 +496,15 @@ export default function MarketIntelPage() {
   }, [multiples, multBand, multMetric]);
 
   const headlines = useMemo(() => {
+    // Recency window: Major Events is a "what's new" feed, refreshed by the
+    // daily ingest — never a historical archive. Anything older than the
+    // window is excluded, so dismissing an item can't backfill older news.
+    const cutoff = new Date(Date.now() - 21 * 864e5).toISOString().slice(0, 10);
     const items: { id: string; kind: string; title: string; detail: string; date: string; url: string; source: "acquisitions" | "filings" | "warn"; rawId: string }[] = [];
     const fmtVal = (v: number | null) =>
       v === null ? "" : v >= 1e9 ? ` · $${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? ` · $${Math.round(v / 1e6)}M` : "";
     for (const a of acquisitions) {
-      if (a.eventType === "bankruptcy" && a.status !== "dismissed") {
+      if (a.eventType === "bankruptcy" && a.status !== "dismissed" && a.announcedDate && a.announcedDate >= cutoff) {
         items.push({
           id: `news-${a.id}`,
           kind: "Bankruptcy",
@@ -513,7 +518,7 @@ export default function MarketIntelPage() {
       }
     }
     for (const f of filings) {
-      if (f.majorEvent && f.status !== "dismissed") {
+      if (f.majorEvent && f.status !== "dismissed" && f.filingDate && f.filingDate >= cutoff) {
         items.push({
           id: `edgar-${f.id}`,
           kind: "8-K Bankruptcy",
@@ -528,7 +533,7 @@ export default function MarketIntelPage() {
     }
     const byType = (t: string, n: number) =>
       acquisitions
-        .filter((a) => a.eventType === t && a.status !== "dismissed" && a.announcedDate)
+        .filter((a) => a.eventType === t && a.status !== "dismissed" && a.announcedDate && a.announcedDate >= cutoff)
         .sort((x, y) => (y.announcedDate || "").localeCompare(x.announcedDate || ""))
         .slice(0, n);
     const kindLabel: Record<string, string> = {
@@ -555,7 +560,7 @@ export default function MarketIntelPage() {
     }
     // Large layoffs
     const bigWarn = warn
-      .filter((w) => (w.headcount ?? 0) >= 300 && w.status !== "dismissed")
+      .filter((w) => (w.headcount ?? 0) >= 300 && w.status !== "dismissed" && w.noticeDate && w.noticeDate >= cutoff)
       .sort((x, y) => (y.noticeDate || "").localeCompare(x.noticeDate || ""))
       .slice(0, 2);
     for (const w of bigWarn) {
@@ -591,7 +596,7 @@ export default function MarketIntelPage() {
         seen.add(key);
         return true;
       });
-    return deduped.slice(0, 12);
+    return deduped.slice(0, 9);
   }, [acquisitions, filings, warn]);
 
   const chartCard = "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60";
@@ -639,7 +644,7 @@ export default function MarketIntelPage() {
         {headlines.length > 0 && (
           <div className="mb-6">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[#0d1f3c] dark:text-white">
-              Major events <span className="ml-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-xs normal-case text-slate-600 dark:text-white/60">AZ headlines</span>
+              Major events <span className="ml-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-xs normal-case text-slate-600 dark:text-white/60">AZ · last 21 days</span>
             </h2>
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {headlines.map((h) => {
