@@ -99,6 +99,15 @@ const COUNTIES: CountyCfg[] = [
     zoom: 9,
     vintage: "ACS 5-year 2024",
   },
+  {
+    id: "pinal",
+    label: "Casa Grande · Pinal",
+    countyName: "Pinal County",
+    files: ["/data/pinal-tracts-p1.json"],
+    center: [32.95, -111.4],
+    zoom: 9,
+    vintage: "ACS 5-year 2024",
+  },
 ];
 
 export default function ValleyDemographics() {

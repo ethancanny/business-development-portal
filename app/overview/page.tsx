@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import TaskList from "@/components/TaskList";
 import PageHero from "@/components/PageHero";
-import { DEAL_STAGES, type Deal, type Executive, type Interaction, type Task } from "@/lib/types";
+import { DEAL_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type Task } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
 
 const TargetMap = dynamic(() => import("@/components/TargetMap"), {
@@ -28,15 +28,18 @@ export default function Overview() {
   const [execs, setExecs] = useState<Executive[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
+  const [flow, setFlow] = useState<DealFlowItem[]>([]);
+  const [weekTab, setWeekTab] = useState<"this" | "last">("this");
 
   const load = async () => {
     try {
-      const [meRes, dealsRes, execsRes, tasksRes, ixRes] = await Promise.all([
+      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes] = await Promise.all([
         fetch("/api/auth/me"),
         fetch("/api/deals"),
         fetch("/api/executives"),
         fetch("/api/tasks"),
         fetch("/api/interactions"),
+        fetch("/api/deal-flow"),
       ]);
       if (
         meRes.status === 401 ||
@@ -52,6 +55,7 @@ export default function Overview() {
       if (execsRes.ok) setExecs(await execsRes.json());
       if (tasksRes.ok) setTasks(await tasksRes.json());
       if (ixRes.ok) setInteractions(await ixRes.json());
+      if (flowRes.ok) setFlow(await flowRes.json());
     } finally {
       setLoading(false);
     }
@@ -101,6 +105,44 @@ export default function Overview() {
   );
 
   // Deals with no logged touch in 30+ days (interactions fall back to last update).
+  // Weekly summary windows (local time): this week = Monday 00:00 → now,
+  // last week = the Monday–Sunday before it.
+  const weekWindow = useMemo(() => {
+    const now = new Date();
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    if (weekTab === "this") return { start: monday, end: now };
+    const prevMonday = new Date(monday);
+    prevMonday.setDate(prevMonday.getDate() - 7);
+    return { start: prevMonday, end: monday };
+  }, [weekTab]);
+
+  const weekly = useMemo(() => {
+    const { start, end } = weekWindow;
+    const inWin = (iso: string) => {
+      const t = new Date(iso).getTime();
+      return t >= start.getTime() && t < end.getTime();
+    };
+    const newDeals = deals
+      .filter((d) => inWin(d.createdAt))
+      .sort((a, b) => (b.dealValue || 0) - (a.dealValue || 0));
+    const newExecs = execs.filter((e) => inWin(e.createdAt));
+    const flowNew = flow.filter((f) => inWin(f.createdAt));
+    return {
+      newDeals,
+      newDealsValue: newDeals.reduce((s, d) => s + (d.dealValue || 0), 0),
+      newExecs,
+      flowForSale: flowNew.filter((f) => f.kind === "business_for_sale").length,
+      flowOperators: flowNew.filter((f) => f.kind === "operator_available").length,
+      flowNotes: flowNew.filter((f) => f.kind === "market_note").length,
+      flowAdded: flow.filter((f) => f.status === "added" && inWin(f.updatedAt)).length,
+      touches: interactions.filter((i) => inWin(i.occurredAt)).length,
+      tasksDone: tasks.filter((t) => t.done && inWin(t.updatedAt)).length,
+      closedWon: deals.filter((d) => d.stage === "Closed Won" && inWin(d.updatedAt)).length,
+      passed: deals.filter((d) => d.stage === "Passed" && inWin(d.updatedAt)).length,
+    };
+  }, [weekWindow, deals, execs, flow, interactions, tasks]);
+
   const staleDeals = useMemo(() => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
@@ -186,6 +228,119 @@ export default function Overview() {
             {s.sub && <p className="mt-0.5 text-xs text-red-500">{s.sub}</p>}
           </div>
         ))}
+      </div>
+
+      {/* Weekly summary */}
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-white/10 dark:bg-[#132847]">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-bold text-[#0d1f3c] dark:text-white">
+            📅 Weekly summary
+          </h2>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400 dark:text-white/40">
+              {weekWindow.start.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              {" – "}
+              {weekTab === "this"
+                ? "today"
+                : new Date(weekWindow.end.getTime() - 86400000).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+            </span>
+            {(["this", "last"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setWeekTab(t)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                  weekTab === t
+                    ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                    : "text-slate-500 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/5"
+                }`}
+              >
+                {t === "this" ? "This week" : "Last week"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mb-4 flex flex-wrap gap-2">
+          {[
+            `${weekly.newDeals.length} new target${weekly.newDeals.length === 1 ? "" : "s"}${
+              weekly.newDealsValue > 0 ? ` · ${fmtMoney(weekly.newDealsValue)}` : ""
+            }`,
+            `${weekly.newExecs.length} new operator${weekly.newExecs.length === 1 ? "" : "s"}`,
+            `${weekly.flowForSale + weekly.flowOperators + weekly.flowNotes} new in Activity (${weekly.flowForSale} for sale · ${weekly.flowOperators} operators · ${weekly.flowNotes} notes)`,
+            `${weekly.flowAdded} moved to pipeline`,
+            `${weekly.touches} touches logged`,
+            `${weekly.tasksDone} follow-ups completed`,
+            ...(weekly.closedWon > 0 ? [`${weekly.closedWon} closed won 🎉`] : []),
+            ...(weekly.passed > 0 ? [`${weekly.passed} passed`] : []),
+          ].map((chip) => (
+            <span
+              key={chip}
+              className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+              New targets
+            </p>
+            {weekly.newDeals.length === 0 ? (
+              <p className="text-sm text-slate-400 dark:text-white/40">None added this period.</p>
+            ) : (
+              <ul className="space-y-1">
+                {weekly.newDeals.slice(0, 5).map((d) => (
+                  <li key={d.id} className="flex items-baseline justify-between gap-2 text-sm">
+                    <Link
+                      href={`/pipeline/${d.id}`}
+                      className="truncate font-medium text-[#0d1f3c] hover:underline dark:text-white"
+                    >
+                      {d.companyName}
+                    </Link>
+                    <span className="shrink-0 text-xs text-slate-400 dark:text-white/40">
+                      {d.stage}
+                      {d.dealValue ? ` · ${fmtMoney(d.dealValue)}` : ""}
+                    </span>
+                  </li>
+                ))}
+                {weekly.newDeals.length > 5 && (
+                  <li className="text-xs text-slate-400 dark:text-white/40">
+                    +{weekly.newDeals.length - 5} more
+                  </li>
+                )}
+              </ul>
+            )}
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+              New operators
+            </p>
+            {weekly.newExecs.length === 0 ? (
+              <p className="text-sm text-slate-400 dark:text-white/40">None added this period.</p>
+            ) : (
+              <ul className="space-y-1">
+                {weekly.newExecs.slice(0, 5).map((e) => (
+                  <li key={e.id} className="flex items-baseline justify-between gap-2 text-sm">
+                    <span className="truncate font-medium text-[#0d1f3c] dark:text-white">
+                      {e.name}
+                    </span>
+                    <span className="shrink-0 text-xs text-slate-400 dark:text-white/40">
+                      {e.currentTitle || e.targetRole || ""}
+                    </span>
+                  </li>
+                ))}
+                {weekly.newExecs.length > 5 && (
+                  <li className="text-xs text-slate-400 dark:text-white/40">
+                    +{weekly.newExecs.length - 5} more
+                  </li>
+                )}
+              </ul>
+            )}
+          </div>
+        </div>
       </div>
 
       {staleDeals.length > 0 && (
