@@ -1135,7 +1135,9 @@ export async function ingestCountyPermits(): Promise<number> {
       parsed = [];
     }
     if (!parsed.length) {
-      await logSync("county_permits", "error", 0, `dataZoa ${c.county}: no permits columns found`);
+      // EBRC publishes no permits series for Apache, Graham, Greenlee, La Paz —
+      // expected state, not an error (verified on their county pages Oct 2026).
+      await logSync("county_permits", "skipped", 0, `dataZoa ${c.county}: no permits published by EBRC`);
       return 0;
     }
     const rows: IndicatorInput[] = [];
