@@ -42,8 +42,6 @@ const FRED_SERIES: { id: string; title: string }[] = [
 ];
 
 interface FredObsResponse {
-  units?: string;
-  frequency?: string;
   observations?: { date: string; value: string }[];
 }
 
@@ -56,9 +54,30 @@ export async function ingestIndicators(): Promise<number> {
   const start = new Date();
   start.setFullYear(start.getFullYear() - 10);
   const startStr = start.toISOString().slice(0, 10);
+  // Series metadata (proper units/frequency) — cached per run
+  const metaCache = new Map<string, { units: string; frequency: string }>();
+  async function getSeriesMeta(id: string): Promise<{ units: string; frequency: string }> {
+    const cached = metaCache.get(id);
+    if (cached) return cached;
+    const fallback = { units: "", frequency: "" };
+    try {
+      const res = await fetch(
+        `https://api.stlouisfed.org/fred/series?series_id=${id}&api_key=${key}&file_type=json`
+      );
+      if (!res.ok) return fallback;
+      const data = (await res.json()) as { seriess?: { units?: string; frequency?: string }[] };
+      const s = data.seriess?.[0];
+      const meta = { units: s?.units ?? "", frequency: s?.frequency ?? "" };
+      metaCache.set(id, meta);
+      return meta;
+    } catch {
+      return fallback;
+    }
+  }
   let total = 0;
   const results = await Promise.all(
     FRED_SERIES.map(async (s) => {
+      const meta = await getSeriesMeta(s.id);
       const url =
         `https://api.stlouisfed.org/fred/series/observations?series_id=${s.id}` +
         `&api_key=${key}&file_type=json&observation_start=${startStr}&sort_order=asc&limit=100000`;
@@ -71,8 +90,8 @@ export async function ingestIndicators(): Promise<number> {
           source: "fred" as const,
           seriesId: s.id,
           title: s.title,
-          units: data.units ?? "",
-          frequency: data.frequency ?? "",
+          units: meta.units,
+          frequency: meta.frequency,
           obsDate: o.date,
           value: Number(o.value),
         }));

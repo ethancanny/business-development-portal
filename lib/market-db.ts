@@ -57,7 +57,9 @@ export async function getIndicatorSeries(seriesIds: string[]): Promise<MiIndicat
   const db = sql();
   if (!seriesIds.length) return [];
   const rows = await db`
-    SELECT * FROM mi_indicators
+    SELECT id, source, series_id, title, units, frequency,
+           to_char(obs_date, 'YYYY-MM-DD') AS obs_date, value
+    FROM mi_indicators
     WHERE series_id = ANY(${seriesIds})
     ORDER BY obs_date ASC`;
   return rows.map((r) => ({
@@ -67,7 +69,7 @@ export async function getIndicatorSeries(seriesIds: string[]): Promise<MiIndicat
     title: str(r.title),
     units: str(r.units),
     frequency: str(r.frequency),
-    obsDate: String(r.obs_date).slice(0, 10),
+    obsDate: str(r.obs_date),
     value: numOrNull(r.value),
   }));
 }
@@ -78,14 +80,15 @@ export async function getLatestIndicators(): Promise<
   await ensureSchema();
   const db = sql();
   const rows = await db`
-    SELECT DISTINCT ON (series_id) series_id, title, units, obs_date, value
+    SELECT DISTINCT ON (series_id) series_id, title, units,
+           to_char(obs_date, 'YYYY-MM-DD') AS obs_date, value
     FROM mi_indicators
     ORDER BY series_id, obs_date DESC`;
   return rows.map((r) => ({
     seriesId: str(r.series_id),
     title: str(r.title),
     units: str(r.units),
-    obsDate: String(r.obs_date).slice(0, 10),
+    obsDate: str(r.obs_date),
     value: numOrNull(r.value),
   }));
 }
