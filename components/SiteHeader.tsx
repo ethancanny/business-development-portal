@@ -42,7 +42,7 @@ export default function SiteHeader() {
         <div className="flex items-center gap-6">
           <Link href="/overview" className="flex items-center gap-3">
             <img
-              src="/canny-logo-white.png"
+              src="https://cannycapitalpartners.com/canny-logo-white.png"
               alt="Canny Capital Partners"
               className="h-9 w-auto"
             />

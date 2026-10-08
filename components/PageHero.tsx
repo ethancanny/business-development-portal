@@ -8,7 +8,7 @@ export default function PageHero({ eyebrow, title, subtitle }: PageHeroProps) {
   return (
     <div className="relative h-36 overflow-hidden sm:h-44">
       <img
-        src="/arizona-desert-hero.jpg"
+        src="https://cannycapitalpartners.com/arizona-desert-hero.jpg"
         alt=""
         className="absolute inset-0 h-full w-full object-cover"
       />

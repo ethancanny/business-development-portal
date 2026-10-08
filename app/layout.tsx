@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   title: "Business Development Portal | Canny Capital Partners",
   description: "Track acquisition deals and executive sourcing pipelines",
   icons: {
-    icon: "/canny-favicon.png",
+    icon: "https://cannycapitalpartners.com/canny-favicon.png",
   },
   themeColor: "#0d1f3c",
 };

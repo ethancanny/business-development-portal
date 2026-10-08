@@ -40,14 +40,14 @@ export default function LoginPage() {
       className="flex min-h-screen items-center justify-center px-4"
       style={{
         backgroundImage:
-          "linear-gradient(rgba(13,31,60,0.82), rgba(13,31,60,0.88)), url(/arizona-desert-landscape.jpg)",
+          "linear-gradient(rgba(13,31,60,0.82), rgba(13,31,60,0.88)), url(https://cannycapitalpartners.com/arizona-desert-landscape.jpg)",
         backgroundSize: "cover",
         backgroundPosition: "center",
       }}
     >
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-2xl dark:border-white/10 dark:bg-[#132847]/95 dark:backdrop-blur">
         <img
-          src={theme === "dark" ? "/canny-logo-white.png" : "/canny-logo.png"}
+          src={theme === "dark" ? "https://cannycapitalpartners.com/canny-logo-white.png" : "https://cannycapitalpartners.com/canny-logo.png"}
           alt="Canny Capital Partners"
           className="h-12 w-auto"
         />
