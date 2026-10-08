@@ -9,6 +9,8 @@ import {
   upsertFilings,
   upsertIndicatorObs,
   upsertWarn,
+  addMultiple,
+  getMultiples,
   logSync,
   type AcquisitionInput,
   type FilingInput,
@@ -339,9 +341,79 @@ export async function ingestEntities(): Promise<number> {
   return added;
 }
 
+/* ---------------- ExitValue.ai multiples ---------------- */
+
+const VERTICAL_TO_INDUSTRY: Record<string, string> = {
+  "aerospace": "Aerospace & Defense",
+  "industrial-equipment": "Advanced Manufacturing",
+  "metal-fabrication": "Advanced Manufacturing",
+  "electronics": "Advanced Manufacturing",
+  "medical-devices": "Healthcare",
+  "durable-medical-equipment": "Healthcare",
+  "home-health": "Healthcare",
+  "healthcare-it": "Healthcare",
+  "specialty-contractor": "Specialty Trades & Construction",
+};
+
+const BRACKET_LABEL: Record<string, string> = {
+  "under_5m_ev": "EV < $5M",
+  "5m_25m_ev": "EV $5–25M",
+  "25m_100m_ev": "EV $25–100M",
+  "100m_500m_ev": "EV $100–500M",
+  "over_500m_ev": "EV > $500M",
+};
+
+interface ExitValueData {
+  generated_at?: string;
+  data?: Record<string, Record<string, Record<string, { n?: number; p25?: number; p50?: number; p75?: number }>>>;
+}
+
+export async function ingestMultiples(): Promise<number> {
+  const res = await fetch("https://raw.githubusercontent.com/rpesposito/multiples/main/multiples.json");
+  if (!res.ok) {
+    await logSync("multiples", "error", 0, `ExitValue.ai: HTTP ${res.status}`);
+    return 0;
+  }
+  const json = (await res.json()) as ExitValueData;
+  const period = (json.generated_at ?? new Date().toISOString()).slice(0, 10);
+  const data = json.data ?? {};
+
+  // skip if this vintage is already loaded
+  const existing = await getMultiples();
+  if (existing.some((m) => m.sourceReport.startsWith("ExitValue.ai") && m.period === period)) {
+    await logSync("multiples", "skipped", 0, `ExitValue.ai ${period} already loaded`);
+    return 0;
+  }
+
+  let added = 0;
+  for (const [vertical, brackets] of Object.entries(data)) {
+    const industry = VERTICAL_TO_INDUSTRY[vertical];
+    if (!industry) continue;
+    for (const [bracket, metrics] of Object.entries(brackets)) {
+      const ebitda = metrics["ev_ebitda"];
+      const rev = metrics["ev_revenue"];
+      if (!ebitda && !rev) continue;
+      await addMultiple({
+        sourceReport: "ExitValue.ai M&A Multiples Index",
+        period,
+        industry: `${industry} — ${vertical}`,
+        sizeBand: BRACKET_LABEL[bracket] ?? bracket,
+        evEbitdaLow: ebitda?.p25 ?? null,
+        evEbitdaHigh: ebitda?.p75 ?? null,
+        evEbitdaMedian: ebitda?.p50 ?? null,
+        evRevenueMedian: rev?.p50 ?? null,
+        notes: `n=${ebitda?.n ?? rev?.n ?? "?"} disclosed deals; CC-BY-4.0 open data`,
+      });
+      added++;
+    }
+  }
+  await logSync("multiples", "ok", added, `ExitValue.ai ${period}: ${added} industry×size cells`);
+  return added;
+}
+
 /* ---------------- Orchestrator ---------------- */
 
-export type IngestSource = "indicators" | "filings" | "news" | "warn" | "entities" | "all";
+export type IngestSource = "indicators" | "filings" | "news" | "warn" | "entities" | "multiples" | "all";
 
 export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -351,6 +423,7 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["news", ingestNews],
     ["warn", ingestWarn],
     ["entities", ingestEntities],
+    ["multiples", ingestMultiples],
   ];
   for (const [name, fn] of jobs) {
     if (source !== "all" && source !== name) continue;
