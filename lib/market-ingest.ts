@@ -1092,8 +1092,13 @@ function parseCountyPermits(csvText: string): { date: string; total: number | nu
   // Column titles vary slightly by county (e.g. " Single Family" with a space);
   // the permits columns are the LAST "Total" / "Single Family" pair in the table.
   const titles = rows[0].map((c) => c.trim());
-  const totalIdx = titles.lastIndexOf("Total");
   const sfIdx = titles.lastIndexOf("Single Family");
+  // The total column sits immediately before Single Family; counties title it
+  // either "Total" or "Total Units" (Pima's variant also adds sales columns).
+  const totalIdx =
+    sfIdx > 0 && (titles[sfIdx - 1] === "Total" || titles[sfIdx - 1] === "Total Units")
+      ? sfIdx - 1
+      : titles.lastIndexOf("Total");
   const dateRow = rows.findIndex((r) => r[0] === "DATE");
   if (totalIdx < 0 || sfIdx < 0 || dateRow < 0) return [];
   const out: { date: string; total: number | null; sf: number | null }[] = [];
@@ -1111,59 +1116,71 @@ function parseCountyPermits(csvText: string): { date: string; total: number | nu
 }
 
 export async function ingestCountyPermits(): Promise<number> {
-  let total = 0;
   const since = "2020-01-01"; // display window is 5 years; keep ingest lean
-  for (const c of COUNTY_PERMIT_TABLES) {
-    try {
-      // Some counties keep permits in a second table; use the first that yields rows.
-      let parsed: { date: string; total: number | null; sf: number | null }[] = [];
-      for (const hash of c.hashes) {
-        const url = `https://www.datazoa.com/publish/export.asp?hash=${hash}&glname=&dzuuid=1068&alttitle=&altextsrc=&a=exportcsv`;
-        const res = await fetch(url, {
-          headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" },
-        });
-        if (!res.ok) {
-          await logSync("county_permits", "error", 0, `dataZoa ${c.county}: HTTP ${res.status}`);
-          continue;
-        }
-        parsed = parseCountyPermits(await res.text());
-        if (parsed.some((r) => r.total !== null)) break;
-        parsed = [];
-      }
-      if (!parsed.length) {
-        await logSync("county_permits", "error", 0, `dataZoa ${c.county}: no permits columns found`);
+
+  async function processCounty(c: (typeof COUNTY_PERMIT_TABLES)[number]): Promise<number> {
+    // Some counties keep permits in a second table; use the first that yields rows.
+    let parsed: { date: string; total: number | null; sf: number | null }[] = [];
+    for (const hash of c.hashes) {
+      const url = `https://www.datazoa.com/publish/export.asp?hash=${hash}&glname=&dzuuid=1068&alttitle=&altextsrc=&a=exportcsv`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" },
+      });
+      if (!res.ok) {
+        await logSync("county_permits", "error", 0, `dataZoa ${c.county}: HTTP ${res.status}`);
         continue;
       }
-      const rows: IndicatorInput[] = [];
-      for (const r of parsed) {
-        if (r.date < since) continue;
-        if (r.total !== null)
-          rows.push({
-            source: "ebrc",
-            seriesId: `AZPERMIT_${c.slug}`,
-            title: `${c.county} County Housing Permits — Total Units`,
-            units: "Units",
-            frequency: "Monthly",
-            obsDate: r.date,
-            value: r.total,
-          });
-        if (r.sf !== null)
-          rows.push({
-            source: "ebrc",
-            seriesId: `AZPERMIT_SF_${c.slug}`,
-            title: `${c.county} County Housing Permits — Single-Family Units`,
-            units: "Units",
-            frequency: "Monthly",
-            obsDate: r.date,
-            value: r.sf,
-          });
-      }
-      total += await upsertIndicatorObsBulk(rows);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await logSync("county_permits", "error", 0, `dataZoa ${c.county}: ${msg.slice(0, 300)}`);
+      parsed = parseCountyPermits(await res.text());
+      if (parsed.some((r) => r.total !== null)) break;
+      parsed = [];
     }
-    await new Promise((r) => setTimeout(r, 300));
+    if (!parsed.length) {
+      await logSync("county_permits", "error", 0, `dataZoa ${c.county}: no permits columns found`);
+      return 0;
+    }
+    const rows: IndicatorInput[] = [];
+    for (const r of parsed) {
+      if (r.date < since) continue;
+      if (r.total !== null)
+        rows.push({
+          source: "ebrc",
+          seriesId: `AZPERMIT_${c.slug}`,
+          title: `${c.county} County Housing Permits — Total Units`,
+          units: "Units",
+          frequency: "Monthly",
+          obsDate: r.date,
+          value: r.total,
+        });
+      if (r.sf !== null)
+        rows.push({
+          source: "ebrc",
+          seriesId: `AZPERMIT_SF_${c.slug}`,
+          title: `${c.county} County Housing Permits — Single-Family Units`,
+          units: "Units",
+          frequency: "Monthly",
+          obsDate: r.date,
+          value: r.sf,
+        });
+    }
+    return upsertIndicatorObsBulk(rows);
+  }
+
+  // dataZoa generates each CSV slowly (~5-7s); fetch/process 5 counties at a time.
+  let total = 0;
+  for (let i = 0; i < COUNTY_PERMIT_TABLES.length; i += 5) {
+    const batch = COUNTY_PERMIT_TABLES.slice(i, i + 5);
+    const results = await Promise.all(
+      batch.map(async (c) => {
+        try {
+          return await processCounty(c);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await logSync("county_permits", "error", 0, `dataZoa ${c.county}: ${msg.slice(0, 300)}`);
+          return 0;
+        }
+      })
+    );
+    total += results.reduce((a, b) => a + b, 0);
   }
   await logSync("county_permits", "ok", total, `U of A EBRC/dataZoa: county housing permits`);
   return total;
