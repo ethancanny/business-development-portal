@@ -731,7 +731,7 @@ export default function MarketIntelPage() {
         )}
 
         {/* Sections — organized by data type; charts summarize, tables hold source data */}
-        <Section title="Market Multiples" sub="Median deal multiples by industry and deal size — the valuation yardstick" defaultOpen>
+        <Section title="Market Multiples" sub="Median deal multiples by industry and deal size — the valuation yardstick">
 <div className={`${chartCard} lg:col-span-2`}>
           <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Market Multiples by Industry</h3>
@@ -778,8 +778,8 @@ export default function MarketIntelPage() {
           </div>
         </Section>
 
-        <Section title="Arizona Economic Data" sub="State-level indicators, budget, demographics, and permitting" defaultOpen>
-          <SubSection title="Economic Indicators" defaultOpen>
+        <Section title="Arizona Economic Data" sub="State-level indicators, budget, demographics, and permitting">
+          <SubSection title="Economic Indicators">
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Unemployment — AZ vs US</h3>
@@ -1016,8 +1016,8 @@ export default function MarketIntelPage() {
           </SubSection>
         </Section>
 
-        <Section title="Industry" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades" defaultOpen>
-          <SubSection title="Aerospace & Defense" defaultOpen>
+        <Section title="Industry" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades">
+          <SubSection title="Aerospace & Defense">
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
