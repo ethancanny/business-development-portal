@@ -976,7 +976,7 @@ export async function ingestCensusStateFin(): Promise<number> {
   ];
   try {
     const url =
-      `https://api.census.gov/data/timeseries/govslocalfin?get=AGG_DESC,AMOUNT&for=state:04&GOVTYPE=002&time=from+2017+to+2024&key=${key}`;
+      `https://api.census.gov/data/timeseries/govslocalfin?get=AGG_DESC,AMOUNT&for=state:04&GOVTYPE=002&time=from+2017+to+${new Date().getFullYear()}&key=${key}`;
     const res = await fetch(url);
     if (!res.ok) {
       await logSync("census-fin", "error", 0, `HTTP ${res.status}`);
