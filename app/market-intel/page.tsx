@@ -539,7 +539,7 @@ export default function MarketIntelPage() {
   );
 
   const multBands = useMemo(() => {
-    const order = ["EV < $5M", "EV $5–25M", "EV $25–100M", "EV $100–500M", "EV > $500M"];
+    const order = ["EV < $5M", "EV $5–25M", "EV $25–100M", "EV $100–500M", "EV > $500M", "Public comps"];
     const present = new Set(multiples.map((m) => m.sizeBand));
     return order.filter((b) => present.has(b));
   }, [multiples]);
