@@ -90,7 +90,7 @@ export default function MarketIntelPage() {
   const [acquisitions, setAcquisitions] = useState<MiAcquisition[]>([]);
   const [filings, setFilings] = useState<MiFiling[]>([]);
   const [filingCat, setFilingCat] = useState("all");
-  const [multMetric, setMultMetric] = useState<"ebitda" | "revenue">("ebitda");
+  const [multMetric, setMultMetric] = useState<"ebitda" | "revenue">("revenue");
   const [multBand, setMultBand] = useState("EV $5–25M");
   const [warn, setWarn] = useState<MiWarnNotice[]>([]);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
@@ -219,13 +219,18 @@ export default function MarketIntelPage() {
       const existing = byInd.get(m.industry);
       if (!existing || (m.period || "") > (existing.period || "")) byInd.set(m.industry, m);
     }
+    const prettify = (s: string) =>
+      s.split(/[_\-]+/).map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
     return Array.from(byInd.values())
-      .map((m) => ({
-        industry: (m.industry.split("—")[1] || m.industry).trim(),
-        full: m.industry,
-        value: multMetric === "ebitda" ? m.evEbitdaMedian : m.evRevenueMedian,
-        notes: m.notes,
-      }))
+      .map((m) => {
+        const [top, sub] = m.industry.split("—").map((s) => s.trim());
+        return {
+          industry: sub ? `${top}: ${prettify(sub)}` : m.industry,
+          full: m.industry,
+          value: multMetric === "ebitda" ? m.evEbitdaMedian : m.evRevenueMedian,
+          notes: m.notes,
+        };
+      })
       .filter((d) => d.value !== null && d.value !== undefined)
       .sort((a, b) => (b.value as number) - (a.value as number));
   }, [multiples, multBand, multMetric]);
@@ -403,13 +408,13 @@ export default function MarketIntelPage() {
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">New private units authorized, monthly, FRED</p>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={permitRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                <LineChart data={permitRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
                   <CartesianGrid stroke={grid} strokeDasharray="3 3" />
                   <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
                   <YAxis tick={{ fontSize: 11, fill: tick }} />
                   <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
-                  <Bar dataKey="AZBPPRIV" name="Permits" fill={gold} radius={[2, 2, 0, 0]} />
-                </BarChart>
+                  <Line type="monotone" dataKey="AZBPPRIV" name="Permits" stroke={gold} strokeWidth={2} dot={false} />
+                </LineChart>
               </ResponsiveContainer>
             </div>
           </div>
@@ -466,18 +471,19 @@ export default function MarketIntelPage() {
           </div>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
             Median {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} multiples, {multBand} deal size. Sources: ExitValue.ai open data + manual entries.
+            {multMetric === "ebitda" && <span className="ml-1 italic">EBITDA data is sparse for smaller deals — try EV/Revenue or a larger band.</span>}
           </p>
           <div className="h-96">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={multChartData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 0 }}>
                 <CartesianGrid stroke={grid} strokeDasharray="3 3" />
                 <XAxis type="number" tick={{ fontSize: 11, fill: tick }} />
-                <YAxis type="category" dataKey="industry" width={190} tick={{ fontSize: 12, fill: tick }} />
+                <YAxis type="category" dataKey="industry" width={230} tick={{ fontSize: 12, fill: tick }} />
                 <Tooltip
                   contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
                   formatter={(v, _name, props) => [`${v}x`, (props?.payload as { full?: string })?.full || ""]}
                 />
-                <Bar dataKey="value" fill={gold} radius={[0, 4, 4, 0]} />
+                <Bar dataKey="value" fill={gold} radius={[0, 4, 4, 0]} barSize={16} />
               </BarChart>
             </ResponsiveContainer>
           </div>
