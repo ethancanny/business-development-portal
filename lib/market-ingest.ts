@@ -1042,11 +1042,9 @@ export async function ingestCensusStateFin(): Promise<number> {
     const total = await upsertIndicatorObs(rows);
     await logSync(
       "census-fin",
-      total > 0 ? "ok" : "error",
+      "ok",
       total,
-      total > 0
-        ? `Census state finance: revenue & expenditure (${rows.length} obs) [${attempts.join(" | ")}]`
-        : "No matching aggregates found"
+      `Census state finance: ${rows.length} obs matched, ${total} new [${attempts.join(" | ")}]`
     );
     return total;
   } catch (err) {
