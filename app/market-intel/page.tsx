@@ -40,6 +40,19 @@ function decodeEntities(s: string): string {
     .replace(/&nbsp;/g, " ");
 }
 
+/** Arizona's 15 counties; housing permits come from U of A EBRC county tables. */
+const PERMIT_COUNTIES = [
+  "Apache", "Cochise", "Coconino", "Gila", "Graham", "Greenlee", "La Paz",
+  "Maricopa", "Mohave", "Navajo", "Pima", "Pinal", "Santa Cruz", "Yavapai", "Yuma",
+] as const;
+const countySlug = (name: string) => name.replace(/[^A-Za-z]/g, "").toUpperCase();
+const COUNTY_PERMIT_SERIES = PERMIT_COUNTIES.flatMap((n) => [
+  `AZPERMIT_${countySlug(n)}`,
+  `AZPERMIT_SF_${countySlug(n)}`,
+]).join(",");
+const fmtMonth = (iso: string) =>
+  new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+
 type LatestMap = Record<string, { title: string; units: string; obsDate: string; value: number | null }>;
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -241,7 +254,8 @@ export default function MarketIntelPage() {
         const [latestData, obsData, acq, fil, warnData, mult, log] = await Promise.all([
           getJSON<LatestMap>("/api/market/latest"),
           getJSON<MiIndicatorObs[]>(
-            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE,AZ_SPEND_WELFARE,AZ_SPEND_EDUCATION,AZ_SPEND_INSURANCE,AZ_SPEND_HIGHWAYS,AZ_SPEND_CORRECTIONS,AZ_SPEND_HEALTH"
+            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE,AZ_SPEND_WELFARE,AZ_SPEND_EDUCATION,AZ_SPEND_INSURANCE,AZ_SPEND_HIGHWAYS,AZ_SPEND_CORRECTIONS,AZ_SPEND_HEALTH," +
+              COUNTY_PERMIT_SERIES
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
@@ -486,8 +500,43 @@ export default function MarketIntelPage() {
     [obs, fiveYearCutoff]
   );
 
-  const filteredFilings = filingCat === "all" ? filings : filings.filter((f) => f.category === filingCat);
-  const visibleAcq = acquisitions.filter((a) => a.status !== "dismissed" && a.eventType !== "bankruptcy");
+  /** County housing permits (U of A EBRC): latest month per county, ranked. */
+  const countyPermits = useMemo(() => {
+    const per = PERMIT_COUNTIES.map((name) => {
+      const id = `AZPERMIT_${countySlug(name)}`;
+      const l = latest[id];
+      if (!l || l.value === null) return null;
+      const sf = latest[`AZPERMIT_SF_${countySlug(name)}`];
+      return {
+        name,
+        value: l.value,
+        date: l.obsDate,
+        sf: sf && sf.value !== null ? sf.value : null,
+        yoy: yoyChange(obs, id),
+      };
+    }).filter(Boolean) as { name: string; value: number; date: string; sf: number | null; yoy: number | null }[];
+    return per.sort((a, b) => b.value - a.value);
+  }, [latest, obs]);
+  const permitMonth = countyPermits.length
+    ? countyPermits.map((c) => c.date).sort().slice(-1)[0]
+    : "";
+  const countyPermitTotal = countyPermits.reduce((s, c) => s + c.value, 0);
+  const countyChartRows = useMemo(() => {
+    const top5 = countyPermits.slice(0, 5).map((c) => `AZPERMIT_${countySlug(c.name)}`);
+    if (!top5.length) return [];
+    return filterSince(
+      seriesToRows(obs.filter((o) => top5.includes(o.seriesId)), top5),
+      fiveYearCutoff
+    );
+  }, [obs, countyPermits, fiveYearCutoff]);
+
+  const weekCutoff = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const filteredFilings = (filingCat === "all" ? filings : filings.filter((f) => f.category === filingCat)).filter(
+    (f) => f.filingDate && f.filingDate >= weekCutoff
+  );
+  const visibleAcq = acquisitions.filter(
+    (a) => a.status !== "dismissed" && a.eventType !== "bankruptcy" && a.announcedDate && a.announcedDate >= weekCutoff
+  );
 
   const multBands = useMemo(() => {
     const order = ["EV < $5M", "EV $5–25M", "EV $25–100M", "EV $100–500M", "EV > $500M"];
@@ -689,6 +738,30 @@ export default function MarketIntelPage() {
           )}
         </div>
 
+        {/* Top permit counties (U of A EBRC, latest month) */}
+        {countyPermits.length >= 3 && (
+          <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-[#b8975a]/40 bg-[#b8975a]/5 px-4 py-3 dark:bg-[#b8975a]/10">
+            <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">
+              🏠 Top permit counties
+              <span className="ml-2 text-xs font-medium text-slate-500 dark:text-white/50">
+                {fmtMonth(permitMonth)} · housing permits issued
+              </span>
+            </p>
+            {countyPermits.slice(0, 3).map((c, i) => (
+              <p key={c.name} className="text-sm text-slate-700 dark:text-white/80">
+                <span className="font-bold text-[#8a6f3c] dark:text-[#d4b37a]">{i + 1}. {c.name}</span>{" "}
+                <span className="font-semibold text-[#0d1f3c] dark:text-white">{c.value.toLocaleString()}</span>
+                {c.yoy !== null && (
+                  <span className={c.yoy >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                    {" "}{c.yoy >= 0 ? "▲" : "▼"} {Math.abs(c.yoy).toFixed(0)}% YoY
+                  </span>
+                )}
+              </p>
+            ))}
+            <p className="text-xs text-slate-400 dark:text-white/40">Source: U.S. Census Bureau via U of A EBRC</p>
+          </div>
+        )}
+
         {/* Major-event headlines */}
         {headlines.length > 0 && (
           <div className="mb-6">
@@ -779,7 +852,7 @@ export default function MarketIntelPage() {
             </div>
           </div>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-            Median {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} multiples, {multBand} deal size. Sources: ExitValue.ai open data + manual entries.
+            Median {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} multiples, {multBand} deal size. Sources: ExitValue.ai private-deal data, Damodaran (NYU Stern) public comps, manual entries.
             {multMetric === "ebitda" && <span className="ml-1 italic">EBITDA data is sparse for smaller deals — try EV/Revenue or a larger band.</span>}
           </p>
           <div className="h-96">
@@ -1044,6 +1117,63 @@ export default function MarketIntelPage() {
             </div>
           </div>
             </div>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className={chartCard}>
+                <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Housing Permits by County — Top 5</h3>
+                <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Total units authorized, monthly · U.S. Census Bureau via U of A EBRC · 5-yr</p>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={countyChartRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                      <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
+                      <YAxis tick={{ fontSize: 11, fill: tick }} />
+                      <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {countyPermits.slice(0, 5).map((c, i) => (
+                        <Line
+                          key={c.name}
+                          type="monotone"
+                          dataKey={`AZPERMIT_${countySlug(c.name)}`}
+                          name={c.name}
+                          stroke={[gold, blue, green, orange, "#a78bfa"][i % 5]}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className={chartCard}>
+                <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Permits by County — {permitMonth ? fmtMonth(permitMonth) : "Latest"}</h3>
+                <p className="mb-3 text-xs text-slate-500 dark:text-white/40">All 15 counties · total units authorized · U of A EBRC</p>
+                <div className={tableWrap}>
+                  <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                    <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                      <th className={th}>County</th><th className={th}>Total</th><th className={th}>Single-Family</th><th className={th}>Share</th><th className={th}>YoY</th>
+                    </tr></thead>
+                    <tbody>
+                      {countyPermits.map((c) => (
+                        <tr key={c.name} className="border-b border-slate-100 dark:border-white/5">
+                          <td className={`${td} font-medium`}>{c.name}</td>
+                          <td className={td}>{c.value.toLocaleString()}</td>
+                          <td className={td}>{c.sf !== null ? c.sf.toLocaleString() : "—"}</td>
+                          <td className={td}>{countyPermitTotal ? `${((c.value / countyPermitTotal) * 100).toFixed(1)}%` : "—"}</td>
+                          <td className={td}>
+                            {c.yoy !== null ? (
+                              <span className={c.yoy >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                                {c.yoy >= 0 ? "▲" : "▼"} {Math.abs(c.yoy).toFixed(0)}%
+                              </span>
+                            ) : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                      {countyPermits.length === 0 && <tr><td className={td} colSpan={5}>No county permit data yet — it loads on the next daily ingest.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
             <EventStrip items={expansionEvents} onDismiss={dismissEvent} />
           </SubSection>
         </Section>
@@ -1197,7 +1327,7 @@ export default function MarketIntelPage() {
           </div>
         </Section>
 
-        <Section title="Deals & Filings" sub="AZ acquisitions and SEC filings">
+        <Section title="Deals & Filings" sub="AZ acquisitions and SEC filings · last 7 days only">
           <div>
 {/* Tabs */}
         <div className="mb-4 flex flex-wrap gap-2">
@@ -1232,7 +1362,7 @@ export default function MarketIntelPage() {
                     </td>
                   </tr>
                 ))}
-                {visibleAcq.length === 0 && <tr><td className={td} colSpan={5}>No acquisitions tracked yet — they appear after the first daily ingest.</td></tr>}
+                {visibleAcq.length === 0 && <tr><td className={td} colSpan={5}>No acquisitions in the last 7 days.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -1269,7 +1399,7 @@ export default function MarketIntelPage() {
                       </td>
                     </tr>
                   ))}
-                  {filteredFilings.length === 0 && <tr><td className={td} colSpan={5}>No filings yet — they appear after the first daily ingest.</td></tr>}
+                  {filteredFilings.length === 0 && <tr><td className={td} colSpan={5}>No filings in the last 7 days.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -1345,14 +1475,14 @@ function MultiplesPanel({ multiples, onAdded }: { multiples: MiMultiple[]; onAdd
           {saving ? "Saving…" : "Save"}
         </button>
       </div>
-      <div className="lg:col-span-2 overflow-x-auto rounded-xl border border-slate-200 dark:border-white/10">
+      <div className="lg:col-span-2 max-h-[360px] overflow-auto rounded-xl border border-slate-200 dark:border-white/10">
         <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
           <thead><tr className="border-b border-slate-200 dark:border-white/10">
-            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">Report</th>
-            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">Period</th>
-            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">Industry</th>
-            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">EV/EBITDA</th>
-            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">EV/Rev</th>
+            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50 sticky top-0 bg-white dark:bg-[#132847]">Report</th>
+            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50 sticky top-0 bg-white dark:bg-[#132847]">Period</th>
+            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50 sticky top-0 bg-white dark:bg-[#132847]">Industry</th>
+            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50 sticky top-0 bg-white dark:bg-[#132847]">EV/EBITDA</th>
+            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50 sticky top-0 bg-white dark:bg-[#132847]">EV/Rev</th>
           </tr></thead>
           <tbody>
             {multiples.map((m) => (
