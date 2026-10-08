@@ -200,13 +200,36 @@ export interface AcquisitionInput {
   eventType?: "acquisition" | "bankruptcy" | "expansion" | "contract" | "relocation" | "ipo";
 }
 
+function normName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\b(inc|llc|ltd|corp|corporation|co|company|the|group|holdings)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export async function upsertAcquisitions(rows: AcquisitionInput[]): Promise<number> {
   if (!rows.length) return 0;
   await ensureSchema();
   const db = sql();
   let added = 0;
+  // Existing events for near-duplicate detection (same company + event type
+  // within a few days = same story via a different publisher/URL).
+  const existing = await db`
+    SELECT target, acquirer, event_type, announced_date FROM mi_acquisitions
+    WHERE announced_date >= to_char(CURRENT_DATE - INTERVAL '45 days', 'YYYY-MM-DD')`;
+  const seenKeys = new Set(
+    existing.map(
+      (e) =>
+        `${str(e.event_type)}|${normName(str(e.target))}|${str(e.announced_date).slice(0, 7)}`
+    )
+  );
   for (const r of rows) {
     if (!r.sourceUrl) continue;
+    const key = `${r.eventType ?? "acquisition"}|${normName(r.target ?? "")}|${(r.announcedDate ?? "").slice(0, 7)}`;
+    if (r.target && seenKeys.has(key)) continue;
+    seenKeys.add(key);
     const res = await db`
       INSERT INTO mi_acquisitions (id, acquirer, target, target_location, industry, deal_value, announced_date, source_url, publisher, event_type)
       VALUES (${newId()}, ${r.acquirer ?? ""}, ${r.target ?? ""}, ${r.targetLocation ?? ""}, ${r.industry ?? ""},
