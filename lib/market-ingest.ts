@@ -975,38 +975,47 @@ export async function ingestCensusStateFin(): Promise<number> {
     { code: "LF0132", seriesId: "AZ_SPEND_HEALTH", title: "AZ State Spending — Health (Census)" },
   ];
   try {
-    const url =
-      `https://api.census.gov/data/timeseries/govslocalfin?get=AGG_DESC,AMOUNT&for=state:04&GOVTYPE=002&time=from+2017+to+${new Date().getFullYear()}&key=${key}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      await logSync("census-fin", "error", 0, `HTTP ${res.status}`);
-      return 0;
-    }
-    const data = (await res.json()) as string[][];
-    if (!Array.isArray(data) || data.length < 2) {
-      await logSync("census-fin", "error", 0, "empty response");
-      return 0;
-    }
-    const headers = data[0];
-    const iTime = headers.indexOf("time");
-    const iDesc = headers.indexOf("AGG_DESC");
-    const iAmt = headers.indexOf("AMOUNT");
+    // Base range is the Census dataset's confirmed coverage (2017–2024).
+    // Wider ranges return no matching aggregates from this API, so newer
+    // years are probed one at a time: a year with no data yet is a harmless
+    // empty response, and FY2025+ lands automatically once Census publishes.
+    const base =
+      `https://api.census.gov/data/timeseries/govslocalfin?get=AGG_DESC,AMOUNT&for=state:04&GOVTYPE=002&key=${key}`;
+    const urls = [`${base}&time=from+2017+to+2024`];
+    const thisYear = new Date().getFullYear();
+    for (let y = 2025; y <= thisYear; y++) urls.push(`${base}&time=${y}`);
     const byCode = new Map(series.map((s) => [s.code, s]));
     const rows: IndicatorInput[] = [];
-    for (const r of data.slice(1)) {
-      const s = byCode.get((r[iDesc] || "").trim());
-      if (!s) continue;
-      const amt = Number((r[iAmt] || "").replace(/,/g, ""));
-      if (!Number.isFinite(amt)) continue;
-      rows.push({
-        source: "census" as MiIndicatorSource,
-        seriesId: s.seriesId,
-        title: s.title,
-        units: "Thousands of dollars",
-        frequency: "Annual",
-        obsDate: `${r[iTime]}-01-01`,
-        value: amt,
-      });
+    let anyOk = false;
+    for (const url of urls) {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = (await res.json()) as string[][];
+      if (!Array.isArray(data) || data.length < 2) continue;
+      anyOk = true;
+      const headers = data[0];
+      const iTime = headers.indexOf("time");
+      const iDesc = headers.indexOf("AGG_DESC");
+      const iAmt = headers.indexOf("AMOUNT");
+      for (const r of data.slice(1)) {
+        const s = byCode.get((r[iDesc] || "").trim());
+        if (!s) continue;
+        const amt = Number((r[iAmt] || "").replace(/,/g, ""));
+        if (!Number.isFinite(amt)) continue;
+        rows.push({
+          source: "census" as MiIndicatorSource,
+          seriesId: s.seriesId,
+          title: s.title,
+          units: "Thousands of dollars",
+          frequency: "Annual",
+          obsDate: `${r[iTime]}-01-01`,
+          value: amt,
+        });
+      }
+    }
+    if (!anyOk) {
+      await logSync("census-fin", "error", 0, "Census API unreachable / empty");
+      return 0;
     }
     const total = await upsertIndicatorObs(rows);
     await logSync(
