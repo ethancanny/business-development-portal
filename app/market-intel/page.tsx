@@ -780,7 +780,13 @@ export default function MarketIntelPage() {
               <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
                 {c.date}
                 {c.chg !== null && (
-                  <span className={(c.chg >= 0) !== !!c.invert ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                  <span className={c.invert
+                    ? Math.abs(c.chg) >= 25
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-slate-400 dark:text-white/40"
+                    : c.chg >= 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-red-500"}>
                     {" "}{c.chg >= 0 ? "▲" : "▼"} {Math.abs(c.chg).toFixed(1)}{c.chgLabel ?? "pp YoY"}
                   </span>
                 )}
