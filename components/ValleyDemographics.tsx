@@ -108,6 +108,15 @@ const COUNTIES: CountyCfg[] = [
     zoom: 9,
     vintage: "ACS 5-year 2024",
   },
+  {
+    id: "yuma",
+    label: "Yuma · Yuma",
+    countyName: "Yuma County",
+    files: ["/data/yuma-tracts-p1.json"],
+    center: [32.69, -114.62],
+    zoom: 10,
+    vintage: "ACS 5-year 2024",
+  },
 ];
 
 export default function ValleyDemographics() {
