@@ -201,7 +201,7 @@ export interface ActivityEvent {
 
 /* ---------------- Market Intel ---------------- */
 
-export type MiIndicatorSource = "fred" | "bls" | "census";
+export type MiIndicatorSource = "fred" | "bls" | "census" | "usaspending";
 
 export interface MiIndicatorObs {
   id: string;
@@ -284,6 +284,7 @@ export interface MiWarnNotice {
   headcount: number | null;
   noticeDate: string;
   effectiveDate: string;
+  industry: string;
   source: string;
   createdAt: string;
 }

@@ -236,9 +236,11 @@ export function ensureSchema(): Promise<void> {
           notice_date TEXT NOT NULL DEFAULT '',
           effective_date TEXT NOT NULL DEFAULT '',
           source TEXT NOT NULL DEFAULT '',
+          industry TEXT NOT NULL DEFAULT '',
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           UNIQUE (employer, location, notice_date)
         )`;
+      await db`ALTER TABLE mi_warn ADD COLUMN IF NOT EXISTS industry TEXT NOT NULL DEFAULT ''`;
       await db`
         CREATE TABLE IF NOT EXISTS mi_entities (
           id TEXT PRIMARY KEY,

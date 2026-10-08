@@ -9,6 +9,7 @@ import {
   upsertFilings,
   upsertIndicatorObs,
   upsertWarn,
+  backfillWarnIndustries,
   addMultiple,
   getMultiples,
   logSync,
@@ -17,6 +18,7 @@ import {
   type IndicatorInput,
   type WarnInput,
 } from "./market-db";
+import type { MiIndicatorSource } from "./types";
 
 /* ---------------- FRED indicators ---------------- */
 
@@ -251,8 +253,26 @@ export async function ingestNews(): Promise<number> {
 
 /* ---------------- WARN notices ---------------- */
 
-function parseCsvLine(line: string): string[] {
-  const out: string[] = [];
+/** Industry classification for WARN employers: known AZ employers first, then keyword fallback. */
+export function classifyWarnIndustry(employer: string): string {
+  const e = employer.toLowerCase();
+  if (/infineon|intel\b|tsmc|microchip|onsemi|amkor|nxp semiconductors|semiconductor/i.test(e))
+    return "Advanced Manufacturing";
+  if (/honeywell|raytheon|boeing|northrop|general dynamics|l3harris|md helicopters|aerospace/i.test(e))
+    return "Aerospace & Defense";
+  if (/banner health|dignity health|abrazo|valleywise|carondelet|commonspirit|mayo clinic|becton|west pharmaceutical/i.test(e))
+    return "Healthcare";
+  for (const { industry, words } of INDUSTRY_KEYWORDS) {
+    if (words.some((w) => e.includes(w))) return industry;
+  }
+  if (/\b(bank|credit union|mortgage|insurance|financial)\b/.test(e)) return "Financial Services";
+  if (/\b(retail|grocery|restaurant|hotel|resort)\b/.test(e)) return "Retail & Hospitality";
+  if (/\b(logistics|trucking|warehouse|freight|airline)\b/.test(e)) return "Transportation & Logistics";
+  if (/\b(call center|staffing)\b/.test(e)) return "Business Services";
+  return "";
+}
+
+function parseCsvLine(line: string): string[] {  const out: string[] = [];
   let cur = "";
   let inQ = false;
   for (let i = 0; i < line.length; i++) {
@@ -293,11 +313,13 @@ export async function ingestWarn(): Promise<number> {
       headcount: c[idx("employees_affected")] ? Number(c[idx("employees_affected")]) : null,
       noticeDate,
       effectiveDate: c[idx("effective_date")] ?? "",
+      industry: classifyWarnIndustry(c[idx("company")] ?? ""),
       source: "WARN Act notices (APVentureEngine)",
     });
   }
   const added = await upsertWarn(rows);
-  await logSync("warn", "ok", added, `WARN: ${rows.length} AZ notices (12mo) processed`);
+  const backfilled = await backfillWarnIndustries(classifyWarnIndustry);
+  await logSync("warn", "ok", added, `WARN: ${rows.length} AZ notices (12mo) processed${backfilled ? `, ${backfilled} backfilled` : ""}`);
   return added;
 }
 
@@ -411,9 +433,127 @@ export async function ingestMultiples(): Promise<number> {
   return added;
 }
 
+/* ---------------- USASpending: AZ defense contracts ---------------- */
+
+function fyToCalendar(fyYear: number, fyMonth: number): string {
+  const calMonth = ((fyMonth + 8) % 12) + 1;
+  const calYear = fyMonth >= 4 ? fyYear : fyYear - 1;
+  return `${calYear}-${String(calMonth).padStart(2, "0")}-01`;
+}
+
+interface USASpendingMonth {
+  time_period?: { fiscal_year?: string; month?: string };
+  Contract_Obligations?: number | null;
+}
+
+export async function ingestDefenseContracts(): Promise<number> {
+  const end = new Date().toISOString().slice(0, 10);
+  const start = new Date(Date.now() - 3 * 365 * 864e5).toISOString().slice(0, 10);
+  const series: { id: string; title: string; filters: Record<string, unknown> }[] = [
+    {
+      id: "AZ_DOD_CONTRACTS",
+      title: "Arizona DoD Contract Obligations",
+      filters: { agencies: [{ type: "awarding", tier: "toptier", name: "Department of Defense" }] },
+    },
+    {
+      id: "AZ_AEROSPACE_CONTRACTS",
+      title: "Arizona Aerospace Mfg (NAICS 3364) Contract Obligations",
+      filters: { naics_codes: ["3364"] },
+    },
+  ];
+  let total = 0;
+  for (const s of series) {
+    const res = await fetch("https://api.usaspending.gov/api/v2/search/spending_over_time/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        group: "month",
+        filters: {
+          time_period: [{ start_date: start, end_date: end }],
+          place_of_performance_locations: [{ country: "USA", state: "AZ" }],
+          ...s.filters,
+        },
+      }),
+    });
+    if (!res.ok) {
+      await logSync("defense", "error", total, `USASpending ${s.id}: HTTP ${res.status}`);
+      continue;
+    }
+    const data = (await res.json()) as { results?: USASpendingMonth[] };
+    const rows: IndicatorInput[] = [];
+    for (const r of data.results ?? []) {
+      const fy = Number(r.time_period?.fiscal_year ?? 0);
+      const fm = Number(r.time_period?.month ?? 0);
+      const val = r.Contract_Obligations;
+      if (!fy || !fm || val === null || val === undefined) continue;
+      rows.push({
+        source: "usaspending",
+        seriesId: s.id,
+        title: s.title,
+        units: "Dollars",
+        frequency: "Monthly",
+        obsDate: fyToCalendar(fy, fm),
+        value: Math.round(val),
+      });
+    }
+    total += await upsertIndicatorObs(rows);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  await logSync("defense", "ok", total, `USASpending: ${series.length} AZ contract series`);
+  return total;
+}
+
+/* ---------------- Census CBP: AZ aerospace establishments ---------------- */
+
+export async function ingestCensus(): Promise<number> {
+  const key = process.env.CENSUS_KEY;
+  if (!key) {
+    await logSync("census", "skipped", 0, "CENSUS_KEY not set");
+    return 0;
+  }
+  const metrics = [
+    { col: "ESTAB", seriesId: "CBP_AZ_3364_ESTAB", title: "AZ Aerospace Mfg Establishments (NAICS 3364)" },
+    { col: "EMP", seriesId: "CBP_AZ_3364_EMP", title: "AZ Aerospace Mfg Employment (NAICS 3364)" },
+    { col: "PAYANN", seriesId: "CBP_AZ_3364_PAY", title: "AZ Aerospace Mfg Annual Payroll $000s (NAICS 3364)" },
+  ];
+  let total = 0;
+  const thisYear = new Date().getFullYear();
+  for (let year = thisYear - 6; year <= thisYear - 2; year++) {
+    try {
+      const url =
+        `https://api.census.gov/data/${year}/cbp?get=NAME,ESTAB,EMP,PAYANN&for=state:04&NAICS2017=3364&key=${key}`;
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = (await res.json()) as string[][];
+      if (!Array.isArray(data) || data.length < 2) continue;
+      const headers = data[0];
+      const vals = data[1];
+      const get = (c: string) => {
+        const i = headers.indexOf(c);
+        return i >= 0 && vals[i] ? Number(vals[i]) : null;
+      };
+      const rows: IndicatorInput[] = metrics.map((m) => ({
+        source: "census" as MiIndicatorSource,
+        seriesId: m.seriesId,
+        title: m.title,
+        units: m.col === "PAYANN" ? "Thousands of dollars" : m.col === "ESTAB" ? "Establishments" : "Employees",
+        frequency: "Annual",
+        obsDate: `${year}-01-01`,
+        value: get(m.col),
+      }));
+      total += await upsertIndicatorObs(rows.filter((r) => r.value !== null));
+    } catch {
+      continue;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  await logSync("census", "ok", total, "Census CBP: AZ NAICS 3364 series");
+  return total;
+}
+
 /* ---------------- Orchestrator ---------------- */
 
-export type IngestSource = "indicators" | "filings" | "news" | "warn" | "entities" | "multiples" | "all";
+export type IngestSource = "indicators" | "filings" | "news" | "warn" | "entities" | "multiples" | "defense" | "census" | "all";
 
 export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -424,6 +564,8 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["warn", ingestWarn],
     ["entities", ingestEntities],
     ["multiples", ingestMultiples],
+    ["defense", ingestDefenseContracts],
+    ["census", ingestCensus],
   ];
   for (const [name, fn] of jobs) {
     if (source !== "all" && source !== name) continue;

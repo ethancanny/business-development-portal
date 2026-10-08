@@ -8,7 +8,7 @@ import { runMarketIngest, type IngestSource } from "@/lib/market-ingest";
  */
 export const maxDuration = 60;
 
-const SOURCES: IngestSource[] = ["indicators", "filings", "news", "warn", "entities", "multiples", "all"];
+const SOURCES: IngestSource[] = ["indicators", "filings", "news", "warn", "entities", "multiples", "defense", "census", "all"];
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;

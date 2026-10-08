@@ -20,7 +20,6 @@ import type {
   MiAcquisition,
   MiFiling,
   MiIndicatorObs,
-  MiListing,
   MiMultiple,
   MiSyncLog,
   MiWarnNotice,
@@ -79,7 +78,7 @@ const shortDate = (d: string) => (d?.length >= 7 ? d.slice(0, 7) : d);
 
 /* ---------------- main page ---------------- */
 
-const TABS = ["acquisitions", "filings", "warn", "listings", "multiples"] as const;
+const TABS = ["acquisitions", "filings", "warn", "multiples"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function MarketIntelPage() {
@@ -92,7 +91,6 @@ export default function MarketIntelPage() {
   const [filings, setFilings] = useState<MiFiling[]>([]);
   const [filingCat, setFilingCat] = useState("all");
   const [warn, setWarn] = useState<MiWarnNotice[]>([]);
-  const [listings, setListings] = useState<MiListing[]>([]);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [syncLog, setSyncLog] = useState<MiSyncLog[]>([]);
   const [error, setError] = useState("");
@@ -100,15 +98,14 @@ export default function MarketIntelPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [latestData, obsData, acq, fil, warnData, list, mult, log] = await Promise.all([
+        const [latestData, obsData, acq, fil, warnData, mult, log] = await Promise.all([
           getJSON<LatestMap>("/api/market/latest"),
           getJSON<MiIndicatorObs[]>(
-            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS"
+            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS"
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
           getJSON<MiWarnNotice[]>("/api/market/warn?limit=50"),
-          getJSON<MiListing[]>("/api/market/listings?status=all"),
           getJSON<MiMultiple[]>("/api/market/multiples"),
           getJSON<MiSyncLog[]>("/api/market/sync-log"),
         ]);
@@ -120,7 +117,6 @@ export default function MarketIntelPage() {
         setAcquisitions(acq);
         setFilings(fil);
         setWarn(warnData);
-        setListings(list);
         setMultiples(mult);
         setSyncLog(log);
       } catch (e) {
@@ -167,6 +163,19 @@ export default function MarketIntelPage() {
     [obs]
   );
 
+  const defenseRows = useMemo(() => {
+    const rows = seriesToRows(
+      obs.filter((o) => ["AZ_DOD_CONTRACTS", "AZ_AEROSPACE_CONTRACTS"].includes(o.seriesId)),
+      ["AZ_DOD_CONTRACTS", "AZ_AEROSPACE_CONTRACTS"]
+    ).slice(-24);
+    // display in $M
+    return rows.map((r) => ({
+      date: r.date,
+      AZ_DOD_CONTRACTS: typeof r.AZ_DOD_CONTRACTS === "number" ? Math.round(r.AZ_DOD_CONTRACTS / 1e6) : null,
+      AZ_AEROSPACE_CONTRACTS: typeof r.AZ_AEROSPACE_CONTRACTS === "number" ? Math.round(r.AZ_AEROSPACE_CONTRACTS / 1e6) : null,
+    }));
+  }, [obs]);
+
   const statCards = useMemo(() => {
     const card = (id: string, label: string, format: (v: number) => string) => {
       const l = latest[id];
@@ -178,11 +187,11 @@ export default function MarketIntelPage() {
       card("AZUR", "AZ Unemployment", (v) => `${v.toFixed(1)}%`),
       card("UNRATE", "US Unemployment", (v) => `${v.toFixed(1)}%`),
       card("AZMFG", "AZ Manufacturing Jobs", (v) => `${Math.round(v)}k`),
-      card("AZBPPRIV", "AZ Housing Permits", (v) => `${Math.round(v).toLocaleString()}`),
+      card("AZ_DOD_CONTRACTS", "AZ Defense Contracts/mo", (v) => `$${Math.round(v / 1e6)}M`),
     ].filter(Boolean) as { label: string; value: string; date: string; chg: number | null }[];
   }, [latest, obs]);
 
-  const setStatus = async (kind: "acquisitions" | "filings" | "listings", id: string, status: string) => {
+  const setStatus = async (kind: "acquisitions" | "filings", id: string, status: string) => {
     await fetch(`/api/market/${kind}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -190,12 +199,10 @@ export default function MarketIntelPage() {
     });
     if (kind === "acquisitions") setAcquisitions((a) => a.map((x) => (x.id === id ? { ...x, status: status as MiAcquisition["status"] } : x)));
     if (kind === "filings") setFilings((a) => a.map((x) => (x.id === id ? { ...x, status: status as MiFiling["status"] } : x)));
-    if (kind === "listings") setListings((a) => a.map((x) => (x.id === id ? { ...x, status: status as MiListing["status"] } : x)));
   };
 
   const filteredFilings = filingCat === "all" ? filings : filings.filter((f) => f.category === filingCat);
   const visibleAcq = acquisitions.filter((a) => a.status !== "dismissed");
-  const visibleListings = listings.filter((l) => l.status !== "dismissed");
 
   const chartCard = "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60";
   const tableWrap = "overflow-x-auto rounded-xl border border-slate-200 dark:border-white/10";
@@ -313,13 +320,31 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
+
+          <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly obligations, $M, USASpending.gov</p>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={defenseRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="AZ_DOD_CONTRACTS" name="All DoD ($M)" fill={blue} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="AZ_AEROSPACE_CONTRACTS" name="Aerospace NAICS 3364 ($M)" fill={gold} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
 
         {/* Tabs */}
         <div className="mb-4 flex flex-wrap gap-2">
           {(TABS as readonly string[]).map((t) => (
             <button key={t} onClick={() => setTab(t as Tab)} className={tabBtn(tab === t)}>
-              {t === "acquisitions" ? "Acquisitions" : t === "filings" ? "Filings" : t === "warn" ? "WARN Notices" : t === "listings" ? "For Sale" : "Multiples"}
+              {t === "acquisitions" ? "Acquisitions" : t === "filings" ? "Filings" : t === "warn" ? "WARN Notices" : "Multiples"}
             </button>
           ))}
         </div>
@@ -392,50 +417,22 @@ export default function MarketIntelPage() {
           <div className={tableWrap}>
             <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
               <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                <th className={th}>Employer</th><th className={th}>Location</th><th className={th}>Affected</th><th className={th}>Notice date</th>
+                <th className={th}>Employer</th><th className={th}>Industry</th><th className={th}>Location</th><th className={th}>Affected</th><th className={th}>Notice date</th>
               </tr></thead>
               <tbody>
                 {warn.map((w) => (
                   <tr key={w.id} className="border-b border-slate-100 dark:border-white/5">
                     <td className={`${td} font-medium`}>{w.employer}</td>
+                    <td className={td}>{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
                     <td className={td}>{w.location}</td>
                     <td className={td}>{w.headcount ?? "—"}</td>
                     <td className={td}>{w.noticeDate ? fmtDate(w.noticeDate) : "—"}</td>
                   </tr>
                 ))}
-                {warn.length === 0 && <tr><td className={td} colSpan={4}>No WARN notices loaded yet.</td></tr>}
+                {warn.length === 0 && <tr><td className={td} colSpan={5}>No WARN notices loaded yet.</td></tr>}
               </tbody>
             </table>
             <p className="px-3 py-2 text-xs text-slate-400 dark:text-white/30">Layoffs often precede sales — worth a look when a target-industry employer appears. Source: WARN Act notices dataset.</p>
-          </div>
-        )}
-
-        {tab === "listings" && (
-          <div className={tableWrap}>
-            <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
-              <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                <th className={th}>Business</th><th className={th}>Industry</th><th className={th}>Asking</th><th className={th}>Revenue</th><th className={th}>Location</th><th className={th}></th>
-              </tr></thead>
-              <tbody>
-                {visibleListings.map((l) => (
-                  <tr key={l.id} className="border-b border-slate-100 dark:border-white/5">
-                    <td className={td}>
-                      {l.url ? <a href={l.url} target="_blank" rel="noreferrer" className="font-medium text-[#8a6f3e] underline dark:text-[#d4b37a]">{l.title}</a> : <span className="font-medium">{l.title}</span>}
-                      <span className="block text-xs text-slate-400">{l.broker} · {l.source}</span>
-                    </td>
-                    <td className={td}>{l.industry}</td>
-                    <td className={td}>{l.price ? fmtMoney(l.price) : "—"}</td>
-                    <td className={td}>{l.revenue ? fmtMoney(l.revenue) : "—"}</td>
-                    <td className={td}>{l.location}</td>
-                    <td className={`${td} whitespace-nowrap`}>
-                      <button onClick={() => setStatus("listings", l.id, "keep")} className="mr-2 text-xs text-emerald-600 dark:text-emerald-400">Keep</button>
-                      <button onClick={() => setStatus("listings", l.id, "dismissed")} className="text-xs text-slate-400">Dismiss</button>
-                    </td>
-                  </tr>
-                ))}
-                {visibleListings.length === 0 && <tr><td className={td} colSpan={6}>No listings yet — the for-sale scraper lands once source research finishes.</td></tr>}
-              </tbody>
-            </table>
           </div>
         )}
 

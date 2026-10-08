@@ -297,6 +297,7 @@ export interface WarnInput {
   headcount?: number | null;
   noticeDate?: string;
   effectiveDate?: string;
+  industry?: string;
   source?: string;
 }
 
@@ -308,14 +309,30 @@ export async function upsertWarn(rows: WarnInput[]): Promise<number> {
   for (const r of rows) {
     if (!r.employer) continue;
     const res = await db`
-      INSERT INTO mi_warn (id, employer, location, headcount, notice_date, effective_date, source)
+      INSERT INTO mi_warn (id, employer, location, headcount, notice_date, effective_date, industry, source)
       VALUES (${newId()}, ${r.employer}, ${r.location ?? ""}, ${r.headcount ?? null},
-              ${r.noticeDate ?? ""}, ${r.effectiveDate ?? ""}, ${r.source ?? ""})
-      ON CONFLICT (employer, location, notice_date) DO NOTHING
+              ${r.noticeDate ?? ""}, ${r.effectiveDate ?? ""}, ${r.industry ?? ""}, ${r.source ?? ""})
+      ON CONFLICT (employer, location, notice_date) DO UPDATE SET
+        industry = CASE WHEN mi_warn.industry = '' THEN EXCLUDED.industry ELSE mi_warn.industry END
       RETURNING (xmax = 0) AS inserted`;
     if (res[0]?.inserted) added++;
   }
   return added;
+}
+
+/** Fill industry on rows that predate the industry column. */
+export async function backfillWarnIndustries(classify: (employer: string) => string): Promise<number> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`SELECT id, employer FROM mi_warn WHERE industry = ''`;
+  let updated = 0;
+  for (const r of rows) {
+    const industry = classify(String(r.employer));
+    if (!industry) continue;
+    await db`UPDATE mi_warn SET industry = ${industry} WHERE id = ${String(r.id)}`;
+    updated++;
+  }
+  return updated;
 }
 
 export async function getWarn(limit = 100): Promise<MiWarnNotice[]> {
@@ -324,7 +341,8 @@ export async function getWarn(limit = 100): Promise<MiWarnNotice[]> {
   return rows.map((r) => ({
     id: str(r.id), employer: str(r.employer), location: str(r.location),
     headcount: numOrNull(r.headcount), noticeDate: str(r.notice_date),
-    effectiveDate: str(r.effective_date), source: str(r.source),
+    effectiveDate: str(r.effective_date), industry: str(r.industry),
+    source: str(r.source),
     createdAt: String(r.created_at),
   }));
 }
