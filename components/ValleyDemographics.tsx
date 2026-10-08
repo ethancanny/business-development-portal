@@ -90,6 +90,15 @@ const COUNTIES: CountyCfg[] = [
     zoom: 9,
     vintage: "ACS 5-year 2024",
   },
+  {
+    id: "yavapai",
+    label: "Prescott · Yavapai",
+    countyName: "Yavapai County",
+    files: ["/data/yavapai-tracts-p1.json"],
+    center: [34.6, -112.25],
+    zoom: 9,
+    vintage: "ACS 5-year 2024",
+  },
 ];
 
 export default function ValleyDemographics() {
