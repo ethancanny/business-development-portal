@@ -197,7 +197,7 @@ export interface AcquisitionInput {
   announcedDate?: string;
   sourceUrl: string;
   publisher?: string;
-  eventType?: "acquisition" | "bankruptcy" | "expansion" | "contract" | "relocation" | "ipo" | "policy";
+  eventType?: "acquisition" | "bankruptcy" | "expansion" | "contract" | "relocation" | "ipo" | "policy" | "investment";
   summary?: string;
 }
 

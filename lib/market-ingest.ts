@@ -300,6 +300,24 @@ function headlineSummary(title: string): string {
   return title.replace(/\s+-\s+[^-]+$/, "").trim().slice(0, 300);
 }
 
+/** Non-event noise: commentary, advice, stock-price moves, legal/political drama. */
+const JUNK_HEADLINE =
+  /\b(how to|what to know|opinion|editorial|podcast|webinar|sponsored|price target|dividend|earnings call|top \d+|best stocks?|stocks? to (buy|watch)|shares? (rise|risen|fall|fell|jump|drop|surge|plunge|slide|soar|climb|dip)|lawsuit|indicted|arrested|coupon|giveaway|campaign|endorses?|endorsement|poll (shows|says|finds)|slams|blasts|feud|scandal)\b/i;
+function isJunkHeadline(title: string): boolean {
+  return JUNK_HEADLINE.test(title);
+}
+
+/** Market-policy gate: a policy story qualifies only if it is about money,
+ * markets, or economic regulation — budgets, taxes, spending, incentives,
+ * water/infrastructure funding — not political drama. */
+const MARKET_POLICY =
+  /\b(budget|spending|tax|funding|funds|bond|incentive|appropriation|infrastructure|water|housing|economic|business|jobs|tariff|zoning|permit|development|revenue|fiscal|subsid|grant|loan|credit|semiconductor|energy|broadband)\b/i;
+
+/** Scale gate for expansion/investment/relocation: the event must show size —
+ * money, jobs, or a physical facility — to count as "major". */
+const SCALE_SIGNAL =
+  /(million|billion|\$\s?\d|\d[\d,]*\s*(jobs|employees|square|sq\.?\s?ft)|plant|facility|headquarters|campus|factory|warehouse|data center|distribution center|manufacturing|semiconductor|\bfab\b|acre)/i;
+
 export async function ingestNews(): Promise<number> {
   let total = 0;
   const seen = new Set<string>();
@@ -320,6 +338,7 @@ export async function ingestNews(): Promise<number> {
       seen.add(item.link);
       if (!DEAL_VERBS.test(item.title)) continue;
       if (!isArizonaStory(item.title, item.source)) continue;
+      if (isJunkHeadline(item.title)) continue;
       const { acquirer, target } = parseDealHeadline(item.title);
       const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
       rows.push({
@@ -342,7 +361,7 @@ export async function ingestNews(): Promise<number> {
 
 /* ---------------- Economic-event news (expansions, contracts, relocations, IPOs) ---------------- */
 
-type EconEventType = "expansion" | "contract" | "relocation" | "ipo" | "policy";
+type EconEventType = "expansion" | "contract" | "relocation" | "ipo" | "policy" | "investment";
 
 const ECONOMIC_EVENT_QUERIES: { eventType: EconEventType; q: string; verbs: RegExp }[] = [
   {
@@ -379,6 +398,16 @@ const ECONOMIC_EVENT_QUERIES: { eventType: EconEventType; q: string; verbs: RegE
     eventType: "policy",
     q: '("Governor Hobbs" OR "Arizona legislature") (bill OR law OR funding) (economic OR business OR tax OR water OR housing) when:30d',
     verbs: /\b(bill|law|funding|signs|approves|veto)\b/i,
+  },
+  {
+    eventType: "investment",
+    q: 'Arizona (company OR corporation OR manufacturer) (invests OR "will invest" OR investing) (million OR billion OR plant OR facility OR headquarters) when:30d',
+    verbs: /\b(invest|investment)\b/i,
+  },
+  {
+    eventType: "investment",
+    q: '("new investment" OR "capital investment") (Arizona OR Phoenix) (facility OR plant OR jobs OR expansion) when:30d',
+    verbs: /\b(investment)\b/i,
   },
 ];
 
@@ -423,6 +452,15 @@ export async function ingestEconomicEvents(): Promise<number> {
       seen.add(item.link);
       if (!verbs.test(item.title)) continue;
       if (!isArizonaStory(item.title, item.source)) continue;
+      if (isJunkHeadline(item.title)) continue;
+      // Policy counts only when it is a market policy, not political drama.
+      if (eventType === "policy" && !MARKET_POLICY.test(item.title)) continue;
+      // Expansions, investments, and relocations must show major scale.
+      if (
+        (eventType === "expansion" || eventType === "investment" || eventType === "relocation") &&
+        !SCALE_SIGNAL.test(item.title)
+      )
+        continue;
       // skip obvious bankruptcy noise in expansion/contract feeds
       if (/\b(bankruptcy|chapter 11)\b/i.test(item.title)) continue;
       const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
@@ -481,6 +519,7 @@ export async function ingestBankruptcyNews(): Promise<number> {
       // Require an actual filing event, not guides/commentary about bankruptcy.
       if (!/files?\s+for\s+(chapter\s*11\s+)?bankruptcy/i.test(item.title)) continue;
       if (!isArizonaStory(item.title, item.source)) continue;
+      if (isJunkHeadline(item.title)) continue;
       const company = parseBankruptcyHeadline(item.title);
       if (!company || company.length < 3) continue;
       const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
