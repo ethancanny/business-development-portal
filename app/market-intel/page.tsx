@@ -424,7 +424,7 @@ export default function MarketIntelPage() {
 
   /** Section event strips: recent major events relevant to each section. */
   const dismissEvent = (a: MiAcquisition) => setStatus("acquisitions", a.id, "dismissed");
-  const stripCutoff = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
+  const stripCutoff = new Date(Date.now() - 1 * 864e5).toISOString().slice(0, 10);
   const recentEvents = (pred: (a: MiAcquisition) => boolean, n = 3) =>
     acquisitions
       .filter((a) => a.status !== "dismissed" && a.announcedDate && a.announcedDate >= stripCutoff && pred(a))
