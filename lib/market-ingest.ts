@@ -314,45 +314,34 @@ function headlineSummary(title: string): string {
 
 /** Structured brief for a major-event card (Ethan's spec: name the companies
  * involved, dollar amounts, jobs, size, place — not just the headline).
- * Facts are extracted from the headline + the RSS description's lede
- * sentence when the feed carries one. */
+ * Facts are extracted from the headline itself. Google News RSS
+ * descriptions carry no article prose (only links to related stories),
+ * so they are deliberately NOT used — a related headline is not a lede. */
 function buildEventBrief(opts: {
   title: string;
-  description?: string;
   acquirer?: string;
   target?: string;
 }): string {
   const { title, acquirer, target } = opts;
   const cleanTitle = headlineSummary(title);
-  // RSS descriptions are HTML lists that repeat the headline + publisher and
-  // sometimes add a real lede. Strip tags, drop the repeated headline, keep
-  // the first substantive sentence.
-  let lede = "";
-  if (opts.description) {
-    const text = opts.description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const rest = text.replace(cleanTitle, "").trim();
-    const sentence = rest
-      .split(/(?<=[.!?])\s+/)
-      .find((s) => s.length >= 50 && /[a-z]/i.test(s) && !cleanTitle.includes(s.slice(0, 40)));
-    if (sentence) lede = sentence.trim();
-  }
-  const hay = `${title} ${lede}`;
+  const hay = title;
   const facts: string[] = [];
   if (acquirer && target) facts.push(`${acquirer} → ${target}`);
   else if (target) facts.push(target);
   const money = Array.from(hay.matchAll(/\$\s?[\d,.]+\s?(?:billion|million|bn|m|b)\b/gi)).map((m) =>
-    m[0].replace(/\s+/g, "")
+    m[0].replace(/\$\s?/, "$").replace(/\s+/g, " ").trim()
   );
   for (const m of Array.from(new Set(money)).slice(0, 2)) facts.push(m);
   const jobs = hay.match(/[\d,]+\s+(?:new\s+)?jobs/i);
   if (jobs) facts.push(jobs[0].replace(/\s+/g, " "));
-  const sqft = hay.match(/[\d,]+\s*(?:square[- ]feet|sq\.?\s?ft)/i);
+  const sqft = hay.match(/[\d,]+\s*-?\s*(?:square[- ]feet|sq\.?\s?ft)/i);
   if (sqft) facts.push(sqft[0].replace(/\s+/g, " "));
   const loc = hay.match(AZ_TERMS);
   if (loc) facts.push(loc[0].charAt(0).toUpperCase() + loc[0].slice(1));
-  const head = facts.join(" · ");
-  const brief = head ? (lede ? `${head} — ${lede}` : head) : lede || cleanTitle;
-  return brief.slice(0, 340);
+  // The facts line only wins when it actually says something: a company
+  // name, or at least two hard facts. Otherwise the headline is better.
+  const informative = Boolean(acquirer || target) || facts.length >= 2;
+  return (informative && facts.length > 0 ? facts.join(" · ") : cleanTitle).slice(0, 340);
 }
 
 /** Non-event noise: commentary, advice, stock-price moves, legal/political drama. */
@@ -404,7 +393,7 @@ export async function ingestNews(): Promise<number> {
         announcedDate: announced,
         sourceUrl: item.link,
         publisher: item.source,
-        summary: buildEventBrief({ title: item.title, description: item.description, acquirer, target }),
+        summary: buildEventBrief({ title: item.title, acquirer, target }),
       });
     }
     total += await upsertAcquisitions(rows);
@@ -530,7 +519,7 @@ export async function ingestEconomicEvents(): Promise<number> {
         sourceUrl: item.link,
         publisher: item.source,
         eventType,
-        summary: buildEventBrief({ title: item.title, description: item.description, target: subject }),
+        summary: buildEventBrief({ title: item.title, target: subject }),
       });
     }
     total += await upsertAcquisitions(rows);
@@ -589,7 +578,7 @@ export async function ingestBankruptcyNews(): Promise<number> {
         sourceUrl: item.link,
         publisher: item.source,
         eventType: "bankruptcy",
-        summary: buildEventBrief({ title: item.title, description: item.description, target: company }),
+        summary: buildEventBrief({ title: item.title, target: company }),
       });
     }
     total += await upsertAcquisitions(rows);
