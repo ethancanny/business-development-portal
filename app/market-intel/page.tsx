@@ -14,6 +14,7 @@ import {
   YAxis,
 } from "recharts";
 import PageHero from "@/components/PageHero";
+import ValleyDemographics from "@/components/ValleyDemographics";
 import { useTheme } from "@/components/ThemeProvider";
 import { fmtMoney, fmtDate } from "@/lib/format";
 import type {
@@ -629,6 +630,15 @@ export default function MarketIntelPage() {
             <p className="py-4 text-center text-sm text-slate-400">No {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} data for this size band yet.</p>
           )}
         </div>
+        </div>
+
+        {/* Valley demographics — full width */}
+        <div className={`${chartCard} lg:col-span-2`}>
+          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Valley Demographics — Maricopa County</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+            Census tract view of where age and wealth concentrate, plus population growth ’19–’23. Click any tract for details.
+          </p>
+          <ValleyDemographics />
         </div>
 
         {/* Tabs */}

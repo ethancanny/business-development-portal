@@ -8,8 +8,8 @@ import { useTheme } from "@/components/ThemeProvider";
 const NAV = [
   { href: "/overview", label: "Overview" },
   { href: "/", label: "Pipeline" },
-  { href: "/market-intel", label: "Market Intel" },
   { href: "/activity", label: "Activity" },
+  { href: "/market-intel", label: "Market Intel" },
 ];
 
 const AUDIT = { href: "/audit-trail", label: "Audit Trail" };
