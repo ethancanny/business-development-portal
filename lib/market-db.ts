@@ -174,6 +174,12 @@ export async function addMultiple(m: MultipleInput): Promise<void> {
             ${m.evRevenueMedian ?? null}, ${m.notes ?? ""})`;
 }
 
+/** Replace-vintage support: auto-ingests delete their period's rows before re-adding. */
+export async function deleteMultiples(sourceReport: string, period: string): Promise<void> {
+  await ensureSchema();
+  await sql()`DELETE FROM mi_multiples WHERE source_report = ${sourceReport} AND period = ${period}`;
+}
+
 export async function getMultiples(): Promise<MiMultiple[]> {
   await ensureSchema();
   const rows = await sql()`SELECT * FROM mi_multiples ORDER BY created_at DESC`;

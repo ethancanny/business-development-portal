@@ -13,7 +13,7 @@ import {
   backfillWarnIndustries,
   clearNewBankruptcyNews,
   addMultiple,
-  getMultiples,
+  deleteMultiples,
   logSync,
   type AcquisitionInput,
   type FilingInput,
@@ -739,12 +739,8 @@ export async function ingestMultiples(): Promise<number> {
   const period = (json.generated_at ?? new Date().toISOString()).slice(0, 10);
   const data = json.data ?? {};
 
-  // skip if this vintage is already loaded
-  const existing = await getMultiples();
-  if (existing.some((m) => m.sourceReport.startsWith("ExitValue.ai") && m.period === period)) {
-    await logSync("multiples", "skipped", 0, `ExitValue.ai ${period} already loaded`);
-    return 0;
-  }
+  // Replace this vintage wholesale (idempotent; also heals label changes).
+  await deleteMultiples("ExitValue.ai M&A Multiples Index", period);
 
   let added = 0;
   for (const [vertical, brackets] of Object.entries(data)) {
@@ -806,11 +802,8 @@ export async function ingestDamodaranMultiples(): Promise<number> {
     const d = lm ? new Date(lm) : new Date();
     period = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   }
-  const existing = await getMultiples();
-  if (existing.some((m) => m.sourceReport === SOURCE && m.period === period)) {
-    await logSync("multiples", "skipped", 0, `Damodaran ${period} already loaded`);
-    return 0;
-  }
+  // Replace this vintage wholesale (idempotent).
+  await deleteMultiples(SOURCE, period);
   const headerIdx = rows.findIndex((r) => r[0] === "Industry Name");
   if (headerIdx < 0) {
     await logSync("multiples", "error", 0, "Damodaran: header row not found");
