@@ -9,6 +9,7 @@ import {
   upsertEntities,
   upsertFilings,
   upsertIndicatorObs,
+  upsertIndicatorObsBulk,
   upsertWarn,
   backfillWarnIndustries,
   clearNewBankruptcyNews,
@@ -1032,22 +1033,22 @@ export async function ingestCensusStateFin(): Promise<number> {
  * Each county table has a public CSV export endpoint keyed by its embed hash.
  */
 
-const COUNTY_PERMIT_TABLES: { county: string; slug: string; hash: string }[] = [
-  { county: "Apache", slug: "APACHE", hash: "18575CA960" },
-  { county: "Cochise", slug: "COCHISE", hash: "A53FB2362B" },
-  { county: "Coconino", slug: "COCONINO", hash: "F0CD76A943" },
-  { county: "Gila", slug: "GILA", hash: "8BBFE78881" },
-  { county: "Graham", slug: "GRAHAM", hash: "5D7A5FFE60" },
-  { county: "Greenlee", slug: "GREENLEE", hash: "99EC13529F" },
-  { county: "La Paz", slug: "LAPAZ", hash: "BF3A677BA4" },
-  { county: "Maricopa", slug: "MARICOPA", hash: "380B9E931D" },
-  { county: "Mohave", slug: "MOHAVE", hash: "F9A24CD7A3" },
-  { county: "Navajo", slug: "NAVAJO", hash: "081D067E8B" },
-  { county: "Pima", slug: "PIMA", hash: "95E515957E" },
-  { county: "Pinal", slug: "PINAL", hash: "0EA7D0310A" },
-  { county: "Santa Cruz", slug: "SANTACRUZ", hash: "C85FABD7D9" },
-  { county: "Yavapai", slug: "YAVAPAI", hash: "84F517B20F" },
-  { county: "Yuma", slug: "YUMA", hash: "895CEE7B87" },
+const COUNTY_PERMIT_TABLES: { county: string; slug: string; hashes: string[] }[] = [
+  { county: "Apache", slug: "APACHE", hashes: ["18575CA960"] },
+  { county: "Cochise", slug: "COCHISE", hashes: ["A53FB2362B"] },
+  { county: "Coconino", slug: "COCONINO", hashes: ["F0CD76A943"] },
+  { county: "Gila", slug: "GILA", hashes: ["8BBFE78881"] },
+  { county: "Graham", slug: "GRAHAM", hashes: ["5D7A5FFE60"] },
+  { county: "Greenlee", slug: "GREENLEE", hashes: ["99EC13529F"] },
+  { county: "La Paz", slug: "LAPAZ", hashes: ["BF3A677BA4"] },
+  { county: "Maricopa", slug: "MARICOPA", hashes: ["380B9E931D"] },
+  { county: "Mohave", slug: "MOHAVE", hashes: ["F9A24CD7A3"] },
+  { county: "Navajo", slug: "NAVAJO", hashes: ["081D067E8B"] },
+  { county: "Pima", slug: "PIMA", hashes: ["95E515957E"] },
+  { county: "Pinal", slug: "PINAL", hashes: ["0EA7D0310A"] },
+  { county: "Santa Cruz", slug: "SANTACRUZ", hashes: ["C85FABD7D9"] },
+  { county: "Yavapai", slug: "YAVAPAI", hashes: ["84F517B20F"] },
+  { county: "Yuma", slug: "YUMA", hashes: ["895CEE7B87"] },
 ];
 
 /** Minimal RFC4180 CSV parser (dataZoa exports quote fields with embedded commas/newlines). */
@@ -1088,8 +1089,11 @@ function parseCsv(text: string): string[][] {
 function parseCountyPermits(csvText: string): { date: string; total: number | null; sf: number | null }[] {
   const rows = parseCsv(csvText.replace(/^﻿/, ""));
   if (!rows.length) return [];
-  const totalIdx = rows[0].indexOf("Total");
-  const sfIdx = rows[0].indexOf("Single Family");
+  // Column titles vary slightly by county (e.g. " Single Family" with a space);
+  // the permits columns are the LAST "Total" / "Single Family" pair in the table.
+  const titles = rows[0].map((c) => c.trim());
+  const totalIdx = titles.lastIndexOf("Total");
+  const sfIdx = titles.lastIndexOf("Single Family");
   const dateRow = rows.findIndex((r) => r[0] === "DATE");
   if (totalIdx < 0 || sfIdx < 0 || dateRow < 0) return [];
   const out: { date: string; total: number | null; sf: number | null }[] = [];
@@ -1110,17 +1114,26 @@ export async function ingestCountyPermits(): Promise<number> {
   let total = 0;
   const since = "2020-01-01"; // display window is 5 years; keep ingest lean
   for (const c of COUNTY_PERMIT_TABLES) {
-    if (c.hash === "TODO") continue;
     try {
-      const url = `https://www.datazoa.com/publish/export.asp?hash=${c.hash}&glname=&dzuuid=1068&alttitle=&altextsrc=&a=exportcsv`;
-      const res = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" },
-      });
-      if (!res.ok) {
-        await logSync("county_permits", "error", 0, `dataZoa ${c.county}: HTTP ${res.status}`);
+      // Some counties keep permits in a second table; use the first that yields rows.
+      let parsed: { date: string; total: number | null; sf: number | null }[] = [];
+      for (const hash of c.hashes) {
+        const url = `https://www.datazoa.com/publish/export.asp?hash=${hash}&glname=&dzuuid=1068&alttitle=&altextsrc=&a=exportcsv`;
+        const res = await fetch(url, {
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" },
+        });
+        if (!res.ok) {
+          await logSync("county_permits", "error", 0, `dataZoa ${c.county}: HTTP ${res.status}`);
+          continue;
+        }
+        parsed = parseCountyPermits(await res.text());
+        if (parsed.some((r) => r.total !== null)) break;
+        parsed = [];
+      }
+      if (!parsed.length) {
+        await logSync("county_permits", "error", 0, `dataZoa ${c.county}: no permits columns found`);
         continue;
       }
-      const parsed = parseCountyPermits(await res.text());
       const rows: IndicatorInput[] = [];
       for (const r of parsed) {
         if (r.date < since) continue;
@@ -1145,12 +1158,12 @@ export async function ingestCountyPermits(): Promise<number> {
             value: r.sf,
           });
       }
-      total += await upsertIndicatorObs(rows);
+      total += await upsertIndicatorObsBulk(rows);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await logSync("county_permits", "error", 0, `dataZoa ${c.county}: ${msg.slice(0, 300)}`);
     }
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 300));
   }
   await logSync("county_permits", "ok", total, `U of A EBRC/dataZoa: county housing permits`);
   return total;

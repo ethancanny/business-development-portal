@@ -45,11 +45,37 @@ export async function upsertIndicatorObs(rows: IndicatorInput[]): Promise<number
       INSERT INTO mi_indicators (id, source, series_id, title, units, frequency, obs_date, value)
       VALUES (${newId()}, ${r.source}, ${r.seriesId}, ${r.title}, ${r.units}, ${r.frequency}, ${r.obsDate}, ${r.value})
       ON CONFLICT (source, series_id, obs_date) DO UPDATE SET
-        value = EXCLUDED.value, title = EXCLUDED.title, units = EXCLUDED.units
+        value = EXCLUDED.value, title = EXCLUDED.title, units = EXCLUDED.units, frequency = EXCLUDED.frequency
       RETURNING (xmax = 0) AS inserted`;
     if (res[0]?.inserted) added++;
   }
   return added;
+}
+
+/** Bulk variant for large ingests (hundreds of rows per statement, chunked). */
+export async function upsertIndicatorObsBulk(rows: IndicatorInput[]): Promise<number> {
+  if (!rows.length) return 0;
+  await ensureSchema();
+  const db = sql();
+  const CHUNK = 400;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const values: string[] = [];
+    const params: unknown[] = [];
+    chunk.forEach((r, j) => {
+      const b = j * 8;
+      values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8})`);
+      params.push(newId(), r.source, r.seriesId, r.title, r.units, r.frequency, r.obsDate, r.value);
+    });
+    await db.query(
+      `INSERT INTO mi_indicators (id, source, series_id, title, units, frequency, obs_date, value)
+       VALUES ${values.join(", ")}
+       ON CONFLICT (source, series_id, obs_date) DO UPDATE SET
+         value = EXCLUDED.value, title = EXCLUDED.title, units = EXCLUDED.units, frequency = EXCLUDED.frequency`,
+      params
+    );
+  }
+  return rows.length;
 }
 
 export async function getIndicatorSeries(seriesIds: string[]): Promise<MiIndicatorObs[]> {
