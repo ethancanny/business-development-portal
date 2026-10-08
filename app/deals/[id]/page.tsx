@@ -99,7 +99,7 @@ export default function DealDetailPage() {
           This account no longer exists.
         </p>
         <Link
-          href="/"
+          href="/pipeline"
           className="mt-4 inline-block text-sm font-semibold text-[#8a6f3c] hover:underline"
         >
           ← Back to pipeline
@@ -119,7 +119,7 @@ export default function DealDetailPage() {
       />
       <main className="mx-auto max-w-[1100px] px-4 py-6 sm:px-6">
         <Link
-          href="/"
+          href="/pipeline"
           className="text-sm font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
         >
           ← Back to pipeline
@@ -412,7 +412,7 @@ export default function DealDetailPage() {
             setEditing(false);
             load();
           }}
-          onDeleted={() => router.replace("/")}
+          onDeleted={() => router.replace("/pipeline")}
         />
       )}
       </main>

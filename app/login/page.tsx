@@ -23,7 +23,7 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       if (res.ok) {
-        router.replace("/");
+        router.replace("/overview");
         router.refresh();
       } else {
         const data = await res.json().catch(() => ({}));

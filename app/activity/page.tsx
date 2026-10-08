@@ -175,8 +175,25 @@ export default function ActivityPage() {
           </div>
         )}
 
-        <div className="flex flex-col gap-3">
-          {filtered.map((item) => {
+        {(
+          [
+            { kind: "business_for_sale", heading: "Businesses for Sale" },
+            { kind: "operator_available", heading: "Operators Available" },
+            { kind: "market_note", heading: "Market Notes" },
+          ] as const
+        ).map((group) => {
+          const groupItems = filtered.filter((i) => i.kind === group.kind);
+          if (groupItems.length === 0) return null;
+          return (
+            <section key={group.kind} className="mb-8">
+              <h2 className="mb-3 flex items-baseline gap-2 text-base font-bold text-slate-900 dark:text-white">
+                {group.heading}
+                <span className="text-sm font-medium text-slate-400 dark:text-white/40">
+                  {groupItems.length}
+                </span>
+              </h2>
+              <div className="flex flex-col gap-3">
+                {groupItems.map((item) => {
             const km = KIND_META[item.kind];
             const isBusy = busy === item.id;
             return (
@@ -260,8 +277,11 @@ export default function ActivityPage() {
                 )}
               </article>
             );
-          })}
-        </div>
+                })}
+              </div>
+            </section>
+          );
+        })}
       </main>
     </>
   );

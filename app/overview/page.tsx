@@ -221,7 +221,7 @@ export default function Overview() {
               Pipeline by stage
             </h2>
             <Link
-              href="/"
+              href="/pipeline"
               className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
             >
               Open pipeline →

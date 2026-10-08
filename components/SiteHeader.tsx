@@ -7,7 +7,7 @@ import { useTheme } from "@/components/ThemeProvider";
 
 const NAV = [
   { href: "/overview", label: "Overview" },
-  { href: "/", label: "Pipeline" },
+  { href: "/pipeline", label: "Pipeline" },
   { href: "/activity", label: "Activity" },
   { href: "/market-intel", label: "Market Intel" },
 ];
@@ -41,10 +41,7 @@ export default function SiteHeader() {
   };
 
   const navLink = (href: string, label: string, mobile = false) => {
-    const active =
-      href === "/"
-        ? pathname === "/"
-        : pathname === href || pathname.startsWith(href + "/");
+    const active = pathname === href || pathname.startsWith(href + "/");
     return (
       <Link
         key={href}
