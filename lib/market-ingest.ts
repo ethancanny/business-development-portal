@@ -10,6 +10,7 @@ import {
   upsertIndicatorObs,
   upsertWarn,
   backfillWarnIndustries,
+  clearNewBankruptcyNews,
   addMultiple,
   getMultiples,
   logSync,
@@ -151,12 +152,15 @@ export async function ingestFilings(): Promise<number> {
     }
     const data = (await res.json()) as { hits?: { hits?: EdgarHit[] } };
     const hits = data.hits?.hits ?? [];
+    // Resolve CIK info concurrently (EDGAR allows ~10 req/sec)
+    const ciks = Array.from(new Set(hits.map((h) => (h._source?.ciks ?? [])[0]?.replace(/^0+/, "") ?? "").filter(Boolean)));
+    await mapLimit(ciks, 5, getCikInfo);
     const rows: FilingInput[] = [];
     for (const h of hits) {
       const s = h._source ?? {};
       const cik = (s.ciks ?? [])[0]?.replace(/^0+/, "") ?? "";
       const adsh = (s.adsh ?? "").replace(/-/g, "");
-      const info = await getCikInfo(cik);
+      const info = cikInfoCache.get(cik) ?? { state: "", listed: false };
       // Bankruptcy exception: only exchange-listed filers (sizable public companies).
       if (q.category === "bankruptcy" && !info.listed) continue;
       rows.push({
@@ -171,13 +175,23 @@ export async function ingestFilings(): Promise<number> {
         azCompany: info.state === "AZ",
         majorEvent: q.category === "bankruptcy",
       });
-      // be polite to EDGAR: ~5 req/sec max for the submissions lookups
-      await new Promise((r) => setTimeout(r, 200));
     }
     total += await upsertFilings(rows);
   }
   await logSync("filings", "ok", total, `EDGAR: ${EDGAR_QUERIES.length} queries, 30d window`);
   return total;
+}
+
+/** Run async fn over items with a concurrency limit. */
+async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<unknown>): Promise<void> {
+  const queue = [...items];
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length) {
+      const item = queue.shift()!;
+      await fn(item);
+    }
+  });
+  await Promise.all(workers);
 }
 
 /* ---------------- Google News RSS (AZ acquisitions) ---------------- */
@@ -303,6 +317,8 @@ function parseBankruptcyHeadline(title: string): string {
 }
 
 export async function ingestBankruptcyNews(): Promise<number> {
+  // Fresh feature: clear the first loose-filter batch, re-ingest tight.
+  const cleared = await clearNewBankruptcyNews().catch(() => 0);
   let total = 0;
   const seen = new Set<string>();
   for (const q of BANKRUPTCY_NEWS_QUERIES) {
@@ -320,9 +336,10 @@ export async function ingestBankruptcyNews(): Promise<number> {
     for (const item of parseRss(xml)) {
       if (!item.link || seen.has(item.link)) continue;
       seen.add(item.link);
-      if (!/bankrupt|chapter\s*11/i.test(item.title)) continue;
+      // Require an actual filing event, not guides/commentary about bankruptcy.
+      if (!/files?\s+for\s+(chapter\s*11\s+)?bankruptcy/i.test(item.title)) continue;
       const company = parseBankruptcyHeadline(item.title);
-      if (!company) continue;
+      if (!company || company.length < 3) continue;
       const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
       rows.push({
         acquirer: "",
@@ -337,7 +354,7 @@ export async function ingestBankruptcyNews(): Promise<number> {
     total += await upsertAcquisitions(rows);
     await new Promise((r) => setTimeout(r, 1500));
   }
-  await logSync("bankruptcy_news", "ok", total, `Google News: ${BANKRUPTCY_NEWS_QUERIES.length} bankruptcy queries`);
+  await logSync("bankruptcy_news", "ok", total, `Google News: ${BANKRUPTCY_NEWS_QUERIES.length} bankruptcy queries${cleared ? ` (cleared ${cleared} loose rows)` : ""}`);
   return total;
 }
 

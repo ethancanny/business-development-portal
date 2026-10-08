@@ -232,9 +232,15 @@ export async function getAcquisitions(status?: string): Promise<MiAcquisition[]>
   }));
 }
 
-export async function setAcquisitionStatus(id: string, status: MiAcquisition["status"]): Promise<void> {
-  await ensureSchema();
+export async function setAcquisitionStatus(id: string, status: MiAcquisition["status"]): Promise<void> {  await ensureSchema();
   await sql()`UPDATE mi_acquisitions SET status = ${status} WHERE id = ${id}`;
+}
+
+/** Remove un-triaged bankruptcy news rows (used to re-ingest with a tighter filter). */
+export async function clearNewBankruptcyNews(): Promise<number> {
+  await ensureSchema();
+  const res = (await sql()`DELETE FROM mi_acquisitions WHERE event_type = 'bankruptcy' AND status = 'new'`) as unknown as { count?: number };
+  return Number(res.count ?? 0);
 }
 
 /* ---------------- Filings ---------------- */
