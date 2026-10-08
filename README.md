@@ -43,7 +43,6 @@ Pushes to `main` auto-deploy via Vercel (project `business-development-portal`) 
 - `components/` — UI: `Modals.tsx` (deal/executive editors), `KanbanBoard.tsx`, `DealTable.tsx`, `ExecTable.tsx`, `PairingTable.tsx`, `TaskList.tsx`, `TargetMap.tsx`, `SiteHeader.tsx`
 - `lib/` — `db.ts` (Postgres-or-JSON router), `db-postgres.ts`, `db-json.ts`, `types.ts`, `auth.ts`, `format.ts`, `geo.ts`
 - `scripts/seed-neon.mjs` — one-time seed of the Neon database
-- `public/` — static files served by Next.js
 
 > **Brand assets note:** the logo, favicon, and desert imagery are loaded from
 > `https://cannycapitalpartners.com/...` (the main Canny Capital website)
