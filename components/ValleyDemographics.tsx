@@ -63,8 +63,16 @@ export default function ValleyDemographics() {
 
     (async () => {
       const L = await import("leaflet");
-      const res = await fetch("/data/maricopa-tracts.json");
-      const geojson = await res.json();
+      // Tract GeoJSON is split into 4 parts to keep each file small.
+      const parts = await Promise.all(
+        [1, 2, 3, 4].map((i) =>
+          fetch(`/data/maricopa-tracts-p${i}.json`).then((r) => r.json())
+        )
+      );
+      const geojson = {
+        type: "FeatureCollection",
+        features: parts.flatMap((p) => p.features),
+      } as unknown as GeoJSON.FeatureCollection;
       if (cancelled || !containerRef.current) return;
       dataRef.current = geojson;
 
@@ -80,7 +88,7 @@ export default function ValleyDemographics() {
 
       const paint = () => {
         const m = metricRef.current;
-        const feats = geojson.features as { properties: TractProps }[];
+        const feats = geojson.features as unknown as { properties: TractProps }[];
         const vals = feats.map((f) => f.properties[m]).filter((v) => typeof v === "number") as number[];
         const breaks = breaksFor(m, vals);
         if (geoRef.current) geoRef.current.remove();
