@@ -28,6 +28,18 @@ import type {
 
 /* ---------------- helpers ---------------- */
 
+/** Stored rows ingested before RSS entity decoding may contain &amp; etc. */
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+    .replace(/&nbsp;/g, " ");
+}
+
 type LatestMap = Record<string, { title: string; units: string; obsDate: string; value: number | null }>;
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -180,7 +192,7 @@ function EventStrip({
                 {a.announcedDate ? ` · ${fmtDate(a.announcedDate)}` : ""}
               </p>
               <p className="mt-0.5 pr-4 text-sm font-semibold text-[#0d1f3c] dark:text-white">
-                {a.target || a.acquirer || "Unnamed"}
+                {decodeEntities(a.target || a.acquirer || "Unnamed")}
               </p>
               <p className="text-xs text-slate-500 dark:text-white/50">{a.publisher || "News"}</p>
             </a>
@@ -714,9 +726,9 @@ export default function MarketIntelPage() {
                       className="block"
                     >
                       <p className={`text-xs font-semibold uppercase tracking-wider ${label}`}>{h.kind}</p>
-                      <p className="mt-1 pr-5 text-base font-bold text-[#0d1f3c] dark:text-white">{h.title}</p>
+                      <p className="mt-1 pr-5 text-base font-bold text-[#0d1f3c] dark:text-white">{decodeEntities(h.title)}</p>
                       <p className="mt-1 text-xs text-slate-500 dark:text-white/50">
-                        {h.detail}{h.date ? ` · ${fmtDate(h.date)}` : ""}
+                        {decodeEntities(h.detail)}{h.date ? ` · ${fmtDate(h.date)}` : ""}
                       </p>
                     </a>
                     {h.summary && (
@@ -730,7 +742,7 @@ export default function MarketIntelPage() {
                         </button>
                         {expandedId === h.id && (
                           <p className="mt-1.5 border-t border-black/5 pt-2 text-sm leading-relaxed text-slate-700 dark:border-white/10 dark:text-white/80">
-                            {h.summary}
+                            {decodeEntities(h.summary)}
                           </p>
                         )}
                       </>
