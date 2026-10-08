@@ -258,6 +258,7 @@ export interface MiAcquisition {
   sourceUrl: string;
   publisher: string;
   eventType: "acquisition" | "bankruptcy" | "expansion" | "contract" | "relocation" | "ipo" | "policy";
+  summary: string;
   status: "new" | "keep" | "dismissed";
   createdAt: string;
 }

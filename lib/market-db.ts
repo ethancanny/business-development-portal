@@ -198,6 +198,7 @@ export interface AcquisitionInput {
   sourceUrl: string;
   publisher?: string;
   eventType?: "acquisition" | "bankruptcy" | "expansion" | "contract" | "relocation" | "ipo" | "policy";
+  summary?: string;
 }
 
 function normName(s: string): string {
@@ -231,10 +232,10 @@ export async function upsertAcquisitions(rows: AcquisitionInput[]): Promise<numb
     if (r.target && seenKeys.has(key)) continue;
     seenKeys.add(key);
     const res = await db`
-      INSERT INTO mi_acquisitions (id, acquirer, target, target_location, industry, deal_value, announced_date, source_url, publisher, event_type)
+      INSERT INTO mi_acquisitions (id, acquirer, target, target_location, industry, deal_value, announced_date, source_url, publisher, event_type, summary)
       VALUES (${newId()}, ${r.acquirer ?? ""}, ${r.target ?? ""}, ${r.targetLocation ?? ""}, ${r.industry ?? ""},
               ${r.dealValue ?? null}, ${r.announcedDate ?? ""}, ${r.sourceUrl}, ${r.publisher ?? ""},
-              ${r.eventType ?? "acquisition"})
+              ${r.eventType ?? "acquisition"}, ${r.summary ?? ""})
       ON CONFLICT (source_url) DO NOTHING
       RETURNING (xmax = 0) AS inserted`;
     if (res[0]?.inserted) added++;
@@ -254,6 +255,7 @@ export async function getAcquisitions(status?: string): Promise<MiAcquisition[]>
     dealValue: numOrNull(r.deal_value), announcedDate: str(r.announced_date),
     sourceUrl: str(r.source_url), publisher: str(r.publisher),
     eventType: (str(r.event_type) || "acquisition") as MiAcquisition["eventType"],
+    summary: str(r.summary),
     status: str(r.status) as MiAcquisition["status"], createdAt: String(r.created_at),
   }));
 }

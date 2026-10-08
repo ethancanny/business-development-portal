@@ -213,6 +213,7 @@ export function ensureSchema(): Promise<void> {
           UNIQUE (source_url)
         )`;
       await db`ALTER TABLE mi_acquisitions ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'acquisition'`;
+      await db`ALTER TABLE mi_acquisitions ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''`;
       await db`
         CREATE TABLE IF NOT EXISTS mi_filings (
           id TEXT PRIMARY KEY,

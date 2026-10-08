@@ -284,6 +284,22 @@ function parseRss(xml: string): RssItem[] {
 
 const DEAL_VERBS = /\b(acquir|merger|merges|buys|bought|takeover|stake in)\b/i;
 
+/** Arizona relevance for news items: Google News returns loosely-related
+ * national stories even for Arizona queries, so require an Arizona place
+ * term in the headline or an Arizona news outlet as the source. */
+const AZ_TERMS =
+  /\b(arizona|phoenix|scottsdale|tempe|mesa|tucson|chandler|gilbert|glendale|peoria|surprise|flagstaff|yuma|prescott|avondale|goodyear|buckeye|queen creek|maricopa|pinal|sedona|lake havasu)\b/i;
+const AZ_OUTLETS =
+  /(arizona republic|azcentral|phoenix business journal|arizona daily star|ktar|abc15|12 ?news|fox 10 phoenix|arizona capitol times|tucson sentinel|arizona mirror|daily independent|east valley tribune|arizona family|kjzz)/i;
+function isArizonaStory(title: string, source: string): boolean {
+  return AZ_TERMS.test(title) || AZ_OUTLETS.test(source);
+}
+
+/** Headline text minus the " - Publisher" suffix: a one-line brief of the event. */
+function headlineSummary(title: string): string {
+  return title.replace(/\s+-\s+[^-]+$/, "").trim().slice(0, 300);
+}
+
 export async function ingestNews(): Promise<number> {
   let total = 0;
   const seen = new Set<string>();
@@ -303,6 +319,7 @@ export async function ingestNews(): Promise<number> {
       if (!item.link || seen.has(item.link)) continue;
       seen.add(item.link);
       if (!DEAL_VERBS.test(item.title)) continue;
+      if (!isArizonaStory(item.title, item.source)) continue;
       const { acquirer, target } = parseDealHeadline(item.title);
       const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
       rows.push({
@@ -312,6 +329,7 @@ export async function ingestNews(): Promise<number> {
         announcedDate: announced,
         sourceUrl: item.link,
         publisher: item.source,
+        summary: headlineSummary(item.title),
       });
     }
     total += await upsertAcquisitions(rows);
@@ -404,6 +422,7 @@ export async function ingestEconomicEvents(): Promise<number> {
       if (!item.link || seen.has(item.link)) continue;
       seen.add(item.link);
       if (!verbs.test(item.title)) continue;
+      if (!isArizonaStory(item.title, item.source)) continue;
       // skip obvious bankruptcy noise in expansion/contract feeds
       if (/\b(bankruptcy|chapter 11)\b/i.test(item.title)) continue;
       const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
@@ -416,6 +435,7 @@ export async function ingestEconomicEvents(): Promise<number> {
         sourceUrl: item.link,
         publisher: item.source,
         eventType,
+        summary: headlineSummary(item.title),
       });
     }
     total += await upsertAcquisitions(rows);
@@ -460,6 +480,7 @@ export async function ingestBankruptcyNews(): Promise<number> {
       seen.add(item.link);
       // Require an actual filing event, not guides/commentary about bankruptcy.
       if (!/files?\s+for\s+(chapter\s*11\s+)?bankruptcy/i.test(item.title)) continue;
+      if (!isArizonaStory(item.title, item.source)) continue;
       const company = parseBankruptcyHeadline(item.title);
       if (!company || company.length < 3) continue;
       const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
@@ -471,6 +492,7 @@ export async function ingestBankruptcyNews(): Promise<number> {
         sourceUrl: item.link,
         publisher: item.source,
         eventType: "bankruptcy",
+        summary: headlineSummary(item.title),
       });
     }
     total += await upsertAcquisitions(rows);
