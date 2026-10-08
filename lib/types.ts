@@ -261,7 +261,7 @@ export interface MiAcquisition {
   createdAt: string;
 }
 
-export type MiFilingCategory = "acquisition" | "form_d" | "expansion";
+export type MiFilingCategory = "acquisition" | "form_d" | "expansion" | "bankruptcy";
 
 export interface MiFiling {
   id: string;
@@ -273,6 +273,8 @@ export interface MiFiling {
   category: MiFilingCategory;
   summary: string;
   url: string;
+  azCompany: boolean;
+  majorEvent: boolean;
   status: "new" | "keep" | "dismissed";
   createdAt: string;
 }

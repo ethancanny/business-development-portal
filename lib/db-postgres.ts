@@ -227,6 +227,8 @@ export function ensureSchema(): Promise<void> {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           UNIQUE (accession)
         )`;
+      await db`ALTER TABLE mi_filings ADD COLUMN IF NOT EXISTS az_company BOOLEAN NOT NULL DEFAULT FALSE`;
+      await db`ALTER TABLE mi_filings ADD COLUMN IF NOT EXISTS major_event BOOLEAN NOT NULL DEFAULT FALSE`;
       await db`
         CREATE TABLE IF NOT EXISTS mi_warn (
           id TEXT PRIMARY KEY,

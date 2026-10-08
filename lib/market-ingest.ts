@@ -90,11 +90,40 @@ const EDGAR_UA = {
   Accept: "application/json",
 };
 
-const EDGAR_QUERIES: { category: "acquisition" | "form_d" | "expansion"; q: string; forms: string }[] = [
+const EDGAR_QUERIES: { category: "acquisition" | "form_d" | "expansion" | "bankruptcy"; q: string; forms: string; national?: boolean }[] = [
   { category: "acquisition", q: '"acquisition" AND Arizona', forms: "8-K" },
   { category: "form_d", q: "Arizona", forms: "D,D/A" },
   { category: "expansion", q: '"Arizona" AND expansion', forms: "10-K" },
+  // Major-event exception: public-company bankruptcies are rare and newsworthy — track nationally,
+  // keep only exchange-listed filers ("good sized corps").
+  { category: "bankruptcy", q: '"bankruptcy" OR "chapter 11"', forms: "8-K", national: true },
 ];
+
+/** CIK -> { business state, exchange-listed? } via EDGAR submissions API, cached per run. */
+const cikInfoCache = new Map<string, { state: string; listed: boolean }>();
+async function getCikInfo(cik: string): Promise<{ state: string; listed: boolean }> {
+  const cached = cikInfoCache.get(cik);
+  if (cached) return cached;
+  const fallback = { state: "", listed: false };
+  if (!cik) return fallback;
+  try {
+    const padded = cik.replace(/^0+/, "").padStart(10, "0");
+    const res = await fetch(`https://data.sec.gov/submissions/CIK${padded}.json`, { headers: EDGAR_UA });
+    if (!res.ok) return fallback;
+    const data = (await res.json()) as {
+      addresses?: { business?: { stateOrCountry?: string } };
+      exchanges?: string[];
+    };
+    const info = {
+      state: (data.addresses?.business?.stateOrCountry ?? "").toUpperCase(),
+      listed: (data.exchanges ?? []).some((e) => /NYSE|Nasdaq/i.test(e)),
+    };
+    cikInfoCache.set(cik, info);
+    return info;
+  } catch {
+    return fallback;
+  }
+}
 
 interface EdgarHit {
   _source?: {
@@ -122,11 +151,15 @@ export async function ingestFilings(): Promise<number> {
     }
     const data = (await res.json()) as { hits?: { hits?: EdgarHit[] } };
     const hits = data.hits?.hits ?? [];
-    const rows: FilingInput[] = hits.map((h) => {
+    const rows: FilingInput[] = [];
+    for (const h of hits) {
       const s = h._source ?? {};
       const cik = (s.ciks ?? [])[0]?.replace(/^0+/, "") ?? "";
       const adsh = (s.adsh ?? "").replace(/-/g, "");
-      return {
+      const info = await getCikInfo(cik);
+      // Bankruptcy exception: only exchange-listed filers (sizable public companies).
+      if (q.category === "bankruptcy" && !info.listed) continue;
+      rows.push({
         form: s.form ?? "",
         company: (s.display_names ?? [])[0] ?? "",
         cik,
@@ -135,8 +168,12 @@ export async function ingestFilings(): Promise<number> {
         category: q.category,
         summary: s.file_description ?? "",
         url: cik && adsh ? `https://www.sec.gov/Archives/edgar/data/${cik}/${adsh}/` : "",
-      };
-    });
+        azCompany: info.state === "AZ",
+        majorEvent: q.category === "bankruptcy",
+      });
+      // be polite to EDGAR: ~5 req/sec max for the submissions lookups
+      await new Promise((r) => setTimeout(r, 200));
+    }
     total += await upsertFilings(rows);
   }
   await logSync("filings", "ok", total, `EDGAR: ${EDGAR_QUERIES.length} queries, 30d window`);
@@ -307,6 +344,8 @@ export async function ingestWarn(): Promise<number> {
     const c = parseCsvLine(line);
     const noticeDate = c[idx("notice_date")] ?? "";
     if (noticeDate < cutoff) continue; // keep the last 12 months
+    const rowState = (c[idx("state")] ?? "").toUpperCase();
+    if (rowState && rowState !== "AZ") continue; // purely Arizona
     rows.push({
       employer: c[idx("company")] ?? "",
       location: c[idx("location")] ?? "",

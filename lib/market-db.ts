@@ -245,6 +245,8 @@ export interface FilingInput {
   category: MiFilingCategory;
   summary?: string;
   url?: string;
+  azCompany?: boolean;
+  majorEvent?: boolean;
 }
 
 export async function upsertFilings(rows: FilingInput[]): Promise<number> {
@@ -255,10 +257,13 @@ export async function upsertFilings(rows: FilingInput[]): Promise<number> {
   for (const r of rows) {
     if (!r.accession) continue;
     const res = await db`
-      INSERT INTO mi_filings (id, form, company, cik, filing_date, accession, category, summary, url)
+      INSERT INTO mi_filings (id, form, company, cik, filing_date, accession, category, summary, url, az_company, major_event)
       VALUES (${newId()}, ${r.form}, ${r.company ?? ""}, ${r.cik ?? ""}, ${r.filingDate ?? ""},
-              ${r.accession}, ${r.category}, ${r.summary ?? ""}, ${r.url ?? ""})
-      ON CONFLICT (accession) DO NOTHING
+              ${r.accession}, ${r.category}, ${r.summary ?? ""}, ${r.url ?? ""},
+              ${r.azCompany ?? false}, ${r.majorEvent ?? false})
+      ON CONFLICT (accession) DO UPDATE SET
+        az_company = CASE WHEN NOT mi_filings.az_company THEN EXCLUDED.az_company ELSE mi_filings.az_company END,
+        major_event = CASE WHEN NOT mi_filings.major_event THEN EXCLUDED.major_event ELSE mi_filings.major_event END
       RETURNING (xmax = 0) AS inserted`;
     if (res[0]?.inserted) added++;
   }
@@ -280,6 +285,7 @@ export async function getFilings(category?: string, status?: string): Promise<Mi
     id: str(r.id), form: str(r.form), company: str(r.company), cik: str(r.cik),
     filingDate: str(r.filing_date), accession: str(r.accession),
     category: str(r.category) as MiFilingCategory, summary: str(r.summary), url: str(r.url),
+    azCompany: Boolean(r.az_company), majorEvent: Boolean(r.major_event),
     status: str(r.status) as MiFiling["status"], createdAt: String(r.created_at),
   }));
 }

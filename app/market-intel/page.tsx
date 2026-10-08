@@ -381,8 +381,8 @@ export default function MarketIntelPage() {
 
         {tab === "filings" && (
           <div>
-            <div className="mb-3 flex gap-2">
-              {[["all", "All"], ["acquisition", "M&A 8-Ks"], ["form_d", "Form D"], ["expansion", "Expansion"]].map(([v, l]) => (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {[["all", "All"], ["acquisition", "M&A 8-Ks"], ["form_d", "Form D"], ["expansion", "Expansion"], ["bankruptcy", "Bankruptcies"]].map(([v, l]) => (
                 <button key={v} onClick={() => setFilingCat(v)} className={tabBtn(filingCat === v)}>{l}</button>
               ))}
             </div>
@@ -396,6 +396,10 @@ export default function MarketIntelPage() {
                     <tr key={f.id} className="border-b border-slate-100 dark:border-white/5">
                       <td className={td}>
                         {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="font-medium text-[#8a6f3e] underline dark:text-[#d4b37a]">{f.company}</a> : <span className="font-medium">{f.company}</span>}
+                        <span className="block text-xs">
+                          {f.azCompany && <span className="mr-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-emerald-700 dark:text-emerald-400">AZ company</span>}
+                          {f.majorEvent && <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-red-700 dark:text-red-400">Major event</span>}
+                        </span>
                       </td>
                       <td className={td}><span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-white/10">{f.form}</span></td>
                       <td className={td}>{f.filingDate ? fmtDate(f.filingDate) : "—"}</td>
