@@ -1,0 +1,333 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import TaskList from "@/components/TaskList";
+import PageHero from "@/components/PageHero";
+import { DEAL_STAGES, type Deal, type Executive, type Interaction, type Task } from "@/lib/types";
+import { fmtMoney } from "@/lib/format";
+
+const TargetMap = dynamic(() => import("@/components/TargetMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-72 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 sm:h-80 dark:border-white/10 dark:bg-[#0d1f3c]">
+      <p className="text-sm text-slate-400 dark:text-white/40">Loading map…</p>
+    </div>
+  ),
+});
+
+const TERMINAL_STAGES = ["Closed Won", "Passed"];
+
+export default function Overview() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [userName, setUserName] = useState("");
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [execs, setExecs] = useState<Executive[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [interactions, setInteractions] = useState<Interaction[]>([]);
+
+  const load = async () => {
+    try {
+      const [meRes, dealsRes, execsRes, tasksRes, ixRes] = await Promise.all([
+        fetch("/api/auth/me"),
+        fetch("/api/deals"),
+        fetch("/api/executives"),
+        fetch("/api/tasks"),
+        fetch("/api/interactions"),
+      ]);
+      if (
+        meRes.status === 401 ||
+        dealsRes.status === 401 ||
+        tasksRes.status === 401
+      ) {
+        router.replace("/login");
+        return;
+      }
+      const me = await meRes.json();
+      setUserName(me.user?.name ?? "");
+      if (dealsRes.ok) setDeals(await dealsRes.json());
+      if (execsRes.ok) setExecs(await execsRes.json());
+      if (tasksRes.ok) setTasks(await tasksRes.json());
+      if (ixRes.ok) setInteractions(await ixRes.json());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const activeDeals = useMemo(
+    () => deals.filter((d) => !TERMINAL_STAGES.includes(d.stage)),
+    [deals]
+  );
+  const pipelineValue = useMemo(
+    () => activeDeals.reduce((s, d) => s + (d.dealValue || 0), 0),
+    [activeDeals]
+  );
+  const myClaims = useMemo(
+    () =>
+      deals.filter((d) => d.owner === userName).length +
+      execs.filter((e) => e.owner === userName).length,
+    [deals, execs, userName]
+  );
+  const openTasks = useMemo(() => tasks.filter((t) => !t.done), [tasks]);
+  const overdueTasks = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return openTasks.filter((t) => t.dueDate && t.dueDate < today);
+  }, [openTasks]);
+
+  const valueByStage = useMemo(
+    () =>
+      DEAL_STAGES.filter((s) => !TERMINAL_STAGES.includes(s)).map((stage) => ({
+        stage,
+        value: deals
+          .filter((d) => d.stage === stage)
+          .reduce((s, d) => s + (d.dealValue || 0), 0),
+        count: deals.filter((d) => d.stage === stage).length,
+      })),
+    [deals]
+  );
+  const maxStageValue = Math.max(1, ...valueByStage.map((s) => s.value));
+
+  const unclaimed = useMemo(
+    () => activeDeals.filter((d) => !d.owner),
+    [activeDeals]
+  );
+
+  // Deals with no logged touch in 30+ days (interactions fall back to last update).
+  const staleDeals = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+    const lastTouch = new Map<string, string>();
+    interactions.forEach((ix) => {
+      if (!ix.dealId) return;
+      const cur = lastTouch.get(ix.dealId);
+      if (!cur || ix.occurredAt > cur) lastTouch.set(ix.dealId, ix.occurredAt);
+    });
+    return activeDeals.filter((d) => {
+      const touch = lastTouch.get(d.id) ?? d.updatedAt.slice(0, 10);
+      return touch < cutoff.toISOString().slice(0, 10);
+    });
+  }, [activeDeals, interactions]);
+
+  const analytics = useMemo(() => {
+    const thirty = new Date();
+    thirty.setDate(thirty.getDate() - 30);
+    const cutoff = thirty.toISOString();
+    const added30 = deals.filter((d) => d.createdAt >= cutoff).length;
+    const ebitdaSum = activeDeals.reduce((s, d) => s + (d.ebitda || 0), 0);
+    const avgValue =
+      activeDeals.length > 0 ? pipelineValue / activeDeals.length : 0;
+    const closed = deals.filter((d) => TERMINAL_STAGES.includes(d.stage));
+    const won = closed.filter((d) => d.stage === "Closed Won").length;
+    return {
+      added30,
+      ebitdaSum,
+      avgValue,
+      winRate: closed.length > 0 ? Math.round((won / closed.length) * 100) : null,
+    };
+  }, [deals, activeDeals, pipelineValue]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <p className="text-sm text-slate-500 dark:text-white/50">Loading overview…</p>
+      </div>
+    );
+  }
+
+  const stats = [
+    { label: "Active pipeline value", value: fmtMoney(pipelineValue) },
+    { label: "Active targets", value: String(activeDeals.length) },
+    { label: "My claims", value: String(myClaims) },
+    {
+      label: "Open follow-ups",
+      value: String(openTasks.length),
+      alert: overdueTasks.length > 0,
+      sub:
+        overdueTasks.length > 0
+          ? `${overdueTasks.length} overdue`
+          : undefined,
+    },
+  ];
+
+  return (
+    <>
+      <PageHero
+        eyebrow="Canny Capital Partners"
+        title="Overview"
+        subtitle="The state of the firm's pipeline at a glance."
+      />
+      <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+
+      {/* Stat cards */}
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {stats.map((s) => (
+          <div
+            key={s.label}
+            className="rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]"
+          >
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-white/50">
+              {s.label}
+            </p>
+            <p
+              className={`mt-1 text-2xl font-bold ${
+                s.alert ? "text-red-600 dark:text-red-400" : "text-[#0d1f3c] dark:text-white"
+              }`}
+            >
+              {s.value}
+            </p>
+            {s.sub && <p className="mt-0.5 text-xs text-red-500">{s.sub}</p>}
+          </div>
+        ))}
+      </div>
+
+      {staleDeals.length > 0 && (
+        <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
+            ⚠ {staleDeals.length} {staleDeals.length === 1 ? "deal is" : "deals are"} going stale
+            <span className="font-normal"> — no touch in 30+ days: </span>
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {staleDeals.slice(0, 6).map((d) => (
+              <Link
+                key={d.id}
+                href={`/deals/${d.id}`}
+                className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-800 shadow-sm hover:underline dark:bg-white/10 dark:text-amber-200"
+              >
+                {d.companyName}
+              </Link>
+            ))}
+            {staleDeals.length > 6 && (
+              <span className="px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+                +{staleDeals.length - 6} more
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Pipeline by stage */}
+        <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-base font-bold text-[#0d1f3c] dark:text-white">
+              Pipeline by stage
+            </h2>
+            <Link
+              href="/"
+              className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+            >
+              Open pipeline →
+            </Link>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            {valueByStage.map(({ stage, value, count }) => (
+              <div key={stage}>
+                <div className="mb-1 flex items-baseline justify-between text-xs">
+                  <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">{stage}</span>
+                  <span className="text-slate-500 dark:text-white/50">
+                    {count} · {fmtMoney(value)}
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#0d1f3c] to-[#b8975a]"
+                    style={{ width: `${(value / maxStageValue) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          {unclaimed.length > 0 && (
+            <div className="mt-4 rounded-lg bg-[#b8975a]/10 px-3 py-2.5 dark:bg-[#b8975a]/15">
+              <p className="text-xs font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">
+                {unclaimed.length} unclaimed{" "}
+                {unclaimed.length === 1 ? "target" : "targets"}:{" "}
+                <span className="font-normal">
+                  {unclaimed
+                    .slice(0, 3)
+                    .map((d) => d.companyName)
+                    .join(", ")}
+                  {unclaimed.length > 3 &&
+                    ` +${unclaimed.length - 3} more`}
+                </span>
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* Target map */}
+        <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
+          <h2 className="mb-4 text-base font-bold text-[#0d1f3c] dark:text-white">
+            Where we&apos;re looking
+          </h2>
+          <TargetMap deals={deals} />
+        </section>
+      </div>
+
+      {/* Tasks & follow-ups */}
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
+        <h2 className="mb-4 text-base font-bold text-[#0d1f3c] dark:text-white">
+          Tasks &amp; follow-ups
+        </h2>
+        <TaskList
+          tasks={tasks}
+          deals={deals}
+          execs={execs}
+          onChanged={load}
+        />
+      </section>
+
+      {/* Pipeline analytics */}
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
+        <h2 className="mb-4 text-base font-bold text-[#0d1f3c] dark:text-white">
+          Pipeline analytics
+        </h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div>
+            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+              {analytics.added30}
+            </p>
+            <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
+              Added (30 days)
+            </p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+              {fmtMoney(analytics.avgValue)}
+            </p>
+            <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
+              Avg deal value
+            </p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+              {fmtMoney(analytics.ebitdaSum)}
+            </p>
+            <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
+              Pipeline EBITDA
+            </p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+              {analytics.winRate === null ? "—" : `${analytics.winRate}%`}
+            </p>
+            <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
+              Close rate
+            </p>
+          </div>
+        </div>
+      </section>
+
+
+      </main>
+    </>
+  );
+}
