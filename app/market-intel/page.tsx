@@ -411,12 +411,6 @@ export default function MarketIntelPage() {
   }, [obs]);
 
   const statCards = useMemo(() => {
-    const card = (id: string, label: string, format: (v: number) => string) => {
-      const l = latest[id];
-      if (!l || l.value === null) return null;
-      const chg = yoyChange(obs, id);
-      return { label, value: format(l.value), date: l.obsDate, chg };
-    };
     // Combined unemployment bubble: AZ and US side by side in one card.
     const azUr = latest["AZUR"];
     const usUr = latest["UNRATE"];
@@ -429,9 +423,50 @@ export default function MarketIntelPage() {
             chg: yoyChange(obs, "AZUR"),
           }
         : null;
-    // Anomaly card 1 — layoff spike: WARN workers affected in the last 90
-    // days vs the prior 90 days. For investors, a layoff surge is a
-    // distress / deal-flow signal, so "up" is bad (colors inverted).
+    // Manufacturing jobs with their share of all Arizona jobs (AZNA).
+    const mfgL = latest["AZMFG"];
+    const totL = latest["AZNA"];
+    const mfgCard =
+      mfgL && mfgL.value !== null
+        ? {
+            label: "AZ Manufacturing Jobs",
+            value: `${Math.round(mfgL.value)}k`,
+            date:
+              totL && totL.value
+                ? `${mfgL.obsDate} · ${((mfgL.value / totL.value) * 100).toFixed(1)}% of all AZ jobs`
+                : mfgL.obsDate,
+            chg: yoyChange(obs, "AZMFG"),
+            chgLabel: "% YoY",
+            invert: false,
+          }
+        : null;
+    // Permits vs their trailing 12-month average (also feeds the anomaly scan).
+    const permitObs = obs
+      .filter((o) => o.seriesId === "AZBPPRIV" && o.value !== null)
+      .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+    const pLast = permitObs[permitObs.length - 1];
+    const prior12 = permitObs.slice(-13, -1);
+    const avg12 =
+      prior12.length >= 6
+        ? prior12.reduce((s, o) => s + (o.value || 0), 0) / prior12.length
+        : null;
+    const permitChg =
+      pLast && avg12 ? (((pLast.value || 0) - avg12) / avg12) * 100 : null;
+    const permitCard =
+      pLast && avg12 && permitChg !== null
+        ? {
+            label: "AZ Building Permits",
+            value: Math.round(pLast.value || 0).toLocaleString(),
+            date: pLast.obsDate,
+            chg: permitChg,
+            chgLabel: "% vs 1-yr avg",
+            invert: false,
+          }
+        : null;
+    // 🔎 Top Anomaly — scan every source for the reading that "usually
+    // doesn't happen" and surface the single biggest deviation.
+    type Cand = { score: number; headline: string; detail: string };
+    const cands: Cand[] = [];
     const now = Date.now();
     const d90 = 90 * 864e5;
     const sumWin = (from: number, to: number) =>
@@ -444,45 +479,75 @@ export default function MarketIntelPage() {
         .reduce((s, w) => s + (w.headcount || 0), 0);
     const layNow = sumWin(now - d90, now + 1);
     const layPrev = sumWin(now - 2 * d90, now - d90);
-    const latestNotice = warn
-      .filter((w) => w.noticeDate)
-      .sort((a, b) => (b.noticeDate || "").localeCompare(a.noticeDate || ""))[0]?.noticeDate;
-    const layoffCard = {
-      label: "⚠ Layoff Alerts — 90 Days",
-      value: `${layNow.toLocaleString()} workers`,
-      date: latestNotice ? `latest notice ${latestNotice}` : "",
-      chg: layPrev > 0 ? ((layNow - layPrev) / layPrev) * 100 : null,
-      chgLabel: "% vs prior 90 days",
-      invert: true,
-    };
-    // Anomaly card 2 — permits vs their own baseline: latest month against
-    // the trailing 12-month average (surge/slump signal for AZ growth).
-    const permitObs = obs
-      .filter((o) => o.seriesId === "AZBPPRIV" && o.value !== null)
+    if (layPrev > 0) {
+      const chg = ((layNow - layPrev) / layPrev) * 100;
+      cands.push({
+        score: Math.abs(chg),
+        headline: `Layoffs ${chg >= 0 ? "▲" : "▼"}${Math.abs(Math.round(chg))}%`,
+        detail: `${layNow.toLocaleString()} workers in 90 days vs ${layPrev.toLocaleString()} prior · WARN`,
+      });
+    }
+    if (permitChg !== null && pLast && avg12) {
+      cands.push({
+        score: Math.abs(permitChg),
+        headline: `Permits ${permitChg >= 0 ? "▲" : "▼"}${Math.abs(Math.round(permitChg))}%`,
+        detail: `${Math.round(pLast.value || 0).toLocaleString()} permits in ${pLast.obsDate.slice(0, 7)} vs ${Math.round(avg12).toLocaleString()} 1-yr avg · FRED`,
+      });
+    }
+    const dodObs = obs
+      .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.value !== null)
       .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
-    const pLast = permitObs[permitObs.length - 1];
-    const prior12 = permitObs.slice(-13, -1);
-    const avg12 =
-      prior12.length >= 6
-        ? prior12.reduce((s, o) => s + (o.value || 0), 0) / prior12.length
-        : null;
-    const permitCard =
-      pLast && avg12
-        ? {
-            label: "AZ Building Permits",
-            value: Math.round(pLast.value || 0).toLocaleString(),
-            date: pLast.obsDate,
-            chg: ((pLast.value || 0) - avg12) / avg12 * 100,
-            chgLabel: "% vs 1-yr avg",
-            invert: false,
-          }
-        : null;
-    return [
-      unempCard,
-      card("AZMFG", "AZ Manufacturing Jobs", (v) => `${Math.round(v)}k`),
-      layoffCard,
-      permitCard,
-    ].filter(Boolean) as {
+    const dodLast = dodObs[dodObs.length - 1];
+    const dodPrior = dodObs.slice(-13, -1);
+    if (dodLast && dodPrior.length >= 6) {
+      const dodAvg = dodPrior.reduce((s, o) => s + (o.value || 0), 0) / dodPrior.length;
+      if (dodAvg > 0) {
+        const chg = (((dodLast.value || 0) - dodAvg) / dodAvg) * 100;
+        cands.push({
+          score: Math.abs(chg),
+          headline: `Defense $ ${chg >= 0 ? "▲" : "▼"}${Math.abs(Math.round(chg))}%`,
+          detail: `$${Math.round((dodLast.value || 0) / 1e6)}M in ${dodLast.obsDate.slice(0, 7)} vs $${Math.round(dodAvg / 1e6)}M avg/mo · USASpending`,
+        });
+      }
+    }
+    const urObs = obs
+      .filter((o) => o.seriesId === "AZUR" && o.value !== null)
+      .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+    const urLast = urObs[urObs.length - 1];
+    const urPrev = urObs[urObs.length - 4];
+    if (urLast && urPrev) {
+      const dpp = (urLast.value || 0) - (urPrev.value || 0);
+      if (Math.abs(dpp) >= 0.2) {
+        cands.push({
+          score: Math.abs(dpp) * 30,
+          headline: `Jobless ${dpp >= 0 ? "▲" : "▼"}${Math.abs(dpp).toFixed(1)}pp`,
+          detail: `AZ unemployment ${urLast.value}% vs ${urPrev.value}% three months ago · BLS`,
+        });
+      }
+    }
+    const bkCutoff = new Date(now - 30 * 864e5).toISOString().slice(0, 10);
+    const bk = acquisitions.filter(
+      (a) => a.eventType === "bankruptcy" && a.status !== "dismissed" && a.announcedDate >= bkCutoff
+    );
+    if (bk.length >= 2) {
+      cands.push({
+        score: bk.length * 12,
+        headline: `${bk.length} bankruptcies / 30 days`,
+        detail: bk.slice(0, 3).map((a) => a.target).join(" · "),
+      });
+    }
+    cands.sort((a, b) => b.score - a.score);
+    const anomalyCard = cands[0]
+      ? {
+          label: "🔎 Top Anomaly",
+          value: cands[0].headline,
+          date: cands[0].detail,
+          chg: null,
+          chgLabel: undefined,
+          invert: false,
+        }
+      : null;
+    return [unempCard, mfgCard, permitCard, anomalyCard].filter(Boolean) as {
       label: string;
       value: string;
       date: string;
@@ -490,7 +555,7 @@ export default function MarketIntelPage() {
       chgLabel?: string;
       invert?: boolean;
     }[];
-  }, [latest, obs, warn]);
+  }, [latest, obs, warn, acquisitions]);
 
   const setStatus = async (kind: "acquisitions" | "filings", id: string, status: string) => {
     await fetch(`/api/market/${kind}`, {
@@ -526,6 +591,11 @@ export default function MarketIntelPage() {
       .slice(0, n);
   const policyEvents = recentEvents((a) => a.eventType === "policy");
   const expansionEvents = recentEvents((a) => a.eventType === "expansion" || a.eventType === "relocation");
+  const acqEvents = recentEvents((a) => a.eventType === "acquisition");
+  const demoEvents = recentEvents((a) =>
+    ["relocation", "expansion", "investment", "policy"].includes(a.eventType)
+  );
+  const allEvents = recentEvents(() => true);
   const industryEvents = (industry: string) => recentEvents((a) => a.industry === industry);
 
   const healthRows = useMemo(
@@ -800,29 +870,6 @@ export default function MarketIntelPage() {
           )}
         </div>
 
-        {/* Top permit counties (U of A EBRC, latest month) */}
-        {countyPermits.length >= 3 && (
-          <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-[#b8975a]/40 bg-[#b8975a]/5 px-4 py-3 dark:bg-[#b8975a]/10">
-            <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">
-              🏠 Top permit counties
-              <span className="ml-2 text-xs font-medium text-slate-500 dark:text-white/50">
-                {fmtMonth(permitMonth)} · housing permits issued
-              </span>
-            </p>
-            {countyPermits.slice(0, 3).map((c, i) => (
-              <p key={c.name} className="text-sm text-slate-700 dark:text-white/80">
-                <span className="font-bold text-[#8a6f3c] dark:text-[#d4b37a]">{i + 1}. {c.name}</span>{" "}
-                <span className="font-semibold text-[#0d1f3c] dark:text-white">{c.value.toLocaleString()}</span>
-                {c.yoy !== null && (
-                  <span className={c.yoy >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
-                    {" "}{c.yoy >= 0 ? "▲" : "▼"} {Math.abs(c.yoy).toFixed(0)}% YoY
-                  </span>
-                )}
-              </p>
-            ))}
-            <p className="text-xs text-slate-400 dark:text-white/40">Source: U.S. Census Bureau via U of A EBRC</p>
-          </div>
-        )}
 
         {/* Major-event headlines */}
         {headlines.length > 0 && (
@@ -899,6 +946,7 @@ export default function MarketIntelPage() {
 
         {/* Sections — organized by data type; charts summarize, tables hold source data */}
         <Section title="Market Multiples" sub="Median deal multiples by industry and deal size — the valuation yardstick">
+          <EventStrip items={acqEvents} onDismiss={dismissEvent} />
 <div className={`${chartCard} lg:col-span-2`}>
           <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Market Multiples by Industry</h3>
@@ -947,6 +995,7 @@ export default function MarketIntelPage() {
 
         <Section title="Arizona Economic Data" sub="State-level indicators, budget, demographics, and permitting">
           <SubSection title="Economic Indicators">
+            <EventStrip items={allEvents} onDismiss={dismissEvent} />
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Unemployment — AZ vs US</h3>
@@ -1031,6 +1080,7 @@ export default function MarketIntelPage() {
           </SubSection>
 
           <SubSection title="State Revenue & Spending">
+            <EventStrip items={policyEvents} onDismiss={dismissEvent} />
 <div className={chartCard}>
           <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Revenue vs Spending</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
@@ -1129,30 +1179,44 @@ export default function MarketIntelPage() {
           )}
         </div>
           {(() => {
-            const l = latest["AZ_DOD_CONTRACTS"];
-            if (!l || l.value === null) return null;
-            const chg = yoyChange(obs, "AZ_DOD_CONTRACTS");
+            const dod = obs
+              .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.value !== null)
+              .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+            if (dod.length === 0) return null;
+            const lastYear = dod[dod.length - 1].obsDate.slice(0, 4);
+            const prevYear = String(Number(lastYear) - 1);
+            const cur = dod.filter((o) => o.obsDate.startsWith(lastYear));
+            const months = new Set(cur.map((o) => o.obsDate.slice(5, 7)));
+            const prev = dod.filter(
+              (o) => o.obsDate.startsWith(prevYear) && months.has(o.obsDate.slice(5, 7))
+            );
+            const ytd = cur.reduce((s, o) => s + (o.value || 0), 0);
+            const ytdPrev = prev.reduce((s, o) => s + (o.value || 0), 0);
+            const chg = ytdPrev > 0 ? ((ytd - ytdPrev) / ytdPrev) * 100 : null;
+            const fmt$ = (v: number) =>
+              v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : `$${Math.round(v / 1e6)}M`;
+            const thru = cur[cur.length - 1].obsDate.slice(0, 7);
             return (
               <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-[#132847]/60">
                 <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">🛡 AZ Defense Contracts</p>
                 <p className="text-sm text-slate-600 dark:text-white/70">
-                  <b>${Math.round(l.value / 1e6)}M</b>/mo · {l.obsDate}
+                  <b>{fmt$(ytd)} YTD</b> ({lastYear} through {thru})
                   {chg !== null && (
                     <span className={chg >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
-                      {" "}{chg >= 0 ? "▲" : "▼"} {Math.abs(chg).toFixed(1)}% YoY
+                      {" "}{chg >= 0 ? "▲" : "▼"} {Math.abs(chg).toFixed(1)}% vs same period {prevYear} ({fmt$(ytdPrev)})
                     </span>
                   )}
                 </p>
                 <p className="text-xs text-slate-400 dark:text-white/40">
-                  Federal contract obligations in Arizona (USASpending) · full chart under Industry → Aerospace &amp; Defense.
+                  Federal contract obligations in Arizona (USASpending) · full chart under Industries → Aerospace &amp; Defense.
                 </p>
               </div>
             );
           })()}
-            <EventStrip items={policyEvents} onDismiss={dismissEvent} />
           </SubSection>
 
           <SubSection title="Demographics">
+            <EventStrip items={demoEvents} onDismiss={dismissEvent} />
 <div className={`${chartCard} lg:col-span-2`}>
           <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Valley Demographics — Maricopa County</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
@@ -1163,6 +1227,30 @@ export default function MarketIntelPage() {
           </SubSection>
 
           <SubSection title="Permitting & Licensing">
+            <EventStrip items={expansionEvents} onDismiss={dismissEvent} />
+            {/* Top permit counties (U of A EBRC, latest month) */}
+            {countyPermits.length >= 3 && (
+              <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-[#b8975a]/40 bg-[#b8975a]/5 px-4 py-3 dark:bg-[#b8975a]/10">
+                <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">
+                  🏠 Top permit counties
+                  <span className="ml-2 text-xs font-medium text-slate-500 dark:text-white/50">
+                    {fmtMonth(permitMonth)} · housing permits issued
+                  </span>
+                </p>
+                {countyPermits.slice(0, 3).map((c, i) => (
+                  <p key={c.name} className="text-sm text-slate-700 dark:text-white/80">
+                    <span className="font-bold text-[#8a6f3c] dark:text-[#d4b37a]">{i + 1}. {c.name}</span>{" "}
+                    <span className="font-semibold text-[#0d1f3c] dark:text-white">{c.value.toLocaleString()}</span>
+                    {c.yoy !== null && (
+                      <span className={c.yoy >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                        {" "}{c.yoy >= 0 ? "▲" : "▼"} {Math.abs(c.yoy).toFixed(0)}% YoY
+                      </span>
+                    )}
+                  </p>
+                ))}
+                <p className="text-xs text-slate-400 dark:text-white/40">Source: U.S. Census Bureau via U of A EBRC</p>
+              </div>
+            )}
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Housing Permits</h3>
@@ -1257,12 +1345,51 @@ export default function MarketIntelPage() {
                 </div>
               </div>
             </div>
-            <EventStrip items={expansionEvents} onDismiss={dismissEvent} />
+          </SubSection>
+          <SubSection title="Layoffs & WARN Notices">
+          <div className="mb-4 grid gap-4 lg:grid-cols-2">
+<div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Layoff Notices (WARN)</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Workers affected per month · 5-yr</p>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={warnMonthly} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Bar dataKey="workers" name="Workers affected" fill={orange} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          </div>
+<div className={tableWrap}>
+            <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+              <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                <th className={th}>Employer</th><th className={th}>Industry</th><th className={th}>Location</th><th className={th}>Affected</th><th className={th}>Notice date</th>
+              </tr></thead>
+              <tbody>
+                {warn.map((w) => (
+                  <tr key={w.id} className="border-b border-slate-100 dark:border-white/5">
+                    <td className={`${td} font-medium`}>{w.employer}</td>
+                    <td className={td}>{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
+                    <td className={td}>{w.location}</td>
+                    <td className={td}>{w.headcount ?? "—"}</td>
+                    <td className={td}>{w.noticeDate ? fmtDate(w.noticeDate) : "—"}</td>
+                  </tr>
+                ))}
+                {warn.length === 0 && <tr><td className={td} colSpan={5}>No WARN notices loaded yet.</td></tr>}
+              </tbody>
+            </table>
+            <p className="px-3 py-2 text-xs text-slate-400 dark:text-white/30">Layoffs often precede sales — worth a look when a target-industry employer appears. Source: WARN Act notices dataset.</p>
+          </div>
           </SubSection>
         </Section>
 
-        <Section title="Industry" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades">
+        <Section title="Industries" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades">
           <SubSection title="Aerospace & Defense">
+            <EventStrip items={industryEvents("Aerospace & Defense")} onDismiss={dismissEvent} />
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
@@ -1303,10 +1430,10 @@ export default function MarketIntelPage() {
             </div>
           </div>
             </div>
-            <EventStrip items={industryEvents("Aerospace & Defense")} onDismiss={dismissEvent} />
           </SubSection>
 
           <SubSection title="Healthcare">
+            <EventStrip items={industryEvents("Healthcare")} onDismiss={dismissEvent} />
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Healthcare Employment — AZ</h3>
@@ -1324,10 +1451,10 @@ export default function MarketIntelPage() {
             </div>
           </div>
             </div>
-            <EventStrip items={industryEvents("Healthcare")} onDismiss={dismissEvent} />
           </SubSection>
 
           <SubSection title="Advanced Manufacturing">
+            <EventStrip items={industryEvents("Advanced Manufacturing")} onDismiss={dismissEvent} />
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Manufacturing Employment — AZ</h3>
@@ -1345,10 +1472,10 @@ export default function MarketIntelPage() {
             </div>
           </div>
             </div>
-            <EventStrip items={industryEvents("Advanced Manufacturing")} onDismiss={dismissEvent} />
           </SubSection>
 
           <SubSection title="Specialty Trades & Construction">
+            <EventStrip items={industryEvents("Specialty Trades & Construction")} onDismiss={dismissEvent} />
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Construction Employment — AZ</h3>
@@ -1366,49 +1493,9 @@ export default function MarketIntelPage() {
             </div>
           </div>
             </div>
-            <EventStrip items={industryEvents("Specialty Trades & Construction")} onDismiss={dismissEvent} />
           </SubSection>
         </Section>
 
-        <Section title="Layoffs & WARN Notices" sub="Announced layoffs — often precede sales">
-          <div className="mb-4 grid gap-4 lg:grid-cols-2">
-<div className={chartCard}>
-            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Layoff Notices (WARN)</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Workers affected per month · 5-yr</p>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={warnMonthly} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
-                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
-                  <YAxis tick={{ fontSize: 11, fill: tick }} />
-                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
-                  <Bar dataKey="workers" name="Workers affected" fill={orange} radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-          </div>
-<div className={tableWrap}>
-            <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
-              <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                <th className={th}>Employer</th><th className={th}>Industry</th><th className={th}>Location</th><th className={th}>Affected</th><th className={th}>Notice date</th>
-              </tr></thead>
-              <tbody>
-                {warn.map((w) => (
-                  <tr key={w.id} className="border-b border-slate-100 dark:border-white/5">
-                    <td className={`${td} font-medium`}>{w.employer}</td>
-                    <td className={td}>{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
-                    <td className={td}>{w.location}</td>
-                    <td className={td}>{w.headcount ?? "—"}</td>
-                    <td className={td}>{w.noticeDate ? fmtDate(w.noticeDate) : "—"}</td>
-                  </tr>
-                ))}
-                {warn.length === 0 && <tr><td className={td} colSpan={5}>No WARN notices loaded yet.</td></tr>}
-              </tbody>
-            </table>
-            <p className="px-3 py-2 text-xs text-slate-400 dark:text-white/30">Layoffs often precede sales — worth a look when a target-industry employer appears. Source: WARN Act notices dataset.</p>
-          </div>
-        </Section>
 
         <Section title="Deals & Filings" sub="AZ acquisitions and SEC filings · last 7 days only">
           <div>
