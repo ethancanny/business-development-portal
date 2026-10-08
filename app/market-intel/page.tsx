@@ -65,6 +65,11 @@ function indexRows(rows: { date: string; [k: string]: string | number | null }[]
   });
 }
 
+/** Keep only rows within the trailing 5-year window so every chart starts at the same date. */
+function filterSince<T extends { date: string }>(rows: T[], cutoff: string): T[] {
+  return rows.filter((r) => r.date >= cutoff);
+}
+
 function yoyChange(obs: MiIndicatorObs[], seriesId: string): number | null {
   const s = obs.filter((o) => o.seriesId === seriesId && o.value !== null).sort((a, b) => (a.obsDate < b.obsDate ? -1 : 1));
   if (s.length < 13) return null;
@@ -103,11 +108,11 @@ export default function MarketIntelPage() {
         const [latestData, obsData, acq, fil, warnData, mult, log] = await Promise.all([
           getJSON<LatestMap>("/api/market/latest"),
           getJSON<MiIndicatorObs[]>(
-            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS"
+            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO"
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
-          getJSON<MiWarnNotice[]>("/api/market/warn?limit=50"),
+          getJSON<MiWarnNotice[]>("/api/market/warn?limit=500"),
           getJSON<MiMultiple[]>("/api/market/multiples"),
           getJSON<MiSyncLog[]>("/api/market/sync-log"),
         ]);
@@ -134,49 +139,88 @@ export default function MarketIntelPage() {
   const green = "#6abf8b";
   const orange = "#e07856";
 
+  const fiveYearCutoff = useMemo(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 5);
+    return d.toISOString().slice(0, 10);
+  }, []);
+
   const unempRows = useMemo(
-    () => seriesToRows(obs.filter((o) => ["AZUR", "UNRATE"].includes(o.seriesId)), ["AZUR", "UNRATE"]).slice(-60),
-    [obs]
+    () => filterSince(seriesToRows(obs.filter((o) => ["AZUR", "UNRATE"].includes(o.seriesId)), ["AZUR", "UNRATE"]), fiveYearCutoff),
+    [obs, fiveYearCutoff]
   );
   const empRows = useMemo(
     () =>
       indexRows(
-        seriesToRows(
-          obs.filter((o) => ["AZMFG", "AZCONS", "SMS04000006562000001"].includes(o.seriesId)),
-          ["AZMFG", "AZCONS", "SMS04000006562000001"]
-        ).slice(-60),
+        filterSince(
+          seriesToRows(
+            obs.filter((o) => ["AZMFG", "AZCONS", "SMS04000006562000001"].includes(o.seriesId)),
+            ["AZMFG", "AZCONS", "SMS04000006562000001"]
+          ),
+          fiveYearCutoff
+        ),
         ["AZMFG", "AZCONS", "SMS04000006562000001"]
       ),
-    [obs]
+    [obs, fiveYearCutoff]
   );
   const permitRows = useMemo(
-    () => seriesToRows(obs.filter((o) => o.seriesId === "AZBPPRIV"), ["AZBPPRIV"]).slice(-36),
-    [obs]
+    () => filterSince(seriesToRows(obs.filter((o) => o.seriesId === "AZBPPRIV"), ["AZBPPRIV"]), fiveYearCutoff),
+    [obs, fiveYearCutoff]
   );
   const hpiRows = useMemo(
     () =>
       indexRows(
-        seriesToRows(
-          obs.filter((o) => ["AZSTHPI", "USSTHPI"].includes(o.seriesId)),
-          ["AZSTHPI", "USSTHPI"]
-        ).slice(-40),
+        filterSince(
+          seriesToRows(
+            obs.filter((o) => ["AZSTHPI", "USSTHPI"].includes(o.seriesId)),
+            ["AZSTHPI", "USSTHPI"]
+          ),
+          fiveYearCutoff
+        ),
         ["AZSTHPI", "USSTHPI"]
       ),
-    [obs]
+    [obs, fiveYearCutoff]
   );
 
   const defenseRows = useMemo(() => {
-    const rows = seriesToRows(
-      obs.filter((o) => ["AZ_DOD_CONTRACTS", "AZ_AEROSPACE_CONTRACTS"].includes(o.seriesId)),
-      ["AZ_DOD_CONTRACTS", "AZ_AEROSPACE_CONTRACTS"]
-    ).slice(-24);
+    const rows = filterSince(
+      seriesToRows(
+        obs.filter((o) => ["AZ_DOD_CONTRACTS", "AZ_AEROSPACE_CONTRACTS"].includes(o.seriesId)),
+        ["AZ_DOD_CONTRACTS", "AZ_AEROSPACE_CONTRACTS"]
+      ),
+      fiveYearCutoff
+    );
     // display in $M
     return rows.map((r) => ({
       date: r.date,
       AZ_DOD_CONTRACTS: typeof r.AZ_DOD_CONTRACTS === "number" ? Math.round(r.AZ_DOD_CONTRACTS / 1e6) : null,
       AZ_AEROSPACE_CONTRACTS: typeof r.AZ_AEROSPACE_CONTRACTS === "number" ? Math.round(r.AZ_AEROSPACE_CONTRACTS / 1e6) : null,
     }));
-  }, [obs]);
+  }, [obs, fiveYearCutoff]);
+
+  const warnMonthly = useMemo(() => {
+    const byMonth = new Map<string, number>();
+    for (const w of warn) {
+      if (!w.noticeDate || !w.headcount || w.noticeDate < fiveYearCutoff) continue;
+      const m = `${w.noticeDate.slice(0, 7)}-01`;
+      byMonth.set(m, (byMonth.get(m) || 0) + w.headcount);
+    }
+    return Array.from(byMonth.entries())
+      .map(([date, workers]) => ({ date, workers }))
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+  }, [warn, fiveYearCutoff]);
+
+  const budgetRows = useMemo(() => {
+    const rows = filterSince(
+      seriesToRows(obs.filter((o) => o.seriesId === "QTAXTOTALQTAXCAT3AZNO"), ["QTAXTOTALQTAXCAT3AZNO"]),
+      fiveYearCutoff
+    );
+    // series is in $M; display in $B
+    return rows.map((r) => ({
+      date: r.date,
+      taxB: typeof r.QTAXTOTALQTAXCAT3AZNO === "number" ? Math.round(r.QTAXTOTALQTAXCAT3AZNO / 100) / 10 : null,
+    }));
+  }, [obs, fiveYearCutoff]);
 
   const statCards = useMemo(() => {
     const card = (id: string, label: string, format: (v: number) => string) => {
@@ -339,24 +383,37 @@ export default function MarketIntelPage() {
         {headlines.length > 0 && (
           <div className="mb-6">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[#0d1f3c] dark:text-white">
-              Major events <span className="ml-1 rounded-full bg-red-500/15 px-2 py-0.5 text-xs normal-case text-red-700 dark:text-red-400">AZ headlines</span>
+              Major events <span className="ml-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-xs normal-case text-slate-600 dark:text-white/60">AZ headlines</span>
             </h2>
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-              {headlines.map((h) => (
-                <a
-                  key={h.id}
-                  href={h.url || undefined}
-                  target={h.url ? "_blank" : undefined}
-                  rel="noreferrer"
-                  className="rounded-xl border border-red-200 bg-red-50/60 p-4 transition hover:shadow-md dark:border-red-500/25 dark:bg-red-500/10"
-                >
-                  <p className="text-xs font-semibold uppercase tracking-wider text-red-700 dark:text-red-400">{h.kind}</p>
-                  <p className="mt-1 text-base font-bold text-[#0d1f3c] dark:text-white">{h.title}</p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-white/50">
-                    {h.detail}{h.date ? ` · ${fmtDate(h.date)}` : ""}
-                  </p>
-                </a>
-              ))}
+              {headlines.map((h) => {
+                const isBankruptcy = h.kind === "Bankruptcy" || h.kind === "8-K Bankruptcy";
+                const style = isBankruptcy
+                  ? "border-red-200 bg-red-50/60 dark:border-red-500/25 dark:bg-red-500/10"
+                  : h.kind === "Acquisition"
+                    ? "border-emerald-200 bg-emerald-50/60 dark:border-emerald-500/25 dark:bg-emerald-500/10"
+                    : "border-amber-200 bg-amber-50/60 dark:border-amber-500/25 dark:bg-amber-500/10";
+                const label = isBankruptcy
+                  ? "text-red-700 dark:text-red-400"
+                  : h.kind === "Acquisition"
+                    ? "text-emerald-700 dark:text-emerald-400"
+                    : "text-amber-700 dark:text-amber-400";
+                return (
+                  <a
+                    key={h.id}
+                    href={h.url || undefined}
+                    target={h.url ? "_blank" : undefined}
+                    rel="noreferrer"
+                    className={`rounded-xl border p-4 transition hover:shadow-md ${style}`}
+                  >
+                    <p className={`text-xs font-semibold uppercase tracking-wider ${label}`}>{h.kind}</p>
+                    <p className="mt-1 text-base font-bold text-[#0d1f3c] dark:text-white">{h.title}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-white/50">
+                      {h.detail}{h.date ? ` · ${fmtDate(h.date)}` : ""}
+                    </p>
+                  </a>
+                );
+              })}
             </div>
           </div>
         )}
@@ -365,7 +422,7 @@ export default function MarketIntelPage() {
         <div className="mb-6 grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Unemployment — AZ vs US</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly, %, FRED</p>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly, %, FRED · 5-yr</p>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={unempRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
@@ -386,7 +443,7 @@ export default function MarketIntelPage() {
 
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Employment by Sector</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED</p>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={empRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
@@ -405,7 +462,7 @@ export default function MarketIntelPage() {
 
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Housing Permits</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">New private units authorized, monthly, FRED</p>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">New private units authorized, monthly, FRED · 5-yr</p>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={permitRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
@@ -421,7 +478,7 @@ export default function MarketIntelPage() {
 
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">House Prices — AZ vs US</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">FHFA index, indexed to 100, quarterly, FRED</p>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">FHFA index, indexed to 100, quarterly, FRED · 5-yr</p>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={hpiRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
@@ -439,7 +496,7 @@ export default function MarketIntelPage() {
 
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly obligations, $M, USASpending.gov</p>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly obligations, $M, USASpending.gov · 5-yr</p>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={defenseRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
@@ -454,6 +511,43 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
+
+          <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Layoff Notices (WARN)</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Workers affected per month · 5-yr</p>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={warnMonthly} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Bar dataKey="workers" name="Workers affected" fill={orange} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        {/* State budget — full width */}
+        <div className={`${chartCard} lg:col-span-2`}>
+          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona State Budget — Tax Collections</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+            Quarterly state tax revenue (the revenue side of the budget), $B, Census via FRED · 5-yr. Seasonal Q2 spikes are income-tax filing season.
+          </p>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={budgetRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
+                <YAxis tick={{ fontSize: 11, fill: tick }} />
+                <Tooltip
+                  contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                  formatter={(v) => [`$${v}B`, "Tax collections"]}
+                />
+                <Bar dataKey="taxB" name="Tax collections" fill={gold} radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
         {/* Market multiples — full width */}
         <div className={`${chartCard} lg:col-span-2`}>
           <div className="mb-1 flex flex-wrap items-center justify-between gap-2">

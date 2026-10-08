@@ -39,6 +39,7 @@ const FRED_SERIES: { id: string; title: string }[] = [
   { id: "AZPBSV", title: "Arizona Professional & Business Services Employment" },
   { id: "SMS04000006562000001", title: "Arizona Health Care & Social Assistance Employment" },
   { id: "CEU6500000001", title: "US Education & Health Services Employment" },
+  { id: "QTAXTOTALQTAXCAT3AZNO", title: "Arizona State Tax Collections (Quarterly)" },
 ];
 
 interface FredObsResponse {
