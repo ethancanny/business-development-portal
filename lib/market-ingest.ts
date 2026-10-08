@@ -679,6 +679,75 @@ export async function ingestCensus(): Promise<number> {
   return total;
 }
 
+/** Arizona state government revenue & expenditure from the Census Annual Survey
+ *  of State Government Finances (timeseries/govsstatefin, 2012+). Requires CENSUS_KEY. */
+export async function ingestCensusStateFin(): Promise<number> {
+  const key = process.env.CENSUS_KEY;
+  if (!key) {
+    await logSync("census-fin", "skipped", 0, "CENSUS_KEY not set");
+    return 0;
+  }
+  try {
+    const url =
+      `https://api.census.gov/data/timeseries/govsstatefin?get=YEAR,AGG_DESC,AMOUNT&for=state:04&key=${key}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      await logSync("census-fin", "error", 0, `HTTP ${res.status}`);
+      return 0;
+    }
+    const data = (await res.json()) as string[][];
+    if (!Array.isArray(data) || data.length < 2) {
+      await logSync("census-fin", "error", 0, "empty response");
+      return 0;
+    }
+    const headers = data[0];
+    const iYear = headers.indexOf("YEAR");
+    const iDesc = headers.indexOf("AGG_DESC");
+    const iAmt = headers.indexOf("AMOUNT");
+    const seen = new Set<string>();
+    const rows: IndicatorInput[] = [];
+    for (const r of data.slice(1)) {
+      const desc = (r[iDesc] || "").trim();
+      seen.add(desc);
+      const dl = desc.toLowerCase();
+      let seriesId: string | null = null;
+      let title = "";
+      if (dl === "total revenue") {
+        seriesId = "AZ_STATE_REVENUE";
+        title = "Arizona State Government Total Revenue (Census)";
+      } else if (dl === "total expenditure" || dl === "total expenditures") {
+        seriesId = "AZ_STATE_EXPENDITURE";
+        title = "Arizona State Government Total Expenditure (Census)";
+      }
+      if (!seriesId) continue;
+      const amt = Number((r[iAmt] || "").replace(/,/g, ""));
+      if (!Number.isFinite(amt)) continue;
+      rows.push({
+        source: "census" as MiIndicatorSource,
+        seriesId,
+        title,
+        units: "Thousands of dollars",
+        frequency: "Annual",
+        obsDate: `${r[iYear]}-01-01`,
+        value: amt,
+      });
+    }
+    const total = await upsertIndicatorObs(rows);
+    await logSync(
+      "census-fin",
+      total > 0 ? "ok" : "error",
+      total,
+      total > 0
+        ? `Census state finance: revenue & expenditure (${rows.length} obs)`
+        : `No total revenue/expenditure aggregates found. Seen: ${Array.from(seen).slice(0, 12).join(" | ")}`
+    );
+    return total;
+  } catch (err) {
+    await logSync("census-fin", "error", 0, err instanceof Error ? err.message : String(err));
+    return 0;
+  }
+}
+
 /* ---------------- Orchestrator ---------------- */
 
 export type IngestSource = "indicators" | "filings" | "news" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "all";
@@ -695,6 +764,7 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["multiples", ingestMultiples],
     ["defense", ingestDefenseContracts],
     ["census", ingestCensus],
+    ["census", ingestCensusStateFin],
   ];
   for (const [name, fn] of jobs) {
     if (source !== "all" && source !== name) continue;

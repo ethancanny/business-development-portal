@@ -108,7 +108,7 @@ export default function MarketIntelPage() {
         const [latestData, obsData, acq, fil, warnData, mult, log] = await Promise.all([
           getJSON<LatestMap>("/api/market/latest"),
           getJSON<MiIndicatorObs[]>(
-            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO"
+            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE"
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
@@ -212,13 +212,17 @@ export default function MarketIntelPage() {
 
   const budgetRows = useMemo(() => {
     const rows = filterSince(
-      seriesToRows(obs.filter((o) => o.seriesId === "QTAXTOTALQTAXCAT3AZNO"), ["QTAXTOTALQTAXCAT3AZNO"]),
+      seriesToRows(
+        obs.filter((o) => ["AZ_STATE_REVENUE", "AZ_STATE_EXPENDITURE"].includes(o.seriesId)),
+        ["AZ_STATE_REVENUE", "AZ_STATE_EXPENDITURE"]
+      ),
       fiveYearCutoff
     );
-    // series is in $M; display in $B
+    // series are in $000s; display in $B
     return rows.map((r) => ({
-      date: r.date,
-      taxB: typeof r.QTAXTOTALQTAXCAT3AZNO === "number" ? Math.round(r.QTAXTOTALQTAXCAT3AZNO / 100) / 10 : null,
+      date: r.date.slice(0, 4),
+      Revenue: typeof r.AZ_STATE_REVENUE === "number" ? Math.round(r.AZ_STATE_REVENUE / 1e5) / 10 : null,
+      Spending: typeof r.AZ_STATE_EXPENDITURE === "number" ? Math.round(r.AZ_STATE_EXPENDITURE / 1e5) / 10 : null,
     }));
   }, [obs, fiveYearCutoff]);
 
@@ -529,21 +533,23 @@ export default function MarketIntelPage() {
           </div>
         {/* State budget — full width */}
         <div className={`${chartCard} lg:col-span-2`}>
-          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona State Budget — Tax Collections</h3>
+          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona State Budget — Revenue vs Spending</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-            Quarterly state tax revenue (the revenue side of the budget), $B, Census via FRED · 5-yr. Seasonal Q2 spikes are income-tax filing season.
+            Annual, $B, Census Annual Survey of State Government Finances · 5-yr. Census notes the gap isn&apos;t a formal surplus/deficit, but it shows the fiscal trend.
           </p>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={budgetRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
                 <CartesianGrid stroke={grid} strokeDasharray="3 3" />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} />
                 <YAxis tick={{ fontSize: 11, fill: tick }} />
                 <Tooltip
                   contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
-                  formatter={(v) => [`$${v}B`, "Tax collections"]}
+                  formatter={(v, name) => [`$${v}B`, name]}
                 />
-                <Bar dataKey="taxB" name="Tax collections" fill={gold} radius={[2, 2, 0, 0]} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="Revenue" fill={green} radius={[2, 2, 0, 0]} />
+                <Bar dataKey="Spending" fill={gold} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
