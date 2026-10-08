@@ -84,8 +84,39 @@ const shortDate = (d: string) => (d?.length >= 7 ? d.slice(0, 7) : d);
 
 /* ---------------- main page ---------------- */
 
-const TABS = ["acquisitions", "filings", "warn", "multiples"] as const;
+const TABS = ["acquisitions", "filings", "multiples"] as const;
 type Tab = (typeof TABS)[number];
+
+/** Collapsible section: charts summarize, source data lives inside. */
+function Section({
+  title,
+  sub,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  sub?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="mb-6">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 border-b-2 border-[#b8975a]/50 pb-2 text-left"
+      >
+        <span>
+          <span className="block text-lg font-bold text-[#0d1f3c] dark:text-white">{title}</span>
+          {sub && <span className="block text-xs text-slate-500 dark:text-white/40">{sub}</span>}
+        </span>
+        <span className="text-xl leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && <div className="pt-4">{children}</div>}
+    </section>
+  );
+}
 
 export default function MarketIntelPage() {
   const { theme } = useTheme();
@@ -116,7 +147,7 @@ export default function MarketIntelPage() {
         const [latestData, obsData, acq, fil, warnData, mult, log] = await Promise.all([
           getJSON<LatestMap>("/api/market/latest"),
           getJSON<MiIndicatorObs[]>(
-            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_TAXES,AZ_STATE_FEDERAL_AID"
+            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE"
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
@@ -219,26 +250,27 @@ export default function MarketIntelPage() {
   }, [warn, fiveYearCutoff]);
 
   const budgetRows = useMemo(() => {
-    const rows = filterSince(
-      seriesToRows(
-        obs.filter((o) => ["AZ_STATE_REVENUE", "AZ_STATE_TAXES", "AZ_STATE_FEDERAL_AID"].includes(o.seriesId)),
-        ["AZ_STATE_REVENUE", "AZ_STATE_TAXES", "AZ_STATE_FEDERAL_AID"]
-      ),
-      fiveYearCutoff
+    // Annual Census data (2017+) — show the full range, not the 5-yr window.
+    const rows = seriesToRows(
+      obs.filter((o) => ["AZ_STATE_REVENUE", "AZ_STATE_EXPENDITURE"].includes(o.seriesId)),
+      ["AZ_STATE_REVENUE", "AZ_STATE_EXPENDITURE"]
     );
     // series are in $000s; display in $B
     const toB = (v: unknown) => (typeof v === "number" ? Math.round(v / 1e5) / 10 : null);
     return rows.map((r) => {
-      const taxes = toB(r.AZ_STATE_TAXES);
-      const federal = toB(r.AZ_STATE_FEDERAL_AID);
-      const total = toB(r.AZ_STATE_REVENUE);
-      const other =
-        total !== null && taxes !== null && federal !== null
-          ? Math.round((total - taxes - federal) * 10) / 10
-          : null;
-      return { date: r.date.slice(0, 4), Taxes: taxes, "Federal aid": federal, Other: other };
+      const revenue = toB(r.AZ_STATE_REVENUE);
+      const spending = toB(r.AZ_STATE_EXPENDITURE);
+      return {
+        date: r.date.slice(0, 4),
+        Revenue: revenue,
+        Spending: spending,
+        Balance:
+          revenue !== null && spending !== null
+            ? Math.round((revenue - spending) * 10) / 10
+            : null,
+      };
     });
-  }, [obs, fiveYearCutoff]);
+  }, [obs]);
 
   const statCards = useMemo(() => {
     const card = (id: string, label: string, format: (v: number) => string) => {
@@ -366,7 +398,28 @@ export default function MarketIntelPage() {
         url: "",
       });
     }
-    return items.sort((x, y) => (y.date || "").localeCompare(x.date || "")).slice(0, 12);
+    // Dedupe: the same event is often ingested several times (multiple news
+    // queries/publishers). Collapse by normalized company + event kind,
+    // keeping the most recent instance.
+    const norm = (s: string) =>
+      s
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]/g, " ")
+        .replace(/\b(inc|llc|ltd|corp|corporation|co|company|the|group|holdings)\b/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    const seen = new Set<string>();
+    const deduped = items
+      .sort((x, y) => (y.date || "").localeCompare(x.date || ""))
+      .filter((it) => {
+        // Coarse category so the same bankruptcy via news + 8-K still collapses.
+        const cat = it.kind.toLowerCase().replace("8-k ", "").trim();
+        const key = `${cat}|${norm(it.title)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    return deduped.slice(0, 12);
   }, [acquisitions, filings, warn]);
 
   const chartCard = "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60";
@@ -455,9 +508,10 @@ export default function MarketIntelPage() {
           </div>
         )}
 
-        {/* Charts */}
-        <div className="mb-6 grid gap-4 lg:grid-cols-2">
-          <div className={chartCard}>
+        {/* Sections — organized by data type; charts summarize, tables hold source data */}
+        <Section title="General Economic Data" sub="Arizona vs US indicators · FRED" defaultOpen>
+          <div className="grid gap-4 lg:grid-cols-2">
+<div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Unemployment — AZ vs US</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly, %, FRED · 5-yr</p>
             <div className="h-64">
@@ -477,8 +531,7 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
-
-          <div className={chartCard}>
+<div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Employment by Sector</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
             <div className="h-64">
@@ -496,24 +549,7 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
-
-          <div className={chartCard}>
-            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Housing Permits</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">New private units authorized, monthly, FRED · 5-yr</p>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={permitRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
-                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
-                  <YAxis tick={{ fontSize: 11, fill: tick }} />
-                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
-                  <Line type="monotone" dataKey="AZBPPRIV" name="Permits" stroke={gold} strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className={chartCard}>
+<div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">House Prices — AZ vs US</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">FHFA index, indexed to 100, quarterly, FRED · 5-yr</p>
             <div className="h-64">
@@ -530,8 +566,131 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
-
           <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Latest Indicator Values</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Source data behind the charts · FRED</p>
+            <div className={tableWrap}>
+              <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                  <th className={th}>Indicator</th><th className={th}>Latest</th><th className={th}>As of</th>
+                </tr></thead>
+                <tbody>
+                  {["AZUR", "UNRATE", "AZMFG", "AZCONS", "SMS04000006562000001", "AZSTHPI", "USSTHPI", "PAYEMS"].map((id) => {
+                    const l = latest[id];
+                    if (!l) return null;
+                    return (
+                      <tr key={id} className="border-b border-slate-100 dark:border-white/5">
+                        <td className={td}>{l.title}</td>
+                        <td className={`${td} font-medium`}>{l.value !== null ? l.value.toLocaleString() : "—"}{l.units ? <span className="text-slate-400"> {l.units}</span> : ""}</td>
+                        <td className={td}>{l.obsDate ? fmtDate(l.obsDate) : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </div>
+        </Section>
+
+        <Section title="Arizona State Revenue & Spending" sub="Annual state budget · Census Bureau" defaultOpen>
+        <div className={chartCard}>
+          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Revenue vs Spending</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+            Annual, $B, Census Annual Survey of State &amp; Local Government Finances (state government only). Census notes the gap isn&apos;t a formal surplus/deficit, but it shows the fiscal trend.
+          </p>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={budgetRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} />
+                <YAxis tick={{ fontSize: 11, fill: tick }} />
+                <Tooltip
+                  contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                  formatter={(v, name) => [`$${v}B`, name]}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="Revenue" fill={green} radius={[2, 2, 0, 0]} />
+                <Bar dataKey="Spending" fill={gold} radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className={`${tableWrap} mt-4`}>
+            <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+              <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                <th className={th}>Year</th><th className={th}>Revenue</th><th className={th}>Spending</th><th className={th}>Balance</th>
+              </tr></thead>
+              <tbody>
+                {[...budgetRows].reverse().map((r) => (
+                  <tr key={r.date} className="border-b border-slate-100 dark:border-white/5">
+                    <td className={`${td} font-medium`}>{r.date}</td>
+                    <td className={td}>{r.Revenue !== null ? `$${r.Revenue}B` : "—"}</td>
+                    <td className={td}>{r.Spending !== null ? `$${r.Spending}B` : "—"}</td>
+                    <td className={`${td} ${r.Balance !== null && r.Balance < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      {r.Balance !== null ? `${r.Balance > 0 ? "+" : ""}$${r.Balance}B` : "—"}
+                    </td>
+                  </tr>
+                ))}
+                {budgetRows.length === 0 && <tr><td className={td} colSpan={4}>Budget data appears after the next ingest with CENSUS_KEY set.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        </Section>
+
+        <Section title="Demographics" sub="Maricopa County census tracts · Census ACS 5-year" defaultOpen>
+<div className={`${chartCard} lg:col-span-2`}>
+          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Valley Demographics — Maricopa County</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+            Census tract view of where age and wealth concentrate, plus population growth ’19–’23. Click any tract for details.
+          </p>
+          <ValleyDemographics />
+        </div>
+        </Section>
+
+        <Section title="Permitting & Licensing" sub="New housing units authorized · FRED">
+          <div className="grid gap-4 lg:grid-cols-2">
+<div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Housing Permits</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">New private units authorized, monthly, FRED · 5-yr</p>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={permitRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="AZBPPRIV" name="Permits" stroke={gold} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Permits — Recent Months</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Source data · FRED AZBPPRIV</p>
+            <div className={tableWrap}>
+              <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                  <th className={th}>Month</th><th className={th}>Units authorized</th>
+                </tr></thead>
+                <tbody>
+                  {[...permitRows].slice(-12).reverse().map((r) => (
+                    <tr key={r.date} className="border-b border-slate-100 dark:border-white/5">
+                      <td className={td}>{shortDate(r.date)}</td>
+                      <td className={`${td} font-medium`}>{typeof r.AZBPPRIV === "number" ? r.AZBPPRIV.toLocaleString() : "—"}</td>
+                    </tr>
+                  ))}
+                  {permitRows.length === 0 && <tr><td className={td} colSpan={2}>No permit data yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </div>
+        </Section>
+
+        <Section title="Defense & Aerospace" sub="Federal contract obligations in Arizona · USASpending.gov">
+          <div className="grid gap-4 lg:grid-cols-2">
+<div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly obligations, $M, USASpending.gov · 5-yr</p>
             <div className="h-64">
@@ -548,8 +707,33 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
-
           <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Contracts — Recent Months</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Source data · USASpending.gov, $M</p>
+            <div className={tableWrap}>
+              <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                  <th className={th}>Month</th><th className={th}>All DoD</th><th className={th}>Aerospace</th>
+                </tr></thead>
+                <tbody>
+                  {[...defenseRows].slice(-12).reverse().map((r) => (
+                    <tr key={r.date} className="border-b border-slate-100 dark:border-white/5">
+                      <td className={td}>{shortDate(r.date)}</td>
+                      <td className={`${td} font-medium`}>{typeof r.AZ_DOD_CONTRACTS === "number" ? `$${r.AZ_DOD_CONTRACTS.toLocaleString()}M` : "—"}</td>
+                      <td className={td}>{typeof r.AZ_AEROSPACE_CONTRACTS === "number" ? `$${r.AZ_AEROSPACE_CONTRACTS.toLocaleString()}M` : "—"}</td>
+                    </tr>
+                  ))}
+                  {defenseRows.length === 0 && <tr><td className={td} colSpan={3}>No contract data yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </div>
+        </Section>
+
+        <Section title="Layoffs & WARN Notices" sub="Announced layoffs — often precede sales">
+          <div className="mb-4 grid gap-4 lg:grid-cols-2">
+<div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Layoff Notices (WARN)</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Workers affected per month · 5-yr</p>
             <div className="h-64">
@@ -564,32 +748,31 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
-        {/* State budget — full width */}
-        <div className={`${chartCard} lg:col-span-2`}>
-          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona State Revenue</h3>
-          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-            Annual state government revenue by source, $B, Census Annual Survey of State Government Finances · 5-yr. The Census API doesn&apos;t publish a matching expenditure series.
-          </p>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={budgetRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
-                <CartesianGrid stroke={grid} strokeDasharray="3 3" />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} />
-                <YAxis tick={{ fontSize: 11, fill: tick }} />
-                <Tooltip
-                  contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
-                  formatter={(v, name) => [`$${v}B`, name]}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Taxes" stackId="rev" fill={gold} />
-                <Bar dataKey="Federal aid" stackId="rev" fill={blue} />
-                <Bar dataKey="Other" stackId="rev" fill={green} radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
           </div>
-        </div>
-        {/* Market multiples — full width */}
-        <div className={`${chartCard} lg:col-span-2`}>
+<div className={tableWrap}>
+            <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+              <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                <th className={th}>Employer</th><th className={th}>Industry</th><th className={th}>Location</th><th className={th}>Affected</th><th className={th}>Notice date</th>
+              </tr></thead>
+              <tbody>
+                {warn.map((w) => (
+                  <tr key={w.id} className="border-b border-slate-100 dark:border-white/5">
+                    <td className={`${td} font-medium`}>{w.employer}</td>
+                    <td className={td}>{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
+                    <td className={td}>{w.location}</td>
+                    <td className={td}>{w.headcount ?? "—"}</td>
+                    <td className={td}>{w.noticeDate ? fmtDate(w.noticeDate) : "—"}</td>
+                  </tr>
+                ))}
+                {warn.length === 0 && <tr><td className={td} colSpan={5}>No WARN notices loaded yet.</td></tr>}
+              </tbody>
+            </table>
+            <p className="px-3 py-2 text-xs text-slate-400 dark:text-white/30">Layoffs often precede sales — worth a look when a target-industry employer appears. Source: WARN Act notices dataset.</p>
+          </div>
+        </Section>
+
+        <Section title="Deals, Filings & Multiples" sub="AZ acquisitions, SEC filings, valuation multiples">
+<div className={`${chartCard} lg:col-span-2`}>
           <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Market Multiples by Industry</h3>
             <div className="flex flex-wrap gap-2">
@@ -630,22 +813,12 @@ export default function MarketIntelPage() {
             <p className="py-4 text-center text-sm text-slate-400">No {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} data for this size band yet.</p>
           )}
         </div>
-        </div>
-
-        {/* Valley demographics — full width */}
-        <div className={`${chartCard} lg:col-span-2`}>
-          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Valley Demographics — Maricopa County</h3>
-          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-            Census tract view of where age and wealth concentrate, plus population growth ’19–’23. Click any tract for details.
-          </p>
-          <ValleyDemographics />
-        </div>
-
-        {/* Tabs */}
+          <div className="mt-4">
+{/* Tabs */}
         <div className="mb-4 flex flex-wrap gap-2">
           {(TABS as readonly string[]).map((t) => (
             <button key={t} onClick={() => setTab(t as Tab)} className={tabBtn(tab === t)}>
-              {t === "acquisitions" ? "Acquisitions" : t === "filings" ? "Filings" : t === "warn" ? "WARN Notices" : "Multiples"}
+              {t === "acquisitions" ? "Acquisitions" : t === "filings" ? "Filings" : "Multiples"}
             </button>
           ))}
         </div>
@@ -718,32 +891,11 @@ export default function MarketIntelPage() {
           </div>
         )}
 
-        {tab === "warn" && (
-          <div className={tableWrap}>
-            <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
-              <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                <th className={th}>Employer</th><th className={th}>Industry</th><th className={th}>Location</th><th className={th}>Affected</th><th className={th}>Notice date</th>
-              </tr></thead>
-              <tbody>
-                {warn.map((w) => (
-                  <tr key={w.id} className="border-b border-slate-100 dark:border-white/5">
-                    <td className={`${td} font-medium`}>{w.employer}</td>
-                    <td className={td}>{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
-                    <td className={td}>{w.location}</td>
-                    <td className={td}>{w.headcount ?? "—"}</td>
-                    <td className={td}>{w.noticeDate ? fmtDate(w.noticeDate) : "—"}</td>
-                  </tr>
-                ))}
-                {warn.length === 0 && <tr><td className={td} colSpan={5}>No WARN notices loaded yet.</td></tr>}
-              </tbody>
-            </table>
-            <p className="px-3 py-2 text-xs text-slate-400 dark:text-white/30">Layoffs often precede sales — worth a look when a target-industry employer appears. Source: WARN Act notices dataset.</p>
-          </div>
-        )}
-
         {tab === "multiples" && (
           <MultiplesPanel multiples={multiples} onAdded={async () => setMultiples(await getJSON("/api/market/multiples"))} />
         )}
+          </div>
+        </Section>
 
         {/* Sync status */}
         {syncLog.length > 0 && (

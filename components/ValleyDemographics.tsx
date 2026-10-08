@@ -54,6 +54,7 @@ export default function ValleyDemographics() {
   const [metric, setMetric] = useState<Metric>("income");
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<{ tracts: number; withGrowth: number } | null>(null);
+  const [legend, setLegend] = useState<number[]>([]);
   const metricRef = useRef(metric);
   metricRef.current = metric;
 
@@ -91,6 +92,7 @@ export default function ValleyDemographics() {
         const feats = geojson.features as unknown as { properties: TractProps }[];
         const vals = feats.map((f) => f.properties[m]).filter((v) => typeof v === "number") as number[];
         const breaks = breaksFor(m, vals);
+        setLegend(breaks);
         if (geoRef.current) geoRef.current.remove();
         geoRef.current = L.geoJSON(geojson, {
           style: (feat) => {
@@ -167,6 +169,36 @@ export default function ValleyDemographics() {
           </button>
         ))}
       </div>
+      {/* Legend */}
+      {legend.length === 5 && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-white/50">
+            {METRICS.find((m) => m.id === metric)?.label}
+          </span>
+          {SCALES[metric].map((color, i) => {
+            const fmt = METRICS.find((m) => m.id === metric)!.format;
+            const label =
+              i === 0
+                ? `≤ ${fmt(legend[0])}`
+                : i === 4
+                  ? `> ${fmt(legend[3])}`
+                  : `${fmt(legend[i - 1])} – ${fmt(legend[i])}`;
+            return (
+              <span key={i} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-white/70">
+                <span
+                  className="inline-block h-3.5 w-5 rounded-sm border border-black/10"
+                  style={{ backgroundColor: color }}
+                />
+                {label}
+              </span>
+            );
+          })}
+          <span className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-white/40">
+            <span className="inline-block h-3.5 w-5 rounded-sm border border-black/10 bg-[#e5e7eb]" />
+            No data
+          </span>
+        </div>
+      )}
       <div className="relative">
         <div
           ref={containerRef}
