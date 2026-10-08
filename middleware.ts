@@ -4,7 +4,9 @@ import type { NextRequest } from "next/server";
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Public routes: login page, auth API (login needs no session), and brand assets
+  // Public routes: login page, auth API (login needs no session), and brand assets.
+  // Market ingest endpoints use their own CRON_SECRET auth (Vercel Cron has no session cookie).
+  const PUBLIC_API_PREFIXES = ["/api/auth", "/api/market/ingest", "/api/market/listings/import"];
   const PUBLIC_ASSETS = [
     "/canny-logo.png",
     "/canny-logo-white.png",
@@ -14,7 +16,7 @@ export function middleware(req: NextRequest) {
   ];
   if (
     pathname === "/login" ||
-    pathname.startsWith("/api/auth") ||
+    PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p)) ||
     PUBLIC_ASSETS.includes(pathname)
   ) {
     return NextResponse.next();
