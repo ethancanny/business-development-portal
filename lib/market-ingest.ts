@@ -269,6 +269,7 @@ interface RssItem {
   link: string;
   pubDate: string;
   source: string;
+  description: string;
 }
 
 function parseRss(xml: string): RssItem[] {
@@ -288,7 +289,7 @@ function parseRss(xml: string): RssItem[] {
       const m = b.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`));
       return m ? decode(m[1].trim().replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")) : "";
     };
-    items.push({ title: get("title"), link: get("link"), pubDate: get("pubDate"), source: get("source") });
+    items.push({ title: get("title"), link: get("link"), pubDate: get("pubDate"), source: get("source"), description: get("description") });
   }
   return items;
 }
@@ -309,6 +310,49 @@ function isArizonaStory(title: string, source: string): boolean {
 /** Headline text minus the " - Publisher" suffix: a one-line brief of the event. */
 function headlineSummary(title: string): string {
   return title.replace(/\s+-\s+[^-]+$/, "").trim().slice(0, 300);
+}
+
+/** Structured brief for a major-event card (Ethan's spec: name the companies
+ * involved, dollar amounts, jobs, size, place — not just the headline).
+ * Facts are extracted from the headline + the RSS description's lede
+ * sentence when the feed carries one. */
+function buildEventBrief(opts: {
+  title: string;
+  description?: string;
+  acquirer?: string;
+  target?: string;
+}): string {
+  const { title, acquirer, target } = opts;
+  const cleanTitle = headlineSummary(title);
+  // RSS descriptions are HTML lists that repeat the headline + publisher and
+  // sometimes add a real lede. Strip tags, drop the repeated headline, keep
+  // the first substantive sentence.
+  let lede = "";
+  if (opts.description) {
+    const text = opts.description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const rest = text.replace(cleanTitle, "").trim();
+    const sentence = rest
+      .split(/(?<=[.!?])\s+/)
+      .find((s) => s.length >= 50 && /[a-z]/i.test(s) && !cleanTitle.includes(s.slice(0, 40)));
+    if (sentence) lede = sentence.trim();
+  }
+  const hay = `${title} ${lede}`;
+  const facts: string[] = [];
+  if (acquirer && target) facts.push(`${acquirer} → ${target}`);
+  else if (target) facts.push(target);
+  const money = Array.from(hay.matchAll(/\$\s?[\d,.]+\s?(?:billion|million|bn|m|b)\b/gi)).map((m) =>
+    m[0].replace(/\s+/g, "")
+  );
+  for (const m of Array.from(new Set(money)).slice(0, 2)) facts.push(m);
+  const jobs = hay.match(/[\d,]+\s+(?:new\s+)?jobs/i);
+  if (jobs) facts.push(jobs[0].replace(/\s+/g, " "));
+  const sqft = hay.match(/[\d,]+\s*(?:square[- ]feet|sq\.?\s?ft)/i);
+  if (sqft) facts.push(sqft[0].replace(/\s+/g, " "));
+  const loc = hay.match(AZ_TERMS);
+  if (loc) facts.push(loc[0].charAt(0).toUpperCase() + loc[0].slice(1));
+  const head = facts.join(" · ");
+  const brief = head ? (lede ? `${head} — ${lede}` : head) : lede || cleanTitle;
+  return brief.slice(0, 340);
 }
 
 /** Non-event noise: commentary, advice, stock-price moves, legal/political drama. */
@@ -356,10 +400,11 @@ export async function ingestNews(): Promise<number> {
         acquirer,
         target,
         industry: classifyIndustry(item.title),
+        dealValue: parseHeadlineValue(item.title),
         announcedDate: announced,
         sourceUrl: item.link,
         publisher: item.source,
-        summary: headlineSummary(item.title),
+        summary: buildEventBrief({ title: item.title, description: item.description, acquirer, target }),
       });
     }
     total += await upsertAcquisitions(rows);
@@ -475,16 +520,17 @@ export async function ingestEconomicEvents(): Promise<number> {
       // skip obvious bankruptcy noise in expansion/contract feeds
       if (/\b(bankruptcy|chapter 11)\b/i.test(item.title)) continue;
       const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
+      const subject = parseEventSubject(item.title, verbs);
       rows.push({
         acquirer: "",
-        target: parseEventSubject(item.title, verbs),
+        target: subject,
         industry: classifyIndustry(item.title),
         dealValue: parseHeadlineValue(item.title),
         announcedDate: announced,
         sourceUrl: item.link,
         publisher: item.source,
         eventType,
-        summary: headlineSummary(item.title),
+        summary: buildEventBrief({ title: item.title, description: item.description, target: subject }),
       });
     }
     total += await upsertAcquisitions(rows);
@@ -538,11 +584,12 @@ export async function ingestBankruptcyNews(): Promise<number> {
         acquirer: "",
         target: company,
         industry: classifyIndustry(item.title),
+        dealValue: parseHeadlineValue(item.title),
         announcedDate: announced,
         sourceUrl: item.link,
         publisher: item.source,
         eventType: "bankruptcy",
-        summary: headlineSummary(item.title),
+        summary: buildEventBrief({ title: item.title, description: item.description, target: company }),
       });
     }
     total += await upsertAcquisitions(rows);
