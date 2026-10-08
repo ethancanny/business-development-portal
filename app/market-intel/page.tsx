@@ -156,11 +156,12 @@ function EventStrip({
   const typeLabel: Record<string, string> = {
     acquisition: "Acquisition",
     bankruptcy: "Bankruptcy",
-    expansion: "Expansion",
+    expansion: "Major Expansion",
+    investment: "New Investment",
     contract: "Contract Award",
     relocation: "Relocation",
     ipo: "IPO",
-    policy: "Policy",
+    policy: "Market Policy",
   };
   return (
     <div className="mt-4">
@@ -513,15 +514,24 @@ export default function MarketIntelPage() {
     // never a historical archive. Dismissed items can't backfill with older
     // news because nothing older is eligible.
     const cutoff = new Date(Date.now() - 1 * 864e5).toISOString().slice(0, 10);
-    const items: { id: string; kind: string; title: string; detail: string; summary: string; date: string; url: string; source: "acquisitions" | "filings" | "warn"; rawId: string }[] = [];
+    // Display-side quality gates (mirror the ingest filters so already-stored
+    // junk disappears too): no commentary/stock/drama noise, and policy items
+    // must be market policy — budgets, taxes, spending, incentives, funding.
+    const JUNK =
+      /\b(how to|what to know|opinion|editorial|podcast|webinar|sponsored|price target|dividend|earnings call|top \d+|best stocks?|stocks? to (buy|watch)|shares? (rise|risen|fall|fell|jump|drop|surge|plunge|slide|soar|climb|dip)|lawsuit|indicted|arrested|coupon|giveaway|campaign|endorses?|endorsement|poll (shows|says|finds)|slams|blasts|feud|scandal)\b/i;
+    const MARKET_POLICY =
+      /\b(budget|spending|tax|funding|funds|bond|incentive|appropriation|infrastructure|water|housing|economic|business|jobs|tariff|zoning|permit|development|revenue|fiscal|subsid|grant|loan|credit|semiconductor|energy|broadband)\b/i;
+    const items: { id: string; kind: string; title: string; key: string; detail: string; summary: string; date: string; url: string; source: "acquisitions" | "filings" | "warn"; rawId: string }[] = [];
     const fmtVal = (v: number | null) =>
       v === null ? "" : v >= 1e9 ? ` · $${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? ` · $${Math.round(v / 1e6)}M` : "";
     for (const a of acquisitions) {
       if (a.eventType === "bankruptcy" && a.status !== "dismissed" && a.announcedDate && a.announcedDate >= cutoff) {
+        if (JUNK.test(a.summary || a.target)) continue;
         items.push({
           id: `news-${a.id}`,
           kind: "Bankruptcy",
-          title: a.target || "Unnamed company",
+          title: a.summary || a.target || "Unnamed company",
+          key: a.target || a.summary || "",
           detail: `${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}`,
           summary: a.summary || "",
           date: a.announcedDate,
@@ -537,6 +547,7 @@ export default function MarketIntelPage() {
           id: `edgar-${f.id}`,
           kind: "8-K Bankruptcy",
           title: f.company || "Unnamed company",
+          key: f.company || "",
           detail: `${f.form} · AZ company`,
           summary: f.summary || "",
           date: f.filingDate,
@@ -548,23 +559,31 @@ export default function MarketIntelPage() {
     }
     const byType = (t: string, n: number) =>
       acquisitions
-        .filter((a) => a.eventType === t && a.status !== "dismissed" && a.announcedDate && a.announcedDate >= cutoff)
+        .filter((a) => {
+          if (a.eventType !== t || a.status === "dismissed" || !a.announcedDate || a.announcedDate < cutoff) return false;
+          const text = `${a.summary || ""} ${a.target || ""} ${a.acquirer || ""}`;
+          if (JUNK.test(text)) return false;
+          if (t === "policy" && !MARKET_POLICY.test(text)) return false;
+          return true;
+        })
         .sort((x, y) => (y.announcedDate || "").localeCompare(x.announcedDate || ""))
         .slice(0, n);
     const kindLabel: Record<string, string> = {
       acquisition: "Acquisition",
-      expansion: "Expansion",
+      expansion: "Major Expansion",
+      investment: "New Investment",
       contract: "Contract Award",
       relocation: "Relocation",
       ipo: "IPO",
-      policy: "Policy",
+      policy: "Market Policy",
     };
-    for (const t of ["acquisition", "expansion", "contract", "relocation", "ipo", "policy"] as const) {
+    for (const t of ["acquisition", "expansion", "investment", "contract", "relocation", "ipo", "policy"] as const) {
       for (const a of byType(t, 2)) {
         items.push({
           id: `${t}-${a.id}`,
           kind: kindLabel[t],
-          title: t === "acquisition" ? a.target || a.acquirer || "Unnamed deal" : a.target || "Unnamed",
+          title: a.summary || (t === "acquisition" ? a.target || a.acquirer || "Unnamed deal" : a.target || "Unnamed"),
+          key: a.target || a.summary || "",
           detail: `${a.acquirer && a.target && t === "acquisition" ? `${a.acquirer} → ${a.target} · ` : ""}${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}${fmtVal(a.dealValue ?? null)}`,
           summary: a.summary || "",
           date: a.announcedDate,
@@ -584,6 +603,7 @@ export default function MarketIntelPage() {
         id: `warn-${w.id}`,
         kind: "Major layoffs",
         title: w.employer,
+        key: w.employer,
         detail: `${w.headcount} affected · ${w.location}${w.industry ? ` · ${w.industry}` : ""}`,
         summary: `${w.employer} filed a WARN notice for layoffs affecting ${w.headcount} employees in ${w.location}, Arizona${w.industry ? ` (${w.industry})` : ""}. Notice date ${w.noticeDate}.`,
         date: w.noticeDate,
@@ -608,7 +628,7 @@ export default function MarketIntelPage() {
       .filter((it) => {
         // Coarse category so the same bankruptcy via news + 8-K still collapses.
         const cat = it.kind.toLowerCase().replace("8-k ", "").trim();
-        const key = `${cat}|${norm(it.title)}`;
+        const key = `${cat}|${norm(it.key || it.title)}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -666,8 +686,8 @@ export default function MarketIntelPage() {
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {headlines.map((h) => {
                 const isBankruptcy = h.kind === "Bankruptcy" || h.kind === "8-K Bankruptcy";
-                const isDeal = h.kind === "Acquisition" || h.kind === "IPO";
-                const isGrowth = h.kind === "Expansion" || h.kind === "Contract Award" || h.kind === "Relocation";
+                const isDeal = h.kind === "Acquisition" || h.kind === "IPO" || h.kind === "New Investment";
+                const isGrowth = h.kind === "Major Expansion" || h.kind === "Contract Award" || h.kind === "Relocation";
                 const style = isBankruptcy
                   ? "border-red-200 bg-red-50/60 dark:border-red-500/25 dark:bg-red-500/10"
                   : isDeal
