@@ -383,9 +383,14 @@ export async function getWarn(limit = 100): Promise<MiWarnNotice[]> {
     id: str(r.id), employer: str(r.employer), location: str(r.location),
     headcount: numOrNull(r.headcount), noticeDate: str(r.notice_date),
     effectiveDate: str(r.effective_date), industry: str(r.industry),
-    source: str(r.source),
+    source: str(r.source), status: str(r.status) || "new",
     createdAt: String(r.created_at),
   }));
+}
+
+export async function setWarnStatus(id: string, status: string): Promise<void> {
+  await ensureSchema();
+  await sql()`UPDATE mi_warn SET status = ${status} WHERE id = ${id}`;
 }
 
 /* ---------------- Entities ---------------- */

@@ -12,6 +12,7 @@ import {
   getWarn,
   setAcquisitionStatus,
   setFilingStatus,
+  setWarnStatus,
   setListingStatus,
   addMultiple,
 } from "@/lib/market-db";
@@ -99,6 +100,12 @@ export async function POST(
       case "filings":
         if (body.id && body.status) {
           await setFilingStatus(String(body.id), body.status);
+          return NextResponse.json({ ok: true });
+        }
+        break;
+      case "warn":
+        if (body.id && body.status) {
+          await setWarnStatus(String(body.id), body.status);
           return NextResponse.json({ ok: true });
         }
         break;

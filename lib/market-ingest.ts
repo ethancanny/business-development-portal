@@ -785,6 +785,12 @@ export async function ingestCensusStateFin(): Promise<number> {
   const series: { code: string; seriesId: string; title: string }[] = [
     { code: "LF0001", seriesId: "AZ_STATE_REVENUE", title: "Arizona State Government Total Revenue (Census)" },
     { code: "LF0090", seriesId: "AZ_STATE_EXPENDITURE", title: "Arizona State Government Total Expenditure (Census)" },
+    { code: "LF0123", seriesId: "AZ_SPEND_WELFARE", title: "AZ State Spending — Public Welfare (Census)" },
+    { code: "LF0107", seriesId: "AZ_SPEND_EDUCATION", title: "AZ State Spending — Education (Census)" },
+    { code: "LF0222", seriesId: "AZ_SPEND_INSURANCE", title: "AZ State Spending — Insurance Trust / Retirement (Census)" },
+    { code: "LF0141", seriesId: "AZ_SPEND_HIGHWAYS", title: "AZ State Spending — Highways (Census)" },
+    { code: "LF0159", seriesId: "AZ_SPEND_CORRECTIONS", title: "AZ State Spending — Corrections (Census)" },
+    { code: "LF0132", seriesId: "AZ_SPEND_HEALTH", title: "AZ State Spending — Health (Census)" },
   ];
   try {
     const url =

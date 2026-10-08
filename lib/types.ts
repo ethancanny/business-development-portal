@@ -289,6 +289,7 @@ export interface MiWarnNotice {
   effectiveDate: string;
   industry: string;
   source: string;
+  status: string;
   createdAt: string;
 }
 
