@@ -1,0 +1,34 @@
+[
+  {
+    "background": "15 yrs P&L leadership across industrial distribution. Led 3 acquisitions as division president at Meridian Group.",
+    "createdAt": "2026-09-15T13:00:00.000Z",
+    "currentTitle": "Division President, Meridian Group",
+    "id": "exec-seed-1",
+    "name": "Jordan Ellis",
+    "notes": "Strong operator profile. Interested in CEO roles at $10-50M revenue industrials. Available Q1.",
+    "owner": "Ronan Canny",
+    "stage": "Interview",
+    "targetRole": "CEO",
+    "updatedAt": "2026-10-04T10:10:00.000Z",
+    "industries": [
+      "Logistics",
+      "Industrial Services"
+    ]
+  },
+  {
+    "background": "Former CFO of two PE-backed SaaS companies; led both through successful exits.",
+    "createdAt": "2026-09-25T09:30:00.000Z",
+    "currentTitle": "CFO, Cloudlane (exited)",
+    "id": "exec-seed-2",
+    "name": "Sofia Ramirez",
+    "notes": "Open to CFO/COO roles in B2B software. Prefers remote-first cultures.",
+    "owner": "Ethan Canny",
+    "stage": "Screening",
+    "targetRole": "CFO",
+    "updatedAt": "2026-10-06T14:00:00.000Z",
+    "industries": [
+      "Software",
+      "Food & Beverage"
+    ]
+  }
+]
