@@ -197,7 +197,7 @@ export interface AcquisitionInput {
   announcedDate?: string;
   sourceUrl: string;
   publisher?: string;
-  eventType?: "acquisition" | "bankruptcy" | "expansion" | "contract" | "relocation" | "ipo";
+  eventType?: "acquisition" | "bankruptcy" | "expansion" | "contract" | "relocation" | "ipo" | "policy";
 }
 
 function normName(s: string): string {

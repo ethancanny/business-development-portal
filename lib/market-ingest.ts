@@ -324,7 +324,7 @@ export async function ingestNews(): Promise<number> {
 
 /* ---------------- Economic-event news (expansions, contracts, relocations, IPOs) ---------------- */
 
-type EconEventType = "expansion" | "contract" | "relocation" | "ipo";
+type EconEventType = "expansion" | "contract" | "relocation" | "ipo" | "policy";
 
 const ECONOMIC_EVENT_QUERIES: { eventType: EconEventType; q: string; verbs: RegExp }[] = [
   {
@@ -351,6 +351,16 @@ const ECONOMIC_EVENT_QUERIES: { eventType: EconEventType; q: string; verbs: RegE
     eventType: "ipo",
     q: 'Arizona (company OR startup) (IPO OR "goes public" OR "files for IPO") when:30d',
     verbs: /\b(IPO|goes public|public offering|files for IPO)\b/i,
+  },
+  {
+    eventType: "policy",
+    q: 'Arizona (budget OR "spending bill" OR legislature) (approved OR approves OR signed OR signs OR passes OR enacted) when:30d',
+    verbs: /\b(approv|signed|signs|passes|enacted|budget|veto)\b/i,
+  },
+  {
+    eventType: "policy",
+    q: '("Governor Hobbs" OR "Arizona legislature") (bill OR law OR funding) (economic OR business OR tax OR water OR housing) when:30d',
+    verbs: /\b(bill|law|funding|signs|approves|veto)\b/i,
   },
 ];
 
