@@ -3,6 +3,7 @@
  * Each fetches a free public source and upserts rows into Neon.
  * Designed to run as a daily Vercel Cron hitting /api/market/ingest.
  */
+import * as XLSX from "xlsx";
 import {
   upsertAcquisitions,
   upsertEntities,
@@ -666,16 +667,53 @@ export async function ingestEntities(): Promise<number> {
 
 /* ---------------- ExitValue.ai multiples ---------------- */
 
-const VERTICAL_TO_INDUSTRY: Record<string, string> = {
-  "aerospace": "Aerospace & Defense",
-  "industrial-equipment": "Advanced Manufacturing",
-  "metal-fabrication": "Advanced Manufacturing",
-  "electronics": "Advanced Manufacturing",
-  "medical-devices": "Healthcare",
-  "durable-medical-equipment": "Healthcare",
-  "home-health": "Healthcare",
-  "healthcare-it": "Healthcare",
-  "specialty-contractor": "Specialty Trades & Construction",
+const VERTICAL_TO_INDUSTRY: Record<string, [string, string]> = {
+  "aerospace": ["Aerospace & Defense", "Aerospace"],
+  "industrial-equipment": ["Advanced Manufacturing", "Industrial Equipment"],
+  "metal-fabrication": ["Advanced Manufacturing", "Metal Fabrication"],
+  "electronics": ["Advanced Manufacturing", "Electronics"],
+  "auto-parts": ["Advanced Manufacturing", "Auto Parts"],
+  "beverage-manufacturing": ["Advanced Manufacturing", "Beverage Manufacturing"],
+  "food-manufacturing": ["Advanced Manufacturing", "Food Manufacturing"],
+  "packaging": ["Advanced Manufacturing", "Packaging"],
+  "plastics": ["Advanced Manufacturing", "Plastics"],
+  "medical-devices": ["Healthcare", "Medical Devices"],
+  "durable-medical-equipment": ["Healthcare", "Durable Medical Equipment"],
+  "home-health": ["Healthcare", "Home Health"],
+  "healthcare-it": ["Healthcare", "Healthcare IT"],
+  "healthtech": ["Healthcare", "HealthTech"],
+  "ambulatory-surgery-center": ["Healthcare", "Ambulatory Surgery Centers"],
+  "dental-practice": ["Healthcare", "Dental Practices"],
+  "hospice": ["Healthcare", "Hospice"],
+  "laboratory-services": ["Healthcare", "Laboratory Services"],
+  "medical-practice-primary-care": ["Healthcare", "Primary Care Practices"],
+  "medical-practice-specialty": ["Healthcare", "Specialty Practices"],
+  "mental-health": ["Healthcare", "Mental Health"],
+  "pharmacy": ["Healthcare", "Pharmacies"],
+  "physical-therapy": ["Healthcare", "Physical Therapy"],
+  "veterinary-practice": ["Healthcare", "Veterinary Practices"],
+  "specialty-contractor": ["Specialty Trades & Construction", "Specialty Contractors"],
+  "advertising-agency": ["Business Services", "Advertising Agencies"],
+  "consulting": ["Business Services", "Consulting"],
+  "it-services": ["Business Services", "IT Services"],
+  "apparel": ["Consumer & Retail", "Apparel"],
+  "auto-dealership": ["Consumer & Retail", "Auto Dealerships"],
+  "consumer-products": ["Consumer & Retail", "Consumer Products"],
+  "gaming": ["Consumer & Retail", "Gaming"],
+  "restaurant-qsr": ["Consumer & Retail", "Restaurants (QSR)"],
+  "specialty-retail": ["Consumer & Retail", "Specialty Retail"],
+  "digital-media": ["Technology & Media", "Digital Media"],
+  "ecommerce": ["Technology & Media", "E-Commerce"],
+  "radio-television": ["Technology & Media", "Radio & Television"],
+  "saas": ["Technology & Media", "SaaS"],
+  "software-enterprise": ["Technology & Media", "Enterprise Software"],
+  "electrical-utility": ["Energy & Utilities", "Electrical Utilities"],
+  "oil-gas-services": ["Energy & Utilities", "Oil & Gas Services"],
+  "insurance-agency": ["Financial Services", "Insurance Agencies"],
+  "food-distribution": ["Transportation & Logistics", "Food Distribution"],
+  "freight-brokerage": ["Transportation & Logistics", "Freight Brokerage"],
+  "trucking": ["Transportation & Logistics", "Trucking"],
+  "wholesale-distribution": ["Transportation & Logistics", "Wholesale Distribution"],
 };
 
 const BRACKET_LABEL: Record<string, string> = {
@@ -710,8 +748,8 @@ export async function ingestMultiples(): Promise<number> {
 
   let added = 0;
   for (const [vertical, brackets] of Object.entries(data)) {
-    const industry = VERTICAL_TO_INDUSTRY[vertical];
-    if (!industry) continue;
+    const mapped = VERTICAL_TO_INDUSTRY[vertical];
+    if (!mapped) continue;
     for (const [bracket, metrics] of Object.entries(brackets)) {
       const ebitda = metrics["ev_ebitda"];
       const rev = metrics["ev_revenue"];
@@ -719,7 +757,7 @@ export async function ingestMultiples(): Promise<number> {
       await addMultiple({
         sourceReport: "ExitValue.ai M&A Multiples Index",
         period,
-        industry: `${industry} — ${vertical}`,
+        industry: `${mapped[0]} — ${mapped[1]}`,
         sizeBand: BRACKET_LABEL[bracket] ?? bracket,
         evEbitdaLow: ebitda?.p25 ?? null,
         evEbitdaHigh: ebitda?.p75 ?? null,
@@ -731,6 +769,76 @@ export async function ingestMultiples(): Promise<number> {
     }
   }
   await logSync("multiples", "ok", added, `ExitValue.ai ${period}: ${added} industry×size cells`);
+  return added;
+}
+
+/**
+ * Damodaran (NYU Stern) public-company EV/EBITDA by industry — the standard
+ * public-comps benchmark, republished every January as an Excel dataset.
+ * Stored as sizeBand "Public comps" alongside the private-deal multiples.
+ */
+export async function ingestDamodaranMultiples(): Promise<number> {
+  const SOURCE = "Damodaran (NYU Stern) — Public Multiples";
+  const res = await fetch("https://pages.stern.nyu.edu/~adamodar/pc/datasets/vebitda.xls", {
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" },
+  });
+  if (!res.ok) {
+    await logSync("multiples", "error", 0, `Damodaran: HTTP ${res.status}`);
+    return 0;
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  const wb = XLSX.read(buf, { type: "buffer" });
+  const ws = wb.Sheets["Industry Averages"];
+  if (!ws) {
+    await logSync("multiples", "error", 0, "Damodaran: 'Industry Averages' sheet missing");
+    return 0;
+  }
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 });
+  // Vintage from the sheet's "Date updated:" Excel serial (fallback: file header).
+  let period = "";
+  const serial = Number(rows[0]?.[1]);
+  if (Number.isFinite(serial) && serial > 30000) {
+    const d = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+    period = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+  if (!period) {
+    const lm = res.headers.get("last-modified");
+    const d = lm ? new Date(lm) : new Date();
+    period = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+  const existing = await getMultiples();
+  if (existing.some((m) => m.sourceReport === SOURCE && m.period === period)) {
+    await logSync("multiples", "skipped", 0, `Damodaran ${period} already loaded`);
+    return 0;
+  }
+  const headerIdx = rows.findIndex((r) => r[0] === "Industry Name");
+  if (headerIdx < 0) {
+    await logSync("multiples", "error", 0, "Damodaran: header row not found");
+    return 0;
+  }
+  const ebitdaCol = (rows[headerIdx] as unknown[]).indexOf("EV/EBITDA");
+  let added = 0;
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const r = rows[i] as unknown[];
+    const industry = String(r[0] ?? "").trim();
+    if (!industry || industry.startsWith("Total Market")) continue;
+    const firms = Number(r[1]);
+    const evEbitda = Number(r[ebitdaCol]);
+    if (!Number.isFinite(evEbitda) || evEbitda <= 0 || evEbitda >= 100) continue;
+    await addMultiple({
+      sourceReport: SOURCE,
+      period,
+      industry,
+      sizeBand: "Public comps",
+      evEbitdaLow: null,
+      evEbitdaHigh: null,
+      evEbitdaMedian: Math.round(evEbitda * 100) / 100,
+      evRevenueMedian: null,
+      notes: `Aggregate EV/EBITDA across ${Number.isFinite(firms) ? firms : "?"} US public companies; NYU Stern dataset, updated ${period}.`,
+    });
+    added++;
+  }
+  await logSync("multiples", "ok", added, `Damodaran ${period}: ${added} public-comp industries`);
   return added;
 }
 
@@ -924,7 +1032,138 @@ export async function ingestCensusStateFin(): Promise<number> {
 
 /* ---------------- Orchestrator ---------------- */
 
-export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "all";
+/* ---------------- U of A EBRC (dataZoa): county housing permits ----------------
+ * The University of Arizona's Economic and Business Research Center publishes
+ * monthly county tables (via dataZoa) whose last two columns are Census
+ * Building Permits Survey counts: Total units and Single-Family units.
+ * Each county table has a public CSV export endpoint keyed by its embed hash.
+ */
+
+const COUNTY_PERMIT_TABLES: { county: string; slug: string; hash: string }[] = [
+  { county: "Apache", slug: "APACHE", hash: "18575CA960" },
+  { county: "Cochise", slug: "COCHISE", hash: "A53FB2362B" },
+  { county: "Coconino", slug: "COCONINO", hash: "F0CD76A943" },
+  { county: "Gila", slug: "GILA", hash: "8BBFE78881" },
+  { county: "Graham", slug: "GRAHAM", hash: "5D7A5FFE60" },
+  { county: "Greenlee", slug: "GREENLEE", hash: "99EC13529F" },
+  { county: "La Paz", slug: "LAPAZ", hash: "BF3A677BA4" },
+  { county: "Maricopa", slug: "MARICOPA", hash: "380B9E931D" },
+  { county: "Mohave", slug: "MOHAVE", hash: "F9A24CD7A3" },
+  { county: "Navajo", slug: "NAVAJO", hash: "081D067E8B" },
+  { county: "Pima", slug: "PIMA", hash: "95E515957E" },
+  { county: "Pinal", slug: "PINAL", hash: "0EA7D0310A" },
+  { county: "Santa Cruz", slug: "SANTACRUZ", hash: "C85FABD7D9" },
+  { county: "Yavapai", slug: "YAVAPAI", hash: "84F517B20F" },
+  { county: "Yuma", slug: "YUMA", hash: "895CEE7B87" },
+];
+
+/** Minimal RFC4180 CSV parser (dataZoa exports quote fields with embedded commas/newlines). */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else inQuotes = false;
+      } else cell += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell);
+      cell = "";
+      rows.push(row);
+      row = [];
+    } else cell += ch;
+  }
+  if (cell !== "" || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
+/** Extract monthly (date, total units, single-family units) from a county export. */
+function parseCountyPermits(csvText: string): { date: string; total: number | null; sf: number | null }[] {
+  const rows = parseCsv(csvText.replace(/^﻿/, ""));
+  if (!rows.length) return [];
+  const totalIdx = rows[0].indexOf("Total");
+  const sfIdx = rows[0].indexOf("Single Family");
+  const dateRow = rows.findIndex((r) => r[0] === "DATE");
+  if (totalIdx < 0 || sfIdx < 0 || dateRow < 0) return [];
+  const out: { date: string; total: number | null; sf: number | null }[] = [];
+  const num = (s: string | undefined) => {
+    const v = parseFloat((s ?? "").replace(/,/g, ""));
+    return Number.isFinite(v) ? v : null;
+  };
+  for (let i = dateRow + 1; i < rows.length; i++) {
+    const m = (rows[i][0] ?? "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!m) continue;
+    const date = `${m[3]}-${m[1].padStart(2, "0")}-01`;
+    out.push({ date, total: num(rows[i][totalIdx]), sf: num(rows[i][sfIdx]) });
+  }
+  return out;
+}
+
+export async function ingestCountyPermits(): Promise<number> {
+  let total = 0;
+  const since = "2020-01-01"; // display window is 5 years; keep ingest lean
+  for (const c of COUNTY_PERMIT_TABLES) {
+    if (c.hash === "TODO") continue;
+    try {
+      const url = `https://www.datazoa.com/publish/export.asp?hash=${c.hash}&glname=&dzuuid=1068&alttitle=&altextsrc=&a=exportcsv`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" },
+      });
+      if (!res.ok) {
+        await logSync("county_permits", "error", 0, `dataZoa ${c.county}: HTTP ${res.status}`);
+        continue;
+      }
+      const parsed = parseCountyPermits(await res.text());
+      const rows: IndicatorInput[] = [];
+      for (const r of parsed) {
+        if (r.date < since) continue;
+        if (r.total !== null)
+          rows.push({
+            source: "ebrc",
+            seriesId: `AZPERMIT_${c.slug}`,
+            title: `${c.county} County Housing Permits — Total Units`,
+            units: "Units",
+            frequency: "Monthly",
+            obsDate: r.date,
+            value: r.total,
+          });
+        if (r.sf !== null)
+          rows.push({
+            source: "ebrc",
+            seriesId: `AZPERMIT_SF_${c.slug}`,
+            title: `${c.county} County Housing Permits — Single-Family Units`,
+            units: "Units",
+            frequency: "Monthly",
+            obsDate: r.date,
+            value: r.sf,
+          });
+      }
+      total += await upsertIndicatorObs(rows);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await logSync("county_permits", "error", 0, `dataZoa ${c.county}: ${msg.slice(0, 300)}`);
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  await logSync("county_permits", "ok", total, `U of A EBRC/dataZoa: county housing permits`);
+  return total;
+}
+
+export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "all";
 
 export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -937,9 +1176,11 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["warn", ingestWarn],
     ["entities", ingestEntities],
     ["multiples", ingestMultiples],
+    ["multiples", ingestDamodaranMultiples],
     ["defense", ingestDefenseContracts],
     ["census", ingestCensus],
     ["census", ingestCensusStateFin],
+    ["county_permits", ingestCountyPermits],
   ];
   for (const [name, fn] of jobs) {
     if (source !== "all" && source !== name) continue;

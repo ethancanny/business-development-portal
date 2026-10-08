@@ -33,6 +33,7 @@ export default function ActivityPage() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<DealFlowItem[]>([]);
   const [filter, setFilter] = useState<"all" | DealFlowStatus>("all");
+  const [kindTab, setKindTab] = useState<DealFlowKind>("business_for_sale");
   const [showAdd, setShowAdd] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -58,6 +59,7 @@ export default function ActivityPage() {
     () => (filter === "all" ? items : items.filter((i) => i.status === filter)),
     [items, filter]
   );
+  const tabItems = filtered.filter((i) => i.kind === kindTab);
 
   const newCount = items.filter((i) => i.status === "new").length;
 
@@ -175,26 +177,42 @@ export default function ActivityPage() {
           </div>
         )}
 
-        {(
-          [
-            { kind: "business_for_sale", heading: "Businesses for Sale" },
-            { kind: "operator_available", heading: "Operators Available" },
-            { kind: "market_note", heading: "Market Notes" },
-          ] as const
-        ).map((group) => {
-          const groupItems = filtered.filter((i) => i.kind === group.kind);
-          if (groupItems.length === 0) return null;
-          return (
-            <section key={group.kind} className="mb-8">
-              <h2 className="mb-3 flex items-baseline gap-2 text-base font-bold text-slate-900 dark:text-white">
-                {group.heading}
-                <span className="text-sm font-medium text-slate-400 dark:text-white/40">
-                  {groupItems.length}
-                </span>
-              </h2>
-              <div className="flex flex-col gap-3">
-                {groupItems.map((item) => {
-            const km = KIND_META[item.kind];
+        {/* Kind tabs — each feed type gets its own tab */}
+        <div className="mb-4 flex flex-wrap gap-2">
+          {(
+            [
+              { kind: "business_for_sale", label: "Businesses for Sale" },
+              { kind: "operator_available", label: "Operators Available" },
+              { kind: "market_note", label: "Market Notes" },
+            ] as const
+          ).map((t) => {
+            const n = filtered.filter((i) => i.kind === t.kind).length;
+            const active = kindTab === t.kind;
+            return (
+              <button
+                key={t.kind}
+                onClick={() => setKindTab(t.kind)}
+                className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition ${
+                  active
+                    ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                    : "bg-white text-slate-500 hover:bg-slate-100 dark:bg-white/10 dark:text-white/60"
+                }`}
+              >
+                {t.label} <span className="opacity-70">({n})</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {tabItems.length === 0 && filtered.length > 0 && (
+          <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center dark:border-white/15">
+            <p className="text-sm text-slate-500 dark:text-white/50">Nothing in this tab with the current status filter.</p>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-3">
+          {tabItems.map((item) => {
+const km = KIND_META[item.kind];
             const isBusy = busy === item.id;
             return (
               <article
@@ -277,11 +295,8 @@ export default function ActivityPage() {
                 )}
               </article>
             );
-                })}
-              </div>
-            </section>
-          );
-        })}
+          })}
+        </div>
       </main>
     </>
   );
