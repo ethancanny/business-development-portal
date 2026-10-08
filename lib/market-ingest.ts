@@ -271,11 +271,20 @@ interface RssItem {
 
 function parseRss(xml: string): RssItem[] {
   const items: RssItem[] = [];
+  const decode = (s: string) =>
+    s
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#0?39;|&apos;/g, "'")
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+      .replace(/&nbsp;/g, " ");
   const blocks = xml.match(/<item>([\s\S]*?)<\/item>/g) ?? [];
   for (const b of blocks) {
     const get = (tag: string) => {
       const m = b.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`));
-      return m ? m[1].trim().replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1") : "";
+      return m ? decode(m[1].trim().replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")) : "";
     };
     items.push({ title: get("title"), link: get("link"), pubDate: get("pubDate"), source: get("source") });
   }
