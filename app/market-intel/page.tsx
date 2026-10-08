@@ -390,9 +390,20 @@ export default function MarketIntelPage() {
       const chg = yoyChange(obs, id);
       return { label, value: format(l.value), date: l.obsDate, chg };
     };
+    // Combined unemployment bubble: AZ and US side by side in one card.
+    const azUr = latest["AZUR"];
+    const usUr = latest["UNRATE"];
+    const unempCard =
+      azUr && azUr.value !== null
+        ? {
+            label: "Unemployment — AZ / US",
+            value: `${azUr.value.toFixed(1)}% / ${usUr && usUr.value !== null ? `${usUr.value.toFixed(1)}%` : "—"}`,
+            date: azUr.obsDate,
+            chg: yoyChange(obs, "AZUR"),
+          }
+        : null;
     return [
-      card("AZUR", "AZ Unemployment", (v) => `${v.toFixed(1)}%`),
-      card("UNRATE", "US Unemployment", (v) => `${v.toFixed(1)}%`),
+      unempCard,
       card("AZMFG", "AZ Manufacturing Jobs", (v) => `${Math.round(v)}k`),
       card("AZ_DOD_CONTRACTS", "AZ Defense Contracts/mo", (v) => `$${Math.round(v / 1e6)}M`),
     ].filter(Boolean) as { label: string; value: string; date: string; chg: number | null }[];
