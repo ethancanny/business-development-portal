@@ -90,6 +90,8 @@ export default function MarketIntelPage() {
   const [acquisitions, setAcquisitions] = useState<MiAcquisition[]>([]);
   const [filings, setFilings] = useState<MiFiling[]>([]);
   const [filingCat, setFilingCat] = useState("all");
+  const [multMetric, setMultMetric] = useState<"ebitda" | "revenue">("ebitda");
+  const [multBand, setMultBand] = useState("EV $5–25M");
   const [warn, setWarn] = useState<MiWarnNotice[]>([]);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [syncLog, setSyncLog] = useState<MiSyncLog[]>([]);
@@ -203,6 +205,30 @@ export default function MarketIntelPage() {
 
   const filteredFilings = filingCat === "all" ? filings : filings.filter((f) => f.category === filingCat);
   const visibleAcq = acquisitions.filter((a) => a.status !== "dismissed" && a.eventType !== "bankruptcy");
+
+  const multBands = useMemo(() => {
+    const order = ["EV < $5M", "EV $5–25M", "EV $25–100M", "EV $100–500M", "EV > $500M"];
+    const present = new Set(multiples.map((m) => m.sizeBand));
+    return order.filter((b) => present.has(b));
+  }, [multiples]);
+
+  const multChartData = useMemo(() => {
+    const byInd = new Map<string, MiMultiple>();
+    for (const m of multiples) {
+      if (m.sizeBand !== multBand) continue;
+      const existing = byInd.get(m.industry);
+      if (!existing || (m.period || "") > (existing.period || "")) byInd.set(m.industry, m);
+    }
+    return Array.from(byInd.values())
+      .map((m) => ({
+        industry: (m.industry.split("—")[1] || m.industry).trim(),
+        full: m.industry,
+        value: multMetric === "ebitda" ? m.evEbitdaMedian : m.evRevenueMedian,
+        notes: m.notes,
+      }))
+      .filter((d) => d.value !== null && d.value !== undefined)
+      .sort((a, b) => (b.value as number) - (a.value as number));
+  }, [multiples, multBand, multMetric]);
 
   const headlines = useMemo(() => {
     const items: { id: string; kind: string; title: string; detail: string; date: string; url: string; industry: string }[] = [];
@@ -395,6 +421,42 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
+        {/* Market multiples — full width */}
+        <div className={`${chartCard} lg:col-span-2`}>
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Market Multiples by Industry</h3>
+            <div className="flex flex-wrap gap-2">
+              {(["ebitda", "revenue"] as const).map((v) => (
+                <button key={v} onClick={() => setMultMetric(v)} className={tabBtn(multMetric === v)}>
+                  {v === "ebitda" ? "EV/EBITDA" : "EV/Revenue"}
+                </button>
+              ))}
+              {multBands.map((b) => (
+                <button key={b} onClick={() => setMultBand(b)} className={tabBtn(multBand === b)}>{b}</button>
+              ))}
+            </div>
+          </div>
+          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+            Median {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} multiples, {multBand} deal size. Sources: ExitValue.ai open data + manual entries.
+          </p>
+          <div className="h-96">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={multChartData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 0 }}>
+                <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                <XAxis type="number" tick={{ fontSize: 11, fill: tick }} />
+                <YAxis type="category" dataKey="industry" width={190} tick={{ fontSize: 12, fill: tick }} />
+                <Tooltip
+                  contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                  formatter={(v, _name, props) => [`${v}x`, (props?.payload as { full?: string })?.full || ""]}
+                />
+                <Bar dataKey="value" fill={gold} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          {multChartData.length === 0 && (
+            <p className="py-4 text-center text-sm text-slate-400">No {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} data for this size band yet.</p>
+          )}
+        </div>
         </div>
 
         {/* Tabs */}
