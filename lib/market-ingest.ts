@@ -988,9 +988,16 @@ export async function ingestCensusStateFin(): Promise<number> {
     const rows: IndicatorInput[] = [];
     let anyOk = false;
     for (const url of urls) {
-      const res = await fetch(url);
-      if (!res.ok) continue;
-      const data = (await res.json()) as string[][];
+      let data: string[][];
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const text = await res.text();
+        if (!text.trim()) continue; // unpublished years return an empty body
+        data = JSON.parse(text) as string[][];
+      } catch {
+        continue;
+      }
       if (!Array.isArray(data) || data.length < 2) continue;
       anyOk = true;
       const headers = data[0];
