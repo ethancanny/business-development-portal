@@ -981,34 +981,48 @@ export async function ingestCensusStateFin(): Promise<number> {
     // empty response, and FY2025+ lands automatically once Census publishes.
     const base =
       `https://api.census.gov/data/timeseries/govslocalfin?get=AGG_DESC,AMOUNT&for=state:04&GOVTYPE=002&key=${key}`;
-    const urls = [`${base}&time=from+2017+to+2024`];
+    const probes: { label: string; url: string }[] = [
+      { label: "base17-24", url: `${base}&time=from+2017+to+2024` },
+    ];
     const thisYear = new Date().getFullYear();
-    for (let y = 2025; y <= thisYear; y++) urls.push(`${base}&time=${y}`);
+    for (let y = 2025; y <= thisYear; y++)
+      probes.push({ label: String(y), url: `${base}&time=${y}` });
     const byCode = new Map(series.map((s) => [s.code, s]));
     const rows: IndicatorInput[] = [];
-    let anyOk = false;
-    for (const url of urls) {
+    const attempts: string[] = [];
+    for (const { label, url } of probes) {
       let data: string[][];
       try {
         const res = await fetch(url);
-        if (!res.ok) continue;
+        if (!res.ok) {
+          attempts.push(`${label}:http${res.status}`);
+          continue;
+        }
         const text = await res.text();
-        if (!text.trim()) continue; // unpublished years return an empty body
+        if (!text.trim()) {
+          attempts.push(`${label}:empty`);
+          continue;
+        }
         data = JSON.parse(text) as string[][];
-      } catch {
+      } catch (err) {
+        attempts.push(`${label}:err(${err instanceof Error ? err.message : "?"})`);
         continue;
       }
-      if (!Array.isArray(data) || data.length < 2) continue;
-      anyOk = true;
+      if (!Array.isArray(data) || data.length < 2) {
+        attempts.push(`${label}:rows=${Array.isArray(data) ? data.length : "na"}`);
+        continue;
+      }
       const headers = data[0];
       const iTime = headers.indexOf("time");
       const iDesc = headers.indexOf("AGG_DESC");
       const iAmt = headers.indexOf("AMOUNT");
+      let matched = 0;
       for (const r of data.slice(1)) {
         const s = byCode.get((r[iDesc] || "").trim());
         if (!s) continue;
         const amt = Number((r[iAmt] || "").replace(/,/g, ""));
         if (!Number.isFinite(amt)) continue;
+        matched++;
         rows.push({
           source: "census" as MiIndicatorSource,
           seriesId: s.seriesId,
@@ -1019,9 +1033,10 @@ export async function ingestCensusStateFin(): Promise<number> {
           value: amt,
         });
       }
+      attempts.push(`${label}:rows=${data.length - 1},matched=${matched}`);
     }
-    if (!anyOk) {
-      await logSync("census-fin", "error", 0, "Census API unreachable / empty");
+    if (rows.length === 0) {
+      await logSync("census-fin", "error", 0, `No matches [${attempts.join(" | ")}]`);
       return 0;
     }
     const total = await upsertIndicatorObs(rows);
@@ -1030,7 +1045,7 @@ export async function ingestCensusStateFin(): Promise<number> {
       total > 0 ? "ok" : "error",
       total,
       total > 0
-        ? `Census state finance: revenue & expenditure (${rows.length} obs)`
+        ? `Census state finance: revenue & expenditure (${rows.length} obs) [${attempts.join(" | ")}]`
         : "No matching aggregates found"
     );
     return total;
