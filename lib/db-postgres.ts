@@ -19,7 +19,7 @@ function sql() {
 let schemaReady: Promise<void> | null = null;
 
 /** Idempotent schema setup — safe to call on every operation (serverless). */
-function ensureSchema(): Promise<void> {
+export function ensureSchema(): Promise<void> {
   if (!schemaReady) {
     schemaReady = (async () => {
       const db = sql();
@@ -146,6 +146,121 @@ function ensureSchema(): Promise<void> {
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS broker TEXT NOT NULL DEFAULT ''`;
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT ''`;
+      /* ---- Market Intel tables ---- */
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_indicators (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL DEFAULT 'fred',
+          series_id TEXT NOT NULL DEFAULT '',
+          title TEXT NOT NULL DEFAULT '',
+          units TEXT NOT NULL DEFAULT '',
+          frequency TEXT NOT NULL DEFAULT '',
+          obs_date DATE NOT NULL,
+          value DOUBLE PRECISION,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (source, series_id, obs_date)
+        )`;
+      await db`
+        CREATE INDEX IF NOT EXISTS mi_indicators_series_idx
+        ON mi_indicators (series_id, obs_date DESC)`;
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_listings (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL DEFAULT '',
+          price DOUBLE PRECISION,
+          revenue DOUBLE PRECISION,
+          cash_flow DOUBLE PRECISION,
+          industry TEXT NOT NULL DEFAULT '',
+          location TEXT NOT NULL DEFAULT '',
+          broker TEXT NOT NULL DEFAULT '',
+          url TEXT NOT NULL DEFAULT '',
+          source TEXT NOT NULL DEFAULT '',
+          description TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'new',
+          first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (url)
+        )`;
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_multiples (
+          id TEXT PRIMARY KEY,
+          source_report TEXT NOT NULL DEFAULT '',
+          period TEXT NOT NULL DEFAULT '',
+          industry TEXT NOT NULL DEFAULT '',
+          size_band TEXT NOT NULL DEFAULT '',
+          ev_ebitda_low DOUBLE PRECISION,
+          ev_ebitda_high DOUBLE PRECISION,
+          ev_ebitda_median DOUBLE PRECISION,
+          ev_revenue_median DOUBLE PRECISION,
+          notes TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`;
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_acquisitions (
+          id TEXT PRIMARY KEY,
+          acquirer TEXT NOT NULL DEFAULT '',
+          target TEXT NOT NULL DEFAULT '',
+          target_location TEXT NOT NULL DEFAULT '',
+          industry TEXT NOT NULL DEFAULT '',
+          deal_value DOUBLE PRECISION,
+          announced_date TEXT NOT NULL DEFAULT '',
+          source_url TEXT NOT NULL DEFAULT '',
+          publisher TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'new',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (source_url)
+        )`;
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_filings (
+          id TEXT PRIMARY KEY,
+          form TEXT NOT NULL DEFAULT '',
+          company TEXT NOT NULL DEFAULT '',
+          cik TEXT NOT NULL DEFAULT '',
+          filing_date TEXT NOT NULL DEFAULT '',
+          accession TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL DEFAULT 'acquisition',
+          summary TEXT NOT NULL DEFAULT '',
+          url TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'new',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (accession)
+        )`;
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_warn (
+          id TEXT PRIMARY KEY,
+          employer TEXT NOT NULL DEFAULT '',
+          location TEXT NOT NULL DEFAULT '',
+          headcount INTEGER,
+          notice_date TEXT NOT NULL DEFAULT '',
+          effective_date TEXT NOT NULL DEFAULT '',
+          source TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (employer, location, notice_date)
+        )`;
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_entities (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          entity_type TEXT NOT NULL DEFAULT '',
+          formation_date TEXT NOT NULL DEFAULT '',
+          agent TEXT NOT NULL DEFAULT '',
+          address TEXT NOT NULL DEFAULT '',
+          source TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'new',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (name, formation_date)
+        )`;
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_sync_log (
+          id TEXT PRIMARY KEY,
+          job TEXT NOT NULL DEFAULT '',
+          ran_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          status TEXT NOT NULL DEFAULT 'ok',
+          added INTEGER NOT NULL DEFAULT 0,
+          message TEXT NOT NULL DEFAULT ''
+        )`;
     })().catch((err) => {
       schemaReady = null;
       throw err;

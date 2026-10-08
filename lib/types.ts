@@ -198,3 +198,113 @@ export interface ActivityEvent {
   execName: string | null;
   createdAt: string;
 }
+
+/* ---------------- Market Intel ---------------- */
+
+export type MiIndicatorSource = "fred" | "bls" | "census";
+
+export interface MiIndicatorObs {
+  id: string;
+  source: MiIndicatorSource;
+  seriesId: string;
+  title: string;
+  units: string;
+  frequency: string;
+  obsDate: string; // YYYY-MM-DD
+  value: number | null;
+}
+
+export interface MiListing {
+  id: string;
+  title: string;
+  price: number | null;
+  revenue: number | null;
+  cashFlow: number | null;
+  industry: string;
+  location: string;
+  broker: string;
+  url: string;
+  source: string;
+  description: string;
+  status: "new" | "keep" | "dismissed" | "added";
+  firstSeen: string;
+  lastSeen: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MiMultiple {
+  id: string;
+  sourceReport: string;
+  period: string;
+  industry: string;
+  sizeBand: string;
+  evEbitdaLow: number | null;
+  evEbitdaHigh: number | null;
+  evEbitdaMedian: number | null;
+  evRevenueMedian: number | null;
+  notes: string;
+  createdAt: string;
+}
+
+export interface MiAcquisition {
+  id: string;
+  acquirer: string;
+  target: string;
+  targetLocation: string;
+  industry: string;
+  dealValue: number | null;
+  announcedDate: string;
+  sourceUrl: string;
+  publisher: string;
+  status: "new" | "keep" | "dismissed";
+  createdAt: string;
+}
+
+export type MiFilingCategory = "acquisition" | "form_d" | "expansion";
+
+export interface MiFiling {
+  id: string;
+  form: string;
+  company: string;
+  cik: string;
+  filingDate: string;
+  accession: string;
+  category: MiFilingCategory;
+  summary: string;
+  url: string;
+  status: "new" | "keep" | "dismissed";
+  createdAt: string;
+}
+
+export interface MiWarnNotice {
+  id: string;
+  employer: string;
+  location: string;
+  headcount: number | null;
+  noticeDate: string;
+  effectiveDate: string;
+  source: string;
+  createdAt: string;
+}
+
+export interface MiEntity {
+  id: string;
+  name: string;
+  entityType: string;
+  formationDate: string;
+  agent: string;
+  address: string;
+  source: string;
+  status: "new" | "keep" | "dismissed";
+  createdAt: string;
+}
+
+export interface MiSyncLog {
+  id: string;
+  job: string;
+  ranAt: string;
+  status: "ok" | "error" | "skipped";
+  added: number;
+  message: string;
+}
