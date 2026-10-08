@@ -202,7 +202,38 @@ export default function MarketIntelPage() {
   };
 
   const filteredFilings = filingCat === "all" ? filings : filings.filter((f) => f.category === filingCat);
-  const visibleAcq = acquisitions.filter((a) => a.status !== "dismissed");
+  const visibleAcq = acquisitions.filter((a) => a.status !== "dismissed" && a.eventType !== "bankruptcy");
+
+  const headlines = useMemo(() => {
+    const items: { id: string; kind: string; title: string; detail: string; date: string; url: string; industry: string }[] = [];
+    for (const a of acquisitions) {
+      if (a.eventType === "bankruptcy" && a.status !== "dismissed") {
+        items.push({
+          id: `news-${a.id}`,
+          kind: "Bankruptcy",
+          title: a.target || "Unnamed company",
+          detail: `${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}`,
+          date: a.announcedDate,
+          url: a.sourceUrl,
+          industry: a.industry,
+        });
+      }
+    }
+    for (const f of filings) {
+      if (f.majorEvent && f.status !== "dismissed") {
+        items.push({
+          id: `edgar-${f.id}`,
+          kind: "8-K Bankruptcy",
+          title: f.company || "Unnamed company",
+          detail: `${f.form}${f.azCompany ? " · AZ company" : " · National"}`,
+          date: f.filingDate,
+          url: f.url,
+          industry: "",
+        });
+      }
+    }
+    return items.sort((x, y) => (y.date || "").localeCompare(x.date || "")).slice(0, 6);
+  }, [acquisitions, filings]);
 
   const chartCard = "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60";
   const tableWrap = "overflow-x-auto rounded-xl border border-slate-200 dark:border-white/10";
@@ -244,6 +275,32 @@ export default function MarketIntelPage() {
             </div>
           )}
         </div>
+
+        {/* Major-event headlines */}
+        {headlines.length > 0 && (
+          <div className="mb-6">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[#0d1f3c] dark:text-white">
+              Major events <span className="ml-1 rounded-full bg-red-500/15 px-2 py-0.5 text-xs normal-case text-red-700 dark:text-red-400">bankruptcies & distress</span>
+            </h2>
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {headlines.map((h) => (
+                <a
+                  key={h.id}
+                  href={h.url || undefined}
+                  target={h.url ? "_blank" : undefined}
+                  rel="noreferrer"
+                  className="rounded-xl border border-red-200 bg-red-50/60 p-4 transition hover:shadow-md dark:border-red-500/25 dark:bg-red-500/10"
+                >
+                  <p className="text-xs font-semibold uppercase tracking-wider text-red-700 dark:text-red-400">{h.kind}</p>
+                  <p className="mt-1 text-base font-bold text-[#0d1f3c] dark:text-white">{h.title}</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-white/50">
+                    {h.detail}{h.date ? ` · ${fmtDate(h.date)}` : ""}
+                  </p>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Charts */}
         <div className="mb-6 grid gap-4 lg:grid-cols-2">

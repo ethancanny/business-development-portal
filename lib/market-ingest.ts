@@ -288,6 +288,59 @@ export async function ingestNews(): Promise<number> {
   return total;
 }
 
+/* ---------------- Bankruptcy news (private-company Chapter 11s) ---------------- */
+
+const BANKRUPTCY_NEWS_QUERIES = [
+  '"Arizona" (bankruptcy OR "chapter 11") when:30d',
+  '"files for bankruptcy" (Phoenix OR Scottsdale OR Tucson OR Mesa OR Chandler OR Tempe) when:30d',
+  '"files for chapter 11" when:7d', // national majors, fresh only
+];
+
+/** "Salad and Go files for Chapter 11 bankruptcy" -> "Salad and Go" */
+function parseBankruptcyHeadline(title: string): string {
+  const m = title.split(/files?\s+for\s+(chapter\s*11\s+)?bankruptcy/i)[0];
+  return (m ?? title).replace(/\s+[-–|]\s+.*$/, "").trim().slice(0, 120);
+}
+
+export async function ingestBankruptcyNews(): Promise<number> {
+  let total = 0;
+  const seen = new Set<string>();
+  for (const q of BANKRUPTCY_NEWS_QUERIES) {
+    const url =
+      `https://news.google.com/rss/search?q=${encodeURIComponent(q)}` + `&hl=en-US&gl=US&ceid=US:en`;
+    let xml = "";
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" } });
+      if (!res.ok) continue;
+      xml = await res.text();
+    } catch {
+      continue;
+    }
+    const rows: AcquisitionInput[] = [];
+    for (const item of parseRss(xml)) {
+      if (!item.link || seen.has(item.link)) continue;
+      seen.add(item.link);
+      if (!/bankrupt|chapter\s*11/i.test(item.title)) continue;
+      const company = parseBankruptcyHeadline(item.title);
+      if (!company) continue;
+      const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
+      rows.push({
+        acquirer: "",
+        target: company,
+        industry: classifyIndustry(item.title),
+        announcedDate: announced,
+        sourceUrl: item.link,
+        publisher: item.source,
+        eventType: "bankruptcy",
+      });
+    }
+    total += await upsertAcquisitions(rows);
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  await logSync("bankruptcy_news", "ok", total, `Google News: ${BANKRUPTCY_NEWS_QUERIES.length} bankruptcy queries`);
+  return total;
+}
+
 /* ---------------- WARN notices ---------------- */
 
 /** Industry classification for WARN employers: known AZ employers first, then keyword fallback. */
@@ -592,7 +645,7 @@ export async function ingestCensus(): Promise<number> {
 
 /* ---------------- Orchestrator ---------------- */
 
-export type IngestSource = "indicators" | "filings" | "news" | "warn" | "entities" | "multiples" | "defense" | "census" | "all";
+export type IngestSource = "indicators" | "filings" | "news" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "all";
 
 export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -600,6 +653,7 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["indicators", ingestIndicators],
     ["filings", ingestFilings],
     ["news", ingestNews],
+    ["bankruptcy_news", ingestBankruptcyNews],
     ["warn", ingestWarn],
     ["entities", ingestEntities],
     ["multiples", ingestMultiples],

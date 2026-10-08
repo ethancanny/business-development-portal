@@ -212,6 +212,7 @@ export function ensureSchema(): Promise<void> {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           UNIQUE (source_url)
         )`;
+      await db`ALTER TABLE mi_acquisitions ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'acquisition'`;
       await db`
         CREATE TABLE IF NOT EXISTS mi_filings (
           id TEXT PRIMARY KEY,
