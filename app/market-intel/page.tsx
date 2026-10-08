@@ -429,12 +429,68 @@ export default function MarketIntelPage() {
             chg: yoyChange(obs, "AZUR"),
           }
         : null;
+    // Anomaly card 1 — layoff spike: WARN workers affected in the last 90
+    // days vs the prior 90 days. For investors, a layoff surge is a
+    // distress / deal-flow signal, so "up" is bad (colors inverted).
+    const now = Date.now();
+    const d90 = 90 * 864e5;
+    const sumWin = (from: number, to: number) =>
+      warn
+        .filter((w) => {
+          if (!w.noticeDate || !w.headcount) return false;
+          const t = new Date(w.noticeDate).getTime();
+          return t >= from && t < to;
+        })
+        .reduce((s, w) => s + (w.headcount || 0), 0);
+    const layNow = sumWin(now - d90, now + 1);
+    const layPrev = sumWin(now - 2 * d90, now - d90);
+    const latestNotice = warn
+      .filter((w) => w.noticeDate)
+      .sort((a, b) => (b.noticeDate || "").localeCompare(a.noticeDate || ""))[0]?.noticeDate;
+    const layoffCard = {
+      label: "⚠ Layoff Alerts — 90 Days",
+      value: `${layNow.toLocaleString()} workers`,
+      date: latestNotice ? `latest notice ${latestNotice}` : "",
+      chg: layPrev > 0 ? ((layNow - layPrev) / layPrev) * 100 : null,
+      chgLabel: "% vs prior 90 days",
+      invert: true,
+    };
+    // Anomaly card 2 — permits vs their own baseline: latest month against
+    // the trailing 12-month average (surge/slump signal for AZ growth).
+    const permitObs = obs
+      .filter((o) => o.seriesId === "AZBPPRIV" && o.value !== null)
+      .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+    const pLast = permitObs[permitObs.length - 1];
+    const prior12 = permitObs.slice(-13, -1);
+    const avg12 =
+      prior12.length >= 6
+        ? prior12.reduce((s, o) => s + (o.value || 0), 0) / prior12.length
+        : null;
+    const permitCard =
+      pLast && avg12
+        ? {
+            label: "AZ Building Permits",
+            value: Math.round(pLast.value || 0).toLocaleString(),
+            date: pLast.obsDate,
+            chg: ((pLast.value || 0) - avg12) / avg12 * 100,
+            chgLabel: "% vs 1-yr avg",
+            invert: false,
+          }
+        : null;
     return [
       unempCard,
       card("AZMFG", "AZ Manufacturing Jobs", (v) => `${Math.round(v)}k`),
-      card("AZ_DOD_CONTRACTS", "AZ Defense Contracts/mo", (v) => `$${Math.round(v / 1e6)}M`),
-    ].filter(Boolean) as { label: string; value: string; date: string; chg: number | null }[];
-  }, [latest, obs]);
+      layoffCard,
+      permitCard,
+    ].filter(Boolean) as {
+      label: string;
+      value: string;
+      date: string;
+      chg: number | null;
+      chgLabel?: string;
+      invert?: boolean;
+    }[];
+  }, [latest, obs, warn]);
 
   const setStatus = async (kind: "acquisitions" | "filings", id: string, status: string) => {
     await fetch(`/api/market/${kind}`, {
@@ -724,8 +780,8 @@ export default function MarketIntelPage() {
               <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
                 {c.date}
                 {c.chg !== null && (
-                  <span className={c.chg >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
-                    {" "}{c.chg >= 0 ? "▲" : "▼"} {Math.abs(c.chg).toFixed(1)}pp YoY
+                  <span className={(c.chg >= 0) !== !!c.invert ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                    {" "}{c.chg >= 0 ? "▲" : "▼"} {Math.abs(c.chg).toFixed(1)}{c.chgLabel ?? "pp YoY"}
                   </span>
                 )}
               </p>
@@ -972,11 +1028,11 @@ export default function MarketIntelPage() {
 <div className={chartCard}>
           <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Revenue vs Spending</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-            Annual, $B, Census Annual Survey of State &amp; Local Government Finances (state government only). Census notes the gap isn&apos;t a formal surplus/deficit, but it shows the fiscal trend.
+            Annual, $B, Census Annual Survey of State &amp; Local Government Finances (state government only). Chart shows the most recent 8 years; the table below has the full history. Census notes the gap isn&apos;t a formal surplus/deficit, but it shows the fiscal trend.
           </p>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={budgetRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+              <BarChart data={budgetRows.slice(-8)} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
                 <CartesianGrid stroke={grid} strokeDasharray="3 3" />
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} />
                 <YAxis tick={{ fontSize: 11, fill: tick }} />
@@ -990,10 +1046,10 @@ export default function MarketIntelPage() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className={`${tableWrap} mt-4`}>
+          <div className={`${tableWrap} mt-4 max-h-[300px] overflow-y-auto`}>
             <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
               <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                <th className={th}>Year</th><th className={th}>Revenue</th><th className={th}>Spending</th><th className={th}>Balance</th>
+                <th className={`${th} sticky top-0 bg-white dark:bg-[#132847]`}>Year</th><th className={`${th} sticky top-0 bg-white dark:bg-[#132847]`}>Revenue</th><th className={`${th} sticky top-0 bg-white dark:bg-[#132847]`}>Spending</th><th className={`${th} sticky top-0 bg-white dark:bg-[#132847]`}>Balance</th>
               </tr></thead>
               <tbody>
                 {[...budgetRows].reverse().map((r) => (
@@ -1014,11 +1070,11 @@ export default function MarketIntelPage() {
 <div className={`${chartCard} mt-4`}>
           <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Where the Spending Goes</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-            State expenditure by function, $B · Census. Public welfare is mostly Medicaid (AHCCCS); insurance trust is mainly state employee retirement payouts. &quot;Other&quot; covers everything else — debt interest, administration, police, natural resources, and smaller functions.
+            State expenditure by function, $B · Census (most recent 8 years). Public welfare is mostly Medicaid (AHCCCS); insurance trust is mainly state employee retirement payouts. &quot;Other&quot; covers everything else — debt interest, administration, police, natural resources, and smaller functions.
           </p>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={spendRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+              <BarChart data={spendRows.slice(-8)} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
                 <CartesianGrid stroke={grid} strokeDasharray="3 3" />
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} />
                 <YAxis tick={{ fontSize: 11, fill: tick }} />
@@ -1038,10 +1094,10 @@ export default function MarketIntelPage() {
             </ResponsiveContainer>
           </div>
           {spendRows.length > 0 && (
-            <div className={`${tableWrap} mt-4`}>
+            <div className={`${tableWrap} mt-4 max-h-[320px] overflow-y-auto`}>
               <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
                 <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                  <th className={th}>Category ({spendRows[spendRows.length - 1].date})</th><th className={th}>Amount</th><th className={th}>Share</th>
+                  <th className={`${th} sticky top-0 bg-white dark:bg-[#132847]`}>Category ({spendRows[spendRows.length - 1].date})</th><th className={`${th} sticky top-0 bg-white dark:bg-[#132847]`}>Amount</th><th className={`${th} sticky top-0 bg-white dark:bg-[#132847]`}>Share</th>
                 </tr></thead>
                 <tbody>
                   {["Public welfare", "Education", "Insurance trust", "Highways", "Corrections", "Health", "Other"].map((label) => {
@@ -1066,6 +1122,27 @@ export default function MarketIntelPage() {
             </div>
           )}
         </div>
+          {(() => {
+            const l = latest["AZ_DOD_CONTRACTS"];
+            if (!l || l.value === null) return null;
+            const chg = yoyChange(obs, "AZ_DOD_CONTRACTS");
+            return (
+              <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-[#132847]/60">
+                <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">🛡 AZ Defense Contracts</p>
+                <p className="text-sm text-slate-600 dark:text-white/70">
+                  <b>${Math.round(l.value / 1e6)}M</b>/mo · {l.obsDate}
+                  {chg !== null && (
+                    <span className={chg >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                      {" "}{chg >= 0 ? "▲" : "▼"} {Math.abs(chg).toFixed(1)}% YoY
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-slate-400 dark:text-white/40">
+                  Federal contract obligations in Arizona (USASpending) · full chart under Industry → Aerospace &amp; Defense.
+                </p>
+              </div>
+            );
+          })()}
             <EventStrip items={policyEvents} onDismiss={dismissEvent} />
           </SubSection>
 
