@@ -82,6 +82,12 @@ export default function ValleyDemographics() {
         9
       );
       mapRef.current = map;
+      // Scroll-wheel zoom while the map is in use, without trapping page
+      // scroll: enable on click/focus, disable when the pointer leaves.
+      map.on("focus", () => map.scrollWheelZoom.enable());
+      map.on("blur", () => map.scrollWheelZoom.disable());
+      containerRef.current.addEventListener("mouseleave", () => map.scrollWheelZoom.disable());
+      containerRef.current.addEventListener("click", () => map.scrollWheelZoom.enable());
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 18,
@@ -212,7 +218,7 @@ export default function ValleyDemographics() {
       </div>
       <p className="mt-1.5 text-xs text-slate-400 dark:text-white/40">
         {stats
-          ? `${stats.tracts.toLocaleString()} Maricopa County census tracts · ACS 5-year 2023${metric === "growth" ? ` · growth for ${stats.withGrowth} tracts with stable boundaries` : ""} · Drag to pan, scroll to zoom, click a tract for details.`
+          ? `${stats.tracts.toLocaleString()} Maricopa County census tracts · ACS 5-year 2023${metric === "growth" ? ` · growth for ${stats.withGrowth} tracts with stable boundaries` : ""} · Drag to pan — click the map, then scroll to zoom. Click a tract for details.`
           : "Source: US Census Bureau, American Community Survey 5-year."}
       </p>
     </div>

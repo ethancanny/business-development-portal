@@ -204,6 +204,7 @@ export default function MarketIntelPage() {
   const [latest, setLatest] = useState<LatestMap>({});
   const [obs, setObs] = useState<MiIndicatorObs[]>([]);
   const [tab, setTab] = useState<Tab>("acquisitions");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [acquisitions, setAcquisitions] = useState<MiAcquisition[]>([]);
   const [filings, setFilings] = useState<MiFiling[]>([]);
   const [filingCat, setFilingCat] = useState("all");
@@ -423,7 +424,7 @@ export default function MarketIntelPage() {
 
   /** Section event strips: recent major events relevant to each section. */
   const dismissEvent = (a: MiAcquisition) => setStatus("acquisitions", a.id, "dismissed");
-  const stripCutoff = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
+  const stripCutoff = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
   const recentEvents = (pred: (a: MiAcquisition) => boolean, n = 3) =>
     acquisitions
       .filter((a) => a.status !== "dismissed" && a.announcedDate && a.announcedDate >= stripCutoff && pred(a))
@@ -496,11 +497,12 @@ export default function MarketIntelPage() {
   }, [multiples, multBand, multMetric]);
 
   const headlines = useMemo(() => {
-    // Recency window: Major Events is a "what's new" feed, refreshed by the
-    // daily ingest — never a historical archive. Anything older than the
-    // window is excluded, so dismissing an item can't backfill older news.
-    const cutoff = new Date(Date.now() - 21 * 864e5).toISOString().slice(0, 10);
-    const items: { id: string; kind: string; title: string; detail: string; date: string; url: string; source: "acquisitions" | "filings" | "warn"; rawId: string }[] = [];
+    // Recency window: Major Events shows only the current day and the day
+    // before — a "what just happened" feed refreshed by the daily ingest,
+    // never a historical archive. Dismissed items can't backfill with older
+    // news because nothing older is eligible.
+    const cutoff = new Date(Date.now() - 1 * 864e5).toISOString().slice(0, 10);
+    const items: { id: string; kind: string; title: string; detail: string; summary: string; date: string; url: string; source: "acquisitions" | "filings" | "warn"; rawId: string }[] = [];
     const fmtVal = (v: number | null) =>
       v === null ? "" : v >= 1e9 ? ` · $${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? ` · $${Math.round(v / 1e6)}M` : "";
     for (const a of acquisitions) {
@@ -510,6 +512,7 @@ export default function MarketIntelPage() {
           kind: "Bankruptcy",
           title: a.target || "Unnamed company",
           detail: `${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}`,
+          summary: a.summary || "",
           date: a.announcedDate,
           url: a.sourceUrl,
           source: "acquisitions",
@@ -518,12 +521,13 @@ export default function MarketIntelPage() {
       }
     }
     for (const f of filings) {
-      if (f.majorEvent && f.status !== "dismissed" && f.filingDate && f.filingDate >= cutoff) {
+      if (f.majorEvent && f.azCompany && f.status !== "dismissed" && f.filingDate && f.filingDate >= cutoff) {
         items.push({
           id: `edgar-${f.id}`,
           kind: "8-K Bankruptcy",
           title: f.company || "Unnamed company",
-          detail: `${f.form}${f.azCompany ? " · AZ company" : " · National"}`,
+          detail: `${f.form} · AZ company`,
+          summary: f.summary || "",
           date: f.filingDate,
           url: f.url,
           source: "filings",
@@ -551,6 +555,7 @@ export default function MarketIntelPage() {
           kind: kindLabel[t],
           title: t === "acquisition" ? a.target || a.acquirer || "Unnamed deal" : a.target || "Unnamed",
           detail: `${a.acquirer && a.target && t === "acquisition" ? `${a.acquirer} → ${a.target} · ` : ""}${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}${fmtVal(a.dealValue ?? null)}`,
+          summary: a.summary || "",
           date: a.announcedDate,
           url: a.sourceUrl,
           source: "acquisitions",
@@ -569,6 +574,7 @@ export default function MarketIntelPage() {
         kind: "Major layoffs",
         title: w.employer,
         detail: `${w.headcount} affected · ${w.location}${w.industry ? ` · ${w.industry}` : ""}`,
+        summary: `${w.employer} filed a WARN notice for layoffs affecting ${w.headcount} employees in ${w.location}, Arizona${w.industry ? ` (${w.industry})` : ""}. Notice date ${w.noticeDate}.`,
         date: w.noticeDate,
         url: "",
         source: "warn",
@@ -644,7 +650,7 @@ export default function MarketIntelPage() {
         {headlines.length > 0 && (
           <div className="mb-6">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[#0d1f3c] dark:text-white">
-              Major events <span className="ml-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-xs normal-case text-slate-600 dark:text-white/60">AZ · last 21 days</span>
+              Major events <span className="ml-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-xs normal-case text-slate-600 dark:text-white/60">AZ only · last 2 days</span>
             </h2>
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {headlines.map((h) => {
@@ -682,6 +688,22 @@ export default function MarketIntelPage() {
                         {h.detail}{h.date ? ` · ${fmtDate(h.date)}` : ""}
                       </p>
                     </a>
+                    {h.summary && (
+                      <>
+                        <button
+                          onClick={() => setExpandedId((cur) => (cur === h.id ? null : h.id))}
+                          aria-expanded={expandedId === h.id}
+                          className={`mt-2 text-xs font-semibold ${label} hover:underline`}
+                        >
+                          {expandedId === h.id ? "Hide summary ▴" : "Summary ▾"}
+                        </button>
+                        {expandedId === h.id && (
+                          <p className="mt-1.5 border-t border-black/5 pt-2 text-sm leading-relaxed text-slate-700 dark:border-white/10 dark:text-white/80">
+                            {h.summary}
+                          </p>
+                        )}
+                      </>
+                    )}
                     <button
                       onClick={() => dismissHeadline(h)}
                       aria-label={`Dismiss ${h.title}`}
