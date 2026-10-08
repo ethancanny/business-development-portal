@@ -84,7 +84,7 @@ const shortDate = (d: string) => (d?.length >= 7 ? d.slice(0, 7) : d);
 
 /* ---------------- main page ---------------- */
 
-const TABS = ["acquisitions", "filings", "multiples"] as const;
+const TABS = ["acquisitions", "filings"] as const;
 type Tab = (typeof TABS)[number];
 
 /** Collapsible section: charts summarize, source data lives inside. */
@@ -115,6 +115,86 @@ function Section({
       </button>
       {open && <div className="pt-4">{children}</div>}
     </section>
+  );
+}
+
+/** Collapsible subsection, nested inside a Section. */
+function SubSection({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="mb-5">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 border-b border-slate-200 pb-1.5 text-left dark:border-white/10"
+      >
+        <span className="text-base font-bold text-[#0d1f3c] dark:text-white">{title}</span>
+        <span className="text-lg leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && <div className="pt-3">{children}</div>}
+    </div>
+  );
+}
+
+/** Compact highlight strip of major events relevant to a section. */
+function EventStrip({
+  items,
+  onDismiss,
+}: {
+  items: MiAcquisition[];
+  onDismiss: (a: MiAcquisition) => void;
+}) {
+  if (items.length === 0) return null;
+  const typeLabel: Record<string, string> = {
+    acquisition: "Acquisition",
+    bankruptcy: "Bankruptcy",
+    expansion: "Expansion",
+    contract: "Contract Award",
+    relocation: "Relocation",
+    ipo: "IPO",
+    policy: "Policy",
+  };
+  return (
+    <div className="mt-4">
+      <p className="mb-2 text-xs font-bold uppercase tracking-wider text-[#8a6f3c] dark:text-[#d4b37a]">
+        ★ Major events
+      </p>
+      <div className="grid gap-2 md:grid-cols-3">
+        {items.map((a) => (
+          <div
+            key={a.id}
+            className="relative rounded-lg border border-[#b8975a]/40 bg-[#b8975a]/5 p-3 dark:bg-[#b8975a]/10"
+          >
+            <a href={a.sourceUrl || undefined} target="_blank" rel="noreferrer" className="block">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#8a6f3c] dark:text-[#d4b37a]">
+                {typeLabel[a.eventType] || a.eventType}
+                {a.announcedDate ? ` · ${fmtDate(a.announcedDate)}` : ""}
+              </p>
+              <p className="mt-0.5 pr-4 text-sm font-semibold text-[#0d1f3c] dark:text-white">
+                {a.target || a.acquirer || "Unnamed"}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-white/50">{a.publisher || "News"}</p>
+            </a>
+            <button
+              onClick={() => onDismiss(a)}
+              aria-label="Dismiss event"
+              title="Dismiss"
+              className="absolute right-1.5 top-1.5 rounded-full px-1.5 py-0.5 text-xs leading-none text-slate-400 transition hover:bg-black/5 hover:text-slate-700 dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -341,6 +421,45 @@ export default function MarketIntelPage() {
     }
   };
 
+  /** Section event strips: recent major events relevant to each section. */
+  const dismissEvent = (a: MiAcquisition) => setStatus("acquisitions", a.id, "dismissed");
+  const recentEvents = (pred: (a: MiAcquisition) => boolean, n = 3) =>
+    acquisitions
+      .filter((a) => a.status !== "dismissed" && a.announcedDate && pred(a))
+      .sort((x, y) => (y.announcedDate || "").localeCompare(x.announcedDate || ""))
+      .slice(0, n);
+  const policyEvents = recentEvents((a) => a.eventType === "policy");
+  const expansionEvents = recentEvents((a) => a.eventType === "expansion" || a.eventType === "relocation");
+  const industryEvents = (industry: string) => recentEvents((a) => a.industry === industry);
+
+  const healthRows = useMemo(
+    () =>
+      indexRows(
+        filterSince(
+          seriesToRows(obs.filter((o) => o.seriesId === "SMS04000006562000001"), ["SMS04000006562000001"]),
+          fiveYearCutoff
+        ),
+        ["SMS04000006562000001"]
+      ),
+    [obs, fiveYearCutoff]
+  );
+  const mfgRows = useMemo(
+    () =>
+      indexRows(
+        filterSince(seriesToRows(obs.filter((o) => o.seriesId === "AZMFG"), ["AZMFG"]), fiveYearCutoff),
+        ["AZMFG"]
+      ),
+    [obs, fiveYearCutoff]
+  );
+  const consRows = useMemo(
+    () =>
+      indexRows(
+        filterSince(seriesToRows(obs.filter((o) => o.seriesId === "AZCONS"), ["AZCONS"]), fiveYearCutoff),
+        ["AZCONS"]
+      ),
+    [obs, fiveYearCutoff]
+  );
+
   const filteredFilings = filingCat === "all" ? filings : filings.filter((f) => f.category === filingCat);
   const visibleAcq = acquisitions.filter((a) => a.status !== "dismissed" && a.eventType !== "bankruptcy");
 
@@ -418,8 +537,9 @@ export default function MarketIntelPage() {
       contract: "Contract Award",
       relocation: "Relocation",
       ipo: "IPO",
+      policy: "Policy",
     };
-    for (const t of ["acquisition", "expansion", "contract", "relocation", "ipo"] as const) {
+    for (const t of ["acquisition", "expansion", "contract", "relocation", "ipo", "policy"] as const) {
       for (const a of byType(t, 2)) {
         items.push({
           id: `${t}-${a.id}`,
@@ -573,8 +693,56 @@ export default function MarketIntelPage() {
         )}
 
         {/* Sections — organized by data type; charts summarize, tables hold source data */}
-        <Section title="General Economic Data" sub="Arizona vs US indicators · FRED" defaultOpen>
-          <div className="grid gap-4 lg:grid-cols-2">
+        <Section title="Market Multiples" sub="Median deal multiples by industry and deal size — the valuation yardstick" defaultOpen>
+<div className={`${chartCard} lg:col-span-2`}>
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Market Multiples by Industry</h3>
+            <div className="flex flex-wrap gap-2">
+              {(["ebitda", "revenue"] as const).map((v) => (
+                <button key={v} onClick={() => setMultMetric(v)} className={tabBtn(multMetric === v)}>
+                  {v === "ebitda" ? "EV/EBITDA" : "EV/Revenue"}
+                </button>
+              ))}
+              {multBands.map((b) => (
+                <button key={b} onClick={() => setMultBand(b)} className={tabBtn(multBand === b)}>{b}</button>
+              ))}
+            </div>
+          </div>
+          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+            Median {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} multiples, {multBand} deal size. Sources: ExitValue.ai open data + manual entries.
+            {multMetric === "ebitda" && <span className="ml-1 italic">EBITDA data is sparse for smaller deals — try EV/Revenue or a larger band.</span>}
+          </p>
+          <div className="h-96">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={multChartData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 0 }}>
+                <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                <XAxis type="number" tick={{ fontSize: 11, fill: tick }} />
+                <YAxis
+                  type="category"
+                  dataKey={isMobile ? "short" : "industry"}
+                  width={isMobile ? 118 : 230}
+                  tick={{ fontSize: isMobile ? 11 : 12, fill: tick }}
+                />
+                <Tooltip
+                  contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                  formatter={(v, _name, props) => [`${v}x`, (props?.payload as { full?: string })?.full || ""]}
+                />
+                <Bar dataKey="value" fill={gold} radius={[0, 4, 4, 0]} barSize={16} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          {multChartData.length === 0 && (
+            <p className="py-4 text-center text-sm text-slate-400">No {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} data for this size band yet.</p>
+          )}
+        </div>
+          <div className="mt-4">
+            <MultiplesPanel multiples={multiples} onAdded={async () => setMultiples(await getJSON("/api/market/multiples"))} />
+          </div>
+        </Section>
+
+        <Section title="Arizona Economic Data" sub="State-level indicators, budget, demographics, and permitting" defaultOpen>
+          <SubSection title="Economic Indicators" defaultOpen>
+            <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Unemployment — AZ vs US</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly, %, FRED · 5-yr</p>
@@ -630,7 +798,7 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
-          <div className={chartCard}>
+<div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Latest Indicator Values</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Source data behind the charts · FRED</p>
             <div className={tableWrap}>
@@ -654,11 +822,11 @@ export default function MarketIntelPage() {
               </table>
             </div>
           </div>
-          </div>
-        </Section>
+            </div>
+          </SubSection>
 
-        <Section title="Arizona State Revenue & Spending" sub="Annual state budget · Census Bureau" defaultOpen>
-        <div className={chartCard}>
+          <SubSection title="State Revenue & Spending">
+<div className={chartCard}>
           <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Revenue vs Spending</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
             Annual, $B, Census Annual Survey of State &amp; Local Government Finances (state government only). Census notes the gap isn&apos;t a formal surplus/deficit, but it shows the fiscal trend.
@@ -700,7 +868,7 @@ export default function MarketIntelPage() {
             </table>
           </div>
         </div>
-        <div className={`${chartCard} mt-4`}>
+<div className={`${chartCard} mt-4`}>
           <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Where the Spending Goes</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
             State expenditure by function, $B · Census. Public welfare is mostly Medicaid (AHCCCS); insurance trust is mainly state employee retirement payouts. &quot;Other&quot; covers everything else — debt interest, administration, police, natural resources, and smaller functions.
@@ -755,9 +923,10 @@ export default function MarketIntelPage() {
             </div>
           )}
         </div>
-        </Section>
+            <EventStrip items={policyEvents} onDismiss={dismissEvent} />
+          </SubSection>
 
-        <Section title="Demographics" sub="Maricopa County census tracts · Census ACS 5-year" defaultOpen>
+          <SubSection title="Demographics">
 <div className={`${chartCard} lg:col-span-2`}>
           <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Valley Demographics — Maricopa County</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
@@ -765,10 +934,10 @@ export default function MarketIntelPage() {
           </p>
           <ValleyDemographics />
         </div>
-        </Section>
+          </SubSection>
 
-        <Section title="Permitting & Licensing" sub="New housing units authorized · FRED">
-          <div className="grid gap-4 lg:grid-cols-2">
+          <SubSection title="Permitting & Licensing">
+            <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Housing Permits</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">New private units authorized, monthly, FRED · 5-yr</p>
@@ -784,7 +953,7 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
-          <div className={chartCard}>
+<div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Permits — Recent Months</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Source data · FRED AZBPPRIV</p>
             <div className={tableWrap}>
@@ -804,11 +973,14 @@ export default function MarketIntelPage() {
               </table>
             </div>
           </div>
-          </div>
+            </div>
+            <EventStrip items={expansionEvents} onDismiss={dismissEvent} />
+          </SubSection>
         </Section>
 
-        <Section title="Defense & Aerospace" sub="Federal contract obligations in Arizona · USASpending.gov">
-          <div className="grid gap-4 lg:grid-cols-2">
+        <Section title="Industry" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades" defaultOpen>
+          <SubSection title="Aerospace & Defense" defaultOpen>
+            <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly obligations, $M, USASpending.gov · 5-yr</p>
@@ -826,7 +998,7 @@ export default function MarketIntelPage() {
               </ResponsiveContainer>
             </div>
           </div>
-          <div className={chartCard}>
+<div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Contracts — Recent Months</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Source data · USASpending.gov, $M</p>
             <div className={tableWrap}>
@@ -847,7 +1019,72 @@ export default function MarketIntelPage() {
               </table>
             </div>
           </div>
+            </div>
+            <EventStrip items={industryEvents("Aerospace & Defense")} onDismiss={dismissEvent} />
+          </SubSection>
+
+          <SubSection title="Healthcare">
+            <div className="grid gap-4 lg:grid-cols-2">
+          <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Healthcare Employment — AZ</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={healthRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="SMS04000006562000001" name="Healthcare" stroke={green} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
+            </div>
+            <EventStrip items={industryEvents("Healthcare")} onDismiss={dismissEvent} />
+          </SubSection>
+
+          <SubSection title="Advanced Manufacturing">
+            <div className="grid gap-4 lg:grid-cols-2">
+          <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Manufacturing Employment — AZ</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={mfgRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="AZMFG" name="Manufacturing" stroke={gold} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+            </div>
+            <EventStrip items={industryEvents("Advanced Manufacturing")} onDismiss={dismissEvent} />
+          </SubSection>
+
+          <SubSection title="Specialty Trades & Construction">
+            <div className="grid gap-4 lg:grid-cols-2">
+          <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Construction Employment — AZ</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={consRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="AZCONS" name="Construction" stroke={orange} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+            </div>
+            <EventStrip items={industryEvents("Specialty Trades & Construction")} onDismiss={dismissEvent} />
+          </SubSection>
         </Section>
 
         <Section title="Layoffs & WARN Notices" sub="Announced layoffs — often precede sales">
@@ -890,54 +1127,13 @@ export default function MarketIntelPage() {
           </div>
         </Section>
 
-        <Section title="Deals, Filings & Multiples" sub="AZ acquisitions, SEC filings, valuation multiples">
-<div className={`${chartCard} lg:col-span-2`}>
-          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Market Multiples by Industry</h3>
-            <div className="flex flex-wrap gap-2">
-              {(["ebitda", "revenue"] as const).map((v) => (
-                <button key={v} onClick={() => setMultMetric(v)} className={tabBtn(multMetric === v)}>
-                  {v === "ebitda" ? "EV/EBITDA" : "EV/Revenue"}
-                </button>
-              ))}
-              {multBands.map((b) => (
-                <button key={b} onClick={() => setMultBand(b)} className={tabBtn(multBand === b)}>{b}</button>
-              ))}
-            </div>
-          </div>
-          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-            Median {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} multiples, {multBand} deal size. Sources: ExitValue.ai open data + manual entries.
-            {multMetric === "ebitda" && <span className="ml-1 italic">EBITDA data is sparse for smaller deals — try EV/Revenue or a larger band.</span>}
-          </p>
-          <div className="h-96">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={multChartData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 0 }}>
-                <CartesianGrid stroke={grid} strokeDasharray="3 3" />
-                <XAxis type="number" tick={{ fontSize: 11, fill: tick }} />
-                <YAxis
-                  type="category"
-                  dataKey={isMobile ? "short" : "industry"}
-                  width={isMobile ? 118 : 230}
-                  tick={{ fontSize: isMobile ? 11 : 12, fill: tick }}
-                />
-                <Tooltip
-                  contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
-                  formatter={(v, _name, props) => [`${v}x`, (props?.payload as { full?: string })?.full || ""]}
-                />
-                <Bar dataKey="value" fill={gold} radius={[0, 4, 4, 0]} barSize={16} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          {multChartData.length === 0 && (
-            <p className="py-4 text-center text-sm text-slate-400">No {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} data for this size band yet.</p>
-          )}
-        </div>
-          <div className="mt-4">
+        <Section title="Deals & Filings" sub="AZ acquisitions and SEC filings">
+          <div>
 {/* Tabs */}
         <div className="mb-4 flex flex-wrap gap-2">
           {(TABS as readonly string[]).map((t) => (
             <button key={t} onClick={() => setTab(t as Tab)} className={tabBtn(tab === t)}>
-              {t === "acquisitions" ? "Acquisitions" : t === "filings" ? "Filings" : "Multiples"}
+              {t === "acquisitions" ? "Acquisitions" : t === "filings" ? "Filings" : t}
             </button>
           ))}
         </div>
@@ -1010,9 +1206,6 @@ export default function MarketIntelPage() {
           </div>
         )}
 
-        {tab === "multiples" && (
-          <MultiplesPanel multiples={multiples} onAdded={async () => setMultiples(await getJSON("/api/market/multiples"))} />
-        )}
           </div>
         </Section>
 
