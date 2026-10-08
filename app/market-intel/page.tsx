@@ -1146,7 +1146,7 @@ export default function MarketIntelPage() {
               </div>
               <div className={chartCard}>
                 <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Permits by County — {permitMonth ? fmtMonth(permitMonth) : "Latest"}</h3>
-                <p className="mb-3 text-xs text-slate-500 dark:text-white/40">All 15 counties · total units authorized · U of A EBRC</p>
+                <p className="mb-3 text-xs text-slate-500 dark:text-white/40">11 of 15 counties · total units authorized · U of A EBRC (Apache, Graham, Greenlee &amp; La Paz aren&apos;t published by EBRC)</p>
                 <div className={tableWrap}>
                   <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
                     <thead><tr className="border-b border-slate-200 dark:border-white/10">
