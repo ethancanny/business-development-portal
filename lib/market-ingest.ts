@@ -772,14 +772,22 @@ export async function ingestCensus(): Promise<number> {
   return total;
 }
 
-/** Arizona state government revenue & expenditure from the Census Annual Survey
- *  of State Government Finances (timeseries/govsstatefin, 2012+). Requires CENSUS_KEY. */
+/** Arizona state government revenue from the Census Annual Survey
+ *  of State Government Finances (timeseries/govsstatefin, 2012+). Requires CENSUS_KEY.
+ *  Note: the API only exposes revenue aggregates (no expenditure series). */
 export async function ingestCensusStateFin(): Promise<number> {
   const key = process.env.CENSUS_KEY;
   if (!key) {
     await logSync("census-fin", "skipped", 0, "CENSUS_KEY not set");
     return 0;
   }
+  // Verified SF codes (via AGG_DESC_LABEL): SF0001 = Total Revenue,
+  // SF0036 = Total Taxes, SF0004 = From Federal Government
+  const series: { code: string; seriesId: string; title: string }[] = [
+    { code: "SF0001", seriesId: "AZ_STATE_REVENUE", title: "Arizona State Government Total Revenue (Census)" },
+    { code: "SF0036", seriesId: "AZ_STATE_TAXES", title: "Arizona State Government Tax Revenue (Census)" },
+    { code: "SF0004", seriesId: "AZ_STATE_FEDERAL_AID", title: "Arizona State Government Federal Aid (Census)" },
+  ];
   try {
     const url =
       `https://api.census.gov/data/timeseries/govsstatefin?get=YEAR,AGG_DESC,AMOUNT&for=state:04&key=${key}`;
@@ -797,28 +805,17 @@ export async function ingestCensusStateFin(): Promise<number> {
     const iYear = headers.indexOf("YEAR");
     const iDesc = headers.indexOf("AGG_DESC");
     const iAmt = headers.indexOf("AMOUNT");
-    const seen = new Set<string>();
+    const byCode = new Map(series.map((s) => [s.code, s]));
     const rows: IndicatorInput[] = [];
     for (const r of data.slice(1)) {
-      const desc = (r[iDesc] || "").trim();
-      seen.add(desc);
-      const dl = desc.toLowerCase();
-      let seriesId: string | null = null;
-      let title = "";
-      if (dl === "total revenue") {
-        seriesId = "AZ_STATE_REVENUE";
-        title = "Arizona State Government Total Revenue (Census)";
-      } else if (dl === "total expenditure" || dl === "total expenditures") {
-        seriesId = "AZ_STATE_EXPENDITURE";
-        title = "Arizona State Government Total Expenditure (Census)";
-      }
-      if (!seriesId) continue;
+      const s = byCode.get((r[iDesc] || "").trim());
+      if (!s) continue;
       const amt = Number((r[iAmt] || "").replace(/,/g, ""));
       if (!Number.isFinite(amt)) continue;
       rows.push({
         source: "census" as MiIndicatorSource,
-        seriesId,
-        title,
+        seriesId: s.seriesId,
+        title: s.title,
         units: "Thousands of dollars",
         frequency: "Annual",
         obsDate: `${r[iYear]}-01-01`,
@@ -831,8 +828,8 @@ export async function ingestCensusStateFin(): Promise<number> {
       total > 0 ? "ok" : "error",
       total,
       total > 0
-        ? `Census state finance: revenue & expenditure (${rows.length} obs)`
-        : `No total revenue/expenditure aggregates found. Seen: ${Array.from(seen).slice(0, 12).join(" | ")}`
+        ? `Census state finance: ${series.length} revenue series (${rows.length} obs)`
+        : "No matching aggregates found"
     );
     return total;
   } catch (err) {

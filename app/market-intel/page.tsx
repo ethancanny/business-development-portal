@@ -115,7 +115,7 @@ export default function MarketIntelPage() {
         const [latestData, obsData, acq, fil, warnData, mult, log] = await Promise.all([
           getJSON<LatestMap>("/api/market/latest"),
           getJSON<MiIndicatorObs[]>(
-            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE"
+            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_TAXES,AZ_STATE_FEDERAL_AID"
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
@@ -220,17 +220,23 @@ export default function MarketIntelPage() {
   const budgetRows = useMemo(() => {
     const rows = filterSince(
       seriesToRows(
-        obs.filter((o) => ["AZ_STATE_REVENUE", "AZ_STATE_EXPENDITURE"].includes(o.seriesId)),
-        ["AZ_STATE_REVENUE", "AZ_STATE_EXPENDITURE"]
+        obs.filter((o) => ["AZ_STATE_REVENUE", "AZ_STATE_TAXES", "AZ_STATE_FEDERAL_AID"].includes(o.seriesId)),
+        ["AZ_STATE_REVENUE", "AZ_STATE_TAXES", "AZ_STATE_FEDERAL_AID"]
       ),
       fiveYearCutoff
     );
     // series are in $000s; display in $B
-    return rows.map((r) => ({
-      date: r.date.slice(0, 4),
-      Revenue: typeof r.AZ_STATE_REVENUE === "number" ? Math.round(r.AZ_STATE_REVENUE / 1e5) / 10 : null,
-      Spending: typeof r.AZ_STATE_EXPENDITURE === "number" ? Math.round(r.AZ_STATE_EXPENDITURE / 1e5) / 10 : null,
-    }));
+    const toB = (v: unknown) => (typeof v === "number" ? Math.round(v / 1e5) / 10 : null);
+    return rows.map((r) => {
+      const taxes = toB(r.AZ_STATE_TAXES);
+      const federal = toB(r.AZ_STATE_FEDERAL_AID);
+      const total = toB(r.AZ_STATE_REVENUE);
+      const other =
+        total !== null && taxes !== null && federal !== null
+          ? Math.round((total - taxes - federal) * 10) / 10
+          : null;
+      return { date: r.date.slice(0, 4), Taxes: taxes, "Federal aid": federal, Other: other };
+    });
   }, [obs, fiveYearCutoff]);
 
   const statCards = useMemo(() => {
@@ -559,9 +565,9 @@ export default function MarketIntelPage() {
           </div>
         {/* State budget — full width */}
         <div className={`${chartCard} lg:col-span-2`}>
-          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona State Budget — Revenue vs Spending</h3>
+          <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona State Revenue</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-            Annual, $B, Census Annual Survey of State Government Finances · 5-yr. Census notes the gap isn&apos;t a formal surplus/deficit, but it shows the fiscal trend.
+            Annual state government revenue by source, $B, Census Annual Survey of State Government Finances · 5-yr. The Census API doesn&apos;t publish a matching expenditure series.
           </p>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
@@ -574,8 +580,9 @@ export default function MarketIntelPage() {
                   formatter={(v, name) => [`$${v}B`, name]}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Revenue" fill={green} radius={[2, 2, 0, 0]} />
-                <Bar dataKey="Spending" fill={gold} radius={[2, 2, 0, 0]} />
+                <Bar dataKey="Taxes" stackId="rev" fill={gold} />
+                <Bar dataKey="Federal aid" stackId="rev" fill={blue} />
+                <Bar dataKey="Other" stackId="rev" fill={green} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
