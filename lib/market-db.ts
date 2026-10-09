@@ -284,7 +284,19 @@ function computeFit(r: CompanyInput): { fit: boolean; why: string } {
 export async function importCompanies(source: string, rows: CompanyInput[], reset: boolean): Promise<{ received: number; total: number }> {
   await ensureSchema();
   const db = sql();
-  const clean = rows.filter((r) => r && r.dedupKey && r.name && r.source === source);
+  const filtered = rows.filter((r) => r && r.dedupKey && r.name && r.source === source);
+  // Dedupe by dedupKey (last occurrence wins). A multi-row
+  // INSERT ... ON CONFLICT DO UPDATE aborts the entire statement when the
+  // same (source, dedup_key) pair appears twice in one VALUES list
+  // ("ON CONFLICT DO UPDATE command cannot affect row a second time") —
+  // the failure behind the Oct 9, 2026 consolidation data loss.
+  const byKey: Record<string, CompanyInput> = {};
+  const keyOrder: string[] = [];
+  for (const r of filtered) {
+    if (!byKey[r.dedupKey]) keyOrder.push(r.dedupKey);
+    byKey[r.dedupKey] = r;
+  }
+  const clean = keyOrder.map((k) => byKey[k]);
   for (const r of clean) {
     const { fit, why } = computeFit(r);
     try {
@@ -375,32 +387,65 @@ const STATUS_RANK: Record<string, number> = { new: 0, dismissed: 1, keep: 2, add
  * row per company. Fit is re-judged by computeFit on the consolidated numbers
  * at insert. Triage status carries over from the best-ranked absorbed row.
  */
-export async function consolidateCompanies(rows: ConsolidateRow[]): Promise<{ groups: number; absorbed: number }> {
+export async function consolidateCompanies(rowsIn: ConsolidateRow[]): Promise<{ groups: number; absorbed: number }> {
   await ensureSchema();
   const db = sql();
   const keyOf = (s: string, d: string) => `${s}|${d}`;
+  // (a) Dedupe the consolidated rows themselves by (source, dedupKey).
+  // Two distinct groups can slugify to the same ENT key (long names share
+  // a truncated slug); left in one payload they collide in the import's
+  // multi-row INSERT and abort it. Merge their absorb lists into one row.
+  const rowByKey: Record<string, ConsolidateRow> = {};
+  const rowOrder: string[] = [];
+  for (const r of rowsIn) {
+    const k = keyOf(r.source, r.dedupKey);
+    const prev = rowByKey[k];
+    if (prev) {
+      const abs: Record<string, true> = {};
+      for (const a of prev.absorb ?? []) abs[a] = true;
+      for (const a of r.absorb ?? []) abs[a] = true;
+      prev.absorb = Object.keys(abs);
+    } else {
+      rowByKey[k] = r;
+      rowOrder.push(k);
+    }
+  }
+  const rows = rowOrder.map((k) => rowByKey[k]);
+  // A consolidated row's own key is never deleted below: when a prior
+  // consolidated row is re-absorbed into its own successor (same key), the
+  // import updates it in place — deleting it would erase the replacement.
+  const ownKeys: Record<string, true> = {};
+  for (const k of rowOrder) ownKeys[k] = true;
+  const seenStatus: Record<string, true> = {};
+  const statusKeys: string[] = [];
   const seenKeys: Record<string, true> = {};
   const absorbKeys: string[] = [];
   for (const r of rows) {
     for (const k of r.absorb ?? []) {
-      if (!seenKeys[k]) {
+      if (!seenStatus[k]) {
+        seenStatus[k] = true;
+        statusKeys.push(k);
+      }
+      if (!seenKeys[k] && !ownKeys[k]) {
         seenKeys[k] = true;
         absorbKeys.push(k);
       }
     }
   }
+  // Read absorbed statuses before any write (triage carry-over).
   const statusByKey = new Map<string, string>();
-  for (let i = 0; i < absorbKeys.length; i += 1500) {
-    const chunk = absorbKeys.slice(i, i + 1500);
+  for (let i = 0; i < statusKeys.length; i += 1500) {
+    const chunk = statusKeys.slice(i, i + 1500);
     const found = await db`SELECT source, dedup_key, status FROM mi_companies WHERE (source || '|' || dedup_key) = ANY(${chunk})`;
     for (const f of found as unknown as Record<string, unknown>[]) {
       statusByKey.set(keyOf(String(f.source), String(f.dedup_key)), String(f.status));
     }
   }
-  for (let i = 0; i < absorbKeys.length; i += 1500) {
-    const chunk = absorbKeys.slice(i, i + 1500);
-    await db`DELETE FROM mi_companies WHERE (source || '|' || dedup_key) = ANY(${chunk})`;
-  }
+  // (b) Import the consolidated replacement rows FIRST. The absorbed
+  // member rows are deleted only after every import has succeeded: a
+  // failed import now leaves duplicates behind (the next consolidation
+  // run re-groups and heals them) instead of the Oct 9, 2026 data loss,
+  // where members were deleted first and a mid-import abort erased them.
   const bySource = new Map<string, ConsolidateRow[]>();
   const sourceOrder: string[] = [];
   for (const r of rows) {
@@ -411,6 +456,10 @@ export async function consolidateCompanies(rows: ConsolidateRow[]): Promise<{ gr
   }
   for (const source of sourceOrder) {
     await importCompanies(source, bySource.get(source) ?? [], false);
+  }
+  for (let i = 0; i < absorbKeys.length; i += 1500) {
+    const chunk = absorbKeys.slice(i, i + 1500);
+    await db`DELETE FROM mi_companies WHERE (source || '|' || dedup_key) = ANY(${chunk})`;
   }
   const keysByStatus = new Map<string, string[]>();
   const statusOrder: string[] = [];
