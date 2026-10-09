@@ -1611,7 +1611,220 @@ export async function ingestCommoditySpot(): Promise<number> {
   return total;
 }
 
-export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "sector_counts" | "commodity_spot" | "all";
+/** Business size profiles (Ethan, Oct 2026): how many Arizona companies in
+ * each focus industry sit in the $5–20M revenue / $500K–$2M EBITDA target
+ * bands vs smaller and bigger firms. Sources, cross-referenced every run:
+ *  - Census SUSB (state file): AZ firm/establishment/employment/receipts
+ *    totals by sector (actuals).
+ *  - Census SUSB (US 6-digit receipts-size file): the receipts-class
+ *    distribution per industry, applied to the AZ totals (modeled split —
+ *    SUSB publishes receipts size nationally, not by state).
+ *  - BLS QCEW (independent agency, UI records): AZ establishment counts by
+ *    sector, stored alongside CBP so the three sources can be reconciled in
+ *    the sector-xcheck log line every run. */
+const SUSB_SECTORS: { naics: string; slug: string; name: string }[] = [
+  { naics: "--", slug: "TOTAL", name: "All sectors" },
+  { naics: "23", slug: "23", name: "Construction" },
+  { naics: "31-33", slug: "3133", name: "Manufacturing" },
+  { naics: "62", slug: "62", name: "Health Care & Social Assistance" },
+];
+
+async function fetchSusbWorkbook(year: number, file: string): Promise<XLSX.WorkBook | null> {
+  try {
+    const res = await fetch(`https://www2.census.gov/programs-surveys/susb/tables/${year}/${file}_${year}.xlsx`);
+    if (!res.ok) return null;
+    const buf = new Uint8Array(await res.arrayBuffer());
+    return XLSX.read(buf, { type: "array" });
+  } catch {
+    return null;
+  }
+}
+
+function susbSheetRows(wb: XLSX.WorkBook, match: string): unknown[][] {
+  const name = wb.SheetNames.find((n) => n.toLowerCase().includes(match)) ?? wb.SheetNames[0];
+  return XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true }) as unknown[][];
+}
+
+function susbSectorKey(naics: string): string | null {
+  if (!/^\d{6}$/.test(naics)) return null;
+  if (naics.startsWith("3364")) return "3364";
+  if (naics.startsWith("23")) return "23";
+  if (/^(31|32|33)/.test(naics)) return "3133";
+  if (naics.startsWith("62")) return "62";
+  return null;
+}
+
+export async function ingestSusbSizes(): Promise<number> {
+  // SUSB vintages lag ~3 years; try the newest plausible year first.
+  const thisYear = new Date().getFullYear();
+  let year = 0;
+  let det: XLSX.WorkBook | null = null;
+  let rcpt: XLSX.WorkBook | null = null;
+  for (const y of [thisYear - 3, thisYear - 4, thisYear - 5]) {
+    det = await fetchSusbWorkbook(y, "us_state_naics_detailedsizes");
+    if (!det) continue;
+    rcpt = await fetchSusbWorkbook(y, "us_6digitnaics_rcptsize");
+    if (rcpt) {
+      year = y;
+      break;
+    }
+    det = null;
+  }
+  if (!det || !rcpt || !year) {
+    await logSync("susb_sizes", "error", 0, "SUSB workbooks not found for any recent vintage");
+    return 0;
+  }
+  const obsDate = `${year}-01-01`;
+  const rows: IndicatorInput[] = [];
+  const push = (seriesId: string, title: string, units: string, value: number | null, source: MiIndicatorSource = "census") => {
+    if (value === null || !Number.isFinite(value)) return;
+    rows.push({ source, seriesId, title, units, frequency: "Annual", obsDate, value: Math.round(value) });
+  };
+
+  // --- AZ actuals from the state detailed-sizes file ---
+  const detRows = susbSheetRows(det, "detailed");
+  const hdrIdx = detRows.findIndex((r) => String(r[0]) === "State");
+  const azTotals = new Map<string, { firms: number; estab: number; emp: number; rcptK: number }>();
+  if (hdrIdx >= 0) {
+    for (const r of detRows.slice(hdrIdx + 1)) {
+      if (String(r[0]) !== "04" || String(r[4]) !== "01: Total") continue;
+      const sec = SUSB_SECTORS.find((s) => s.naics === String(r[2]));
+      if (!sec) continue;
+      azTotals.set(sec.slug, {
+        firms: Number(r[5]) || 0,
+        estab: Number(r[6]) || 0,
+        emp: Number(r[7]) || 0,
+        rcptK: Number(r[11]) || 0,
+      });
+    }
+  }
+  for (const sec of SUSB_SECTORS) {
+    const t = azTotals.get(sec.slug);
+    if (!t) continue;
+    push(`SUSB_AZ_${sec.slug}_FIRMS`, `SUSB — AZ ${sec.name} firms`, "Firms", t.firms);
+    push(`SUSB_AZ_${sec.slug}_ESTAB`, `SUSB — AZ ${sec.name} establishments`, "Establishments", t.estab);
+    push(`SUSB_AZ_${sec.slug}_EMP`, `SUSB — AZ ${sec.name} employment`, "Employees", t.emp);
+    push(`SUSB_AZ_${sec.slug}_RCPT`, `SUSB — AZ ${sec.name} receipts`, "Dollars", t.rcptK * 1000);
+  }
+
+  // --- US receipts-class distribution per industry (6-digit file) ---
+  const rcptRows = susbSheetRows(rcpt, "6-digit");
+  const rHdr = rcptRows.findIndex((r) => String(r[0]) === "NAICS");
+  const classFirms = new Map<string, Map<number, number>>();
+  if (rHdr >= 0) {
+    for (const r of rcptRows.slice(rHdr + 1)) {
+      const key = susbSectorKey(String(r[0]));
+      if (!key) continue;
+      const clsLabel = String(r[2]);
+      const clsNum = Number(clsLabel.slice(0, 2));
+      if (!Number.isFinite(clsNum) || clsNum < 2 || clsNum > 18) continue;
+      if (!classFirms.has(key)) classFirms.set(key, new Map());
+      const m = classFirms.get(key)!;
+      m.set(clsNum, (m.get(clsNum) ?? 0) + (Number(r[3]) || 0));
+    }
+  }
+  const modeledBase = new Map<string, number>();
+  for (const sec of SUSB_SECTORS) {
+    const t = azTotals.get(sec.slug);
+    if (t && t.firms > 0 && sec.slug !== "TOTAL") modeledBase.set(sec.slug, t.firms);
+  }
+  // A&D has no state-level SUSB row (sector file only): use the latest CBP
+  // 3364 establishment count as the firm base — labeled as a proxy.
+  const cbp3364 = await getIndicatorSeries(["CBP_AZ_SEC_3364_ESTAB", "CBP_AZ_SEC_3364_EMP"]).catch(() => []);
+  const latestOf = (sid: string) => {
+    const s = cbp3364.filter((o) => o.seriesId === sid && o.value !== null).sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+    return s.length ? s[s.length - 1].value : null;
+  };
+  const adBase = latestOf("CBP_AZ_SEC_3364_ESTAB");
+  if (adBase) {
+    modeledBase.set("3364", adBase);
+    push("SUSB_AZ_3364_FIRMS", "AZ Aerospace & Defense firms (CBP establishment proxy)", "Firms", adBase);
+    push("SUSB_AZ_3364_ESTAB", "AZ Aerospace & Defense establishments (CBP)", "Establishments", adBase);
+    push("SUSB_AZ_3364_EMP", "AZ Aerospace & Defense employment (CBP)", "Employees", latestOf("CBP_AZ_SEC_3364_EMP"));
+  }
+  for (const [slug, base] of Array.from(modeledBase.entries())) {
+    const dist = classFirms.get(slug);
+    if (!dist) continue;
+    const tot = Array.from(dist.values()).reduce((a, b) => a + b, 0);
+    if (!tot) continue;
+    for (const [clsNum, firms] of Array.from(dist.entries())) {
+      const id = `SUSB_AZ_${slug}_CLS${String(clsNum).padStart(2, "0")}`;
+      push(id, `SUSB modeled — AZ firms by receipts class ${clsNum}`, "Firms (modeled)", (base * firms) / tot);
+    }
+  }
+
+  // --- BLS QCEW cross-reference (independent source) ---
+  const qcew = new Map<string, { estab: number; emp: number; year: number }>();
+  for (const y of [thisYear - 1, thisYear - 2]) {
+    try {
+      const res = await fetch(`https://data.bls.gov/cew/data/api/${y}/a/area/04000.csv`);
+      if (!res.ok) continue;
+      const text = await res.text();
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) continue;
+      const hdr = parseCsvLine(lines[0]).map((h) => h.toLowerCase());
+      const ix = (n: string) => hdr.indexOf(n);
+      const want: Record<string, { agg: string; slug: string }> = {
+        "10": { agg: "51", slug: "TOTAL" },
+        "23": { agg: "54", slug: "23" },
+        "31-33": { agg: "54", slug: "3133" },
+        "62": { agg: "54", slug: "62" },
+        "3364": { agg: "56", slug: "3364" },
+      };
+      for (const line of lines.slice(1)) {
+        const c = parseCsvLine(line);
+        if (c[ix("own_code")] !== "5") continue;
+        const w = want[c[ix("industry_code")]];
+        if (!w || c[ix("agglvl_code")] !== w.agg) continue;
+        qcew.set(w.slug, {
+          estab: Number(c[ix("annual_avg_estabs")]) || 0,
+          emp: Number(c[ix("annual_avg_emplvl")]) || 0,
+          year: y,
+        });
+      }
+      if (qcew.size) break;
+    } catch {
+      continue;
+    }
+  }
+  for (const [slug, q] of Array.from(qcew.entries())) {
+    const name = slug === "TOTAL" ? "All sectors" : slug === "3364" ? "Aerospace & Defense" : (SUSB_SECTORS.find((s) => s.slug === slug)?.name ?? slug);
+    rows.push({ source: "bls", seriesId: `QCEW_AZ_${slug}_ESTAB`, title: `QCEW — AZ ${name} establishments`, units: "Establishments", frequency: "Annual", obsDate: `${q.year}-01-01`, value: q.estab });
+    rows.push({ source: "bls", seriesId: `QCEW_AZ_${slug}_EMP`, title: `QCEW — AZ ${name} employment`, units: "Employees", frequency: "Annual", obsDate: `${q.year}-01-01`, value: q.emp });
+  }
+
+  const total = await upsertIndicatorObs(rows);
+
+  // --- sector-xcheck: CBP vs SUSB vs QCEW establishment counts ---
+  const cbpIds = ["23", "3133", "62", "3364"].map((s) => `CBP_AZ_SEC_${s}_ESTAB`);
+  const cbpObs = await getIndicatorSeries(cbpIds).catch(() => []);
+  const cbpLatest = (slug: string) => {
+    const s = cbpObs.filter((o) => o.seriesId === `CBP_AZ_SEC_${slug}_ESTAB` && o.value !== null).sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+    return s.length ? { v: s[s.length - 1].value ?? 0, y: s[s.length - 1].obsDate.slice(0, 4) } : null;
+  };
+  const parts: string[] = [];
+  let xbad = false;
+  for (const slug of ["23", "3133", "62", "3364"]) {
+    const cbp = cbpLatest(slug);
+    const susb = azTotals.get(slug)?.estab ?? (slug === "3364" ? adBase : undefined);
+    const q = qcew.get(slug);
+    if (!cbp || !q) {
+      xbad = true;
+      parts.push(`${slug}: cross-check incomplete (missing ${!cbp ? "CBP" : "QCEW"})`);
+      continue;
+    }
+    const dq = ((q.estab - cbp.v) / cbp.v) * 100;
+    parts.push(
+      `${slug}: CBP ${cbp.v.toLocaleString()} (${cbp.y}) · SUSB ${susb ? susb.toLocaleString() : "n/a"} (${year}) · QCEW ${q.estab.toLocaleString()} (${q.year}, ${dq >= 0 ? "+" : ""}${dq.toFixed(0)}% vs CBP)`
+    );
+  }
+  parts.push("QCEW counts UI reporting units (multi-establishment employers split) — gaps vs CBP are definitional and tracked here");
+  await logSync("sector-xcheck", xbad ? "error" : "ok", 0, parts.join(" · "));
+  await logSync("susb_sizes", "ok", total, `SUSB ${year} AZ size profiles + QCEW ${qcew.size ? "cross-reference" : "UNAVAILABLE"}`);
+  return total;
+}
+
+export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "sector_counts" | "commodity_spot" | "susb_sizes" | "all";
 
 export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -1631,6 +1844,7 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["census", ingestCensusStateFin],
     ["county_permits", ingestCountyPermits],
     ["sector_counts", ingestSectorCounts],
+    ["susb_sizes", ingestSusbSizes],
   ];
   for (const [name, fn] of jobs) {
     if (source !== "all" && source !== name) continue;
