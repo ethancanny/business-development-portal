@@ -6,7 +6,16 @@ export function middleware(req: NextRequest) {
 
   // Public routes: login page, auth API (login needs no session), and brand assets.
   // Market ingest endpoints use their own CRON_SECRET auth (Vercel Cron has no session cookie).
-  const PUBLIC_API_PREFIXES = ["/api/auth", "/api/market/ingest", "/api/market/listings/import"];
+  // Microsoft Graph webhook + watchdog: no session cookie exists on those
+  // calls; both routes enforce their own auth (webhook clientState secret;
+  // ensure requires session or Bearer CRON_SECRET).
+  const PUBLIC_API_PREFIXES = [
+    "/api/auth",
+    "/api/market/ingest",
+    "/api/market/listings/import",
+    "/api/calendar/microsoft/webhook",
+    "/api/calendar/microsoft/ensure",
+  ];
   const PUBLIC_ASSETS = [
     "/canny-logo.png",
     "/canny-logo-white.png",
