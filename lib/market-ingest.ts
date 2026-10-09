@@ -1440,12 +1440,127 @@ export async function ingestCountyPermits(): Promise<number> {
   return total;
 }
 
-export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "sector_counts" | "all";
+/** Commodity spot prices (Yahoo Finance futures: COMEX copper, NYMEX WTI &
+ * natural gas, ICE cotton) plus the standing cross-reference rule (Ethan,
+ * Oct 2026): every run, each futures series is reconciled against its FRED
+ * monthly benchmark (IMF/EIA/BLS) and the verdict is logged as
+ * commodity-xcheck. Lumber and hay have no exchange-traded price (the CME
+ * lumber contract was delisted), so they remain BLS PPI indexes and are
+ * reported as index-only rather than silently unchecked. */
+const SPOT_DEFS: {
+  symbol: string;
+  seriesId: string;
+  title: string;
+  units: string;
+  fredId: string;
+  toFred: ((v: number) => number) | null;
+  label: string;
+}[] = [
+  { symbol: "HG=F", seriesId: "SPOT_COPPER", title: "Copper — COMEX front month", units: "Dollars per pound", fredId: "PCOPPUSDM", toFred: (v) => v * 2204.62, label: "Copper" },
+  { symbol: "CL=F", seriesId: "SPOT_WTI", title: "WTI Crude Oil — NYMEX front month", units: "Dollars per barrel", fredId: "MCOILWTICO", toFred: (v) => v, label: "WTI" },
+  { symbol: "NG=F", seriesId: "SPOT_NATGAS", title: "Natural Gas — NYMEX front month", units: "Dollars per MMBtu", fredId: "MHHNGSP", toFred: (v) => v, label: "NatGas" },
+  { symbol: "CT=F", seriesId: "SPOT_COTTON", title: "Cotton — ICE front month", units: "Cents per pound", fredId: "WPU01220101", toFred: null, label: "Cotton" },
+];
+
+export async function ingestCommoditySpot(): Promise<number> {
+  let total = 0;
+  let bad = false;
+  const parts: string[] = [];
+  const fredObs = await getIndicatorSeries(SPOT_DEFS.map((d) => d.fredId)).catch(
+    () => [] as { seriesId: string; obsDate: string; value: number | null }[]
+  );
+  for (const def of SPOT_DEFS) {
+    let closes: { date: string; value: number }[] = [];
+    try {
+      const res = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(def.symbol)}?range=1y&interval=1d`,
+        { headers: { "User-Agent": "Mozilla/5.0" } }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        chart?: { result?: { timestamp?: number[]; indicators?: { quote?: { close?: (number | null)[] }[] } }[] };
+      };
+      const r = json.chart?.result?.[0];
+      const ts = r?.timestamp ?? [];
+      const cl = r?.indicators?.quote?.[0]?.close ?? [];
+      closes = ts
+        .map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), value: cl[i] ?? NaN }))
+        .filter((x) => Number.isFinite(x.value));
+    } catch {
+      bad = true;
+      parts.push(`${def.label}: futures fetch FAILED`);
+      continue;
+    }
+    if (closes.length === 0) {
+      bad = true;
+      parts.push(`${def.label}: no futures data`);
+      continue;
+    }
+    total += await upsertIndicatorObs(
+      closes.map((c) => ({
+        source: "yahoo" as MiIndicatorSource,
+        seriesId: def.seriesId,
+        title: def.title,
+        units: def.units,
+        frequency: "Daily",
+        obsDate: c.date,
+        value: Math.round(c.value * 10000) / 10000,
+      }))
+    );
+    // Reconcile against the FRED monthly benchmark.
+    const fred = fredObs
+      .filter((o) => o.seriesId === def.fredId && o.value !== null)
+      .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+    const fLast = fred[fred.length - 1];
+    if (!fLast || !fLast.value) {
+      parts.push(`${def.label}: no FRED benchmark stored`);
+      continue;
+    }
+    const month = fLast.obsDate.slice(0, 7);
+    const inMonth = closes.filter((c) => c.date.startsWith(month));
+    const conv = def.toFred;
+    if (conv) {
+      if (inMonth.length < 5) {
+        parts.push(`${def.label}: insufficient ${month} futures days to cross-check`);
+        continue;
+      }
+      const avg = inMonth.reduce((s, c) => s + conv(c.value), 0) / inMonth.length;
+      const diff = ((avg - fLast.value) / fLast.value) * 100;
+      const ok = Math.abs(diff) <= 8;
+      if (!ok) bad = true;
+      parts.push(`${def.label} ${ok ? "OK" : "MISMATCH"} (futures ${month} avg vs FRED ${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%)`);
+    } else {
+      // Cotton's FRED benchmark is a PPI index (levels aren't prices), so the
+      // reconciliation is directional: month-over-month moves must agree.
+      const fPrev = fred[fred.length - 2];
+      const prevMonth = fPrev ? fPrev.obsDate.slice(0, 7) : "";
+      const inPrev = closes.filter((c) => c.date.startsWith(prevMonth));
+      if (!fPrev || !fPrev.value || inMonth.length < 5 || inPrev.length < 5) {
+        parts.push(`${def.label}: directional check n/a`);
+        continue;
+      }
+      const ppiChg = ((fLast.value - fPrev.value) / fPrev.value) * 100;
+      const futAvg = inMonth.reduce((s, c) => s + c.value, 0) / inMonth.length;
+      const futPrevAvg = inPrev.reduce((s, c) => s + c.value, 0) / inPrev.length;
+      const futChg = (futAvg / futPrevAvg - 1) * 100;
+      const ok = Math.sign(ppiChg) === Math.sign(futChg) || Math.abs(ppiChg - futChg) <= 6;
+      if (!ok) bad = true;
+      parts.push(`${def.label} ${ok ? "OK" : "CHECK"} (PPI ${ppiChg >= 0 ? "+" : ""}${ppiChg.toFixed(1)}% vs futures ${futChg >= 0 ? "+" : ""}${futChg.toFixed(1)}% MoM)`);
+    }
+  }
+  parts.push("Lumber/Hay: PPI index-only (no exchange benchmark exists)");
+  await logSync("commodity-xcheck", bad ? "error" : "ok", total, parts.join(" · "));
+  await logSync("commodity_spot", "ok", total, "Yahoo futures: copper/WTI/natgas/cotton daily spot, 1y window");
+  return total;
+}
+
+export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "sector_counts" | "commodity_spot" | "all";
 
 export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   const jobs: [IngestSource, () => Promise<number>][] = [
     ["indicators", ingestIndicators],
+    ["commodity_spot", ingestCommoditySpot],
     ["filings", ingestFilings],
     ["news", ingestNews],
     ["econ_events", ingestEconomicEvents],

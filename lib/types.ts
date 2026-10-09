@@ -201,7 +201,7 @@ export interface ActivityEvent {
 
 /* ---------------- Market Intel ---------------- */
 
-export type MiIndicatorSource = "fred" | "bls" | "census" | "usaspending" | "ebrc";
+export type MiIndicatorSource = "fred" | "bls" | "census" | "usaspending" | "ebrc" | "yahoo";
 
 export interface MiIndicatorObs {
   id: string;
