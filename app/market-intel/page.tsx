@@ -165,17 +165,19 @@ type Tab = (typeof TABS)[number];
 function Section({
   title,
   sub,
+  alt = false,
   defaultOpen = false,
   children,
 }: {
   title: string;
   sub?: string;
+  alt?: boolean;
   defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className="mb-6">
+    <section className={`mb-6 rounded-2xl px-4 py-4 sm:px-5 ${alt ? "bg-[#b8975a]/[0.08] dark:bg-[#b8975a]/[0.07]" : "bg-slate-900/[0.03] dark:bg-white/[0.02]"}`}>
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -209,16 +211,18 @@ function Section({
 /** Collapsible subsection, nested inside a Section. */
 function SubSection({
   title,
+  alt = false,
   defaultOpen = false,
   children,
 }: {
   title: string;
+  alt?: boolean;
   defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="mb-5">
+    <div className={`mb-5 rounded-xl px-3 py-3 ${alt ? "bg-[#b8975a]/[0.06] dark:bg-[#b8975a]/[0.05]" : "bg-white/50 dark:bg-white/[0.02]"}`}>
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -1372,7 +1376,7 @@ export default function MarketIntelPage() {
           </div>
         </Section>
 
-        <Section title="Industries" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades">
+        <Section alt title="Industries" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades">
           {sectorRows.length > 0 && (
             <div className={`${chartCard} mb-4`}>
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
@@ -1531,7 +1535,7 @@ export default function MarketIntelPage() {
             </div>
           </SubSection>
 
-          <SubSection title="Healthcare">
+          <SubSection alt title="Healthcare">
             <EventStrip items={industryEvents("Healthcare")} onDismiss={dismissEvent} />
             {sectorLine("62")}
             {hasSizeProfile(obs, "62") && <SizeProfileRow obs={obs} slug="62" />}
@@ -1579,7 +1583,7 @@ export default function MarketIntelPage() {
             </div>
           </SubSection>
 
-          <SubSection title="Specialty Trades & Construction">
+          <SubSection alt title="Specialty Trades & Construction">
             <EventStrip items={industryEvents("Specialty Trades & Construction")} onDismiss={dismissEvent} />
             {sectorLine("23")}
             {hasSizeProfile(obs, "23") && <SizeProfileRow obs={obs} slug="23" />}
@@ -1690,7 +1694,7 @@ export default function MarketIntelPage() {
             </div>
           </SubSection>
 
-          <SubSection title="State Revenue & Spending">
+          <SubSection alt title="State Revenue & Spending">
             <EventStrip items={policyEvents} onDismiss={dismissEvent} />
 <div className={chartCard}>
           <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Revenue vs Spending</h3>
@@ -1837,7 +1841,7 @@ export default function MarketIntelPage() {
         </div>
           </SubSection>
 
-          <SubSection title="Permitting & Licensing">
+          <SubSection alt title="Permitting & Licensing">
             <EventStrip items={expansionEvents} onDismiss={dismissEvent} />
             {/* Top permit counties (U of A EBRC, latest month) */}
             {countyPermits.length >= 3 && (
@@ -2039,7 +2043,7 @@ export default function MarketIntelPage() {
               </div>
             </SubSection>
           )}
-          <SubSection title="Layoffs & WARN Notices">
+          <SubSection alt title="Layoffs & WARN Notices">
           <div className="mb-4 grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Layoff Notices (WARN)</h3>
@@ -2085,7 +2089,7 @@ export default function MarketIntelPage() {
         </Section>
 
 
-        <Section title="Deals & Filings" sub="AZ acquisitions and SEC filings · last 7 days only">
+        <Section alt title="Deals & Filings" sub="AZ acquisitions and SEC filings · last 7 days only">
           <div>
 {/* Tabs */}
         <div className="mb-4 flex flex-wrap gap-2">
