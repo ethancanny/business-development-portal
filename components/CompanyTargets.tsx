@@ -12,6 +12,15 @@ export default function CompanyTargets({ sector }: { sector: string }) {
   const [rows, setRows] = useState<MiCompany[] | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [hovId, setHovId] = useState<string | null>(null);
+  // Row colors painted from state via inline styles so hover/select always
+  // render regardless of stylesheet generation. (Ethan, Oct 9, 2026.)
+  const rowBg = (c: MiCompany, isFit: boolean) => {
+    const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+    if (openId === c.id) return isFit ? "rgba(184,151,90,0.30)" : isDark ? "rgba(184,151,90,0.25)" : "rgba(13,31,60,0.14)";
+    if (hovId === c.id) return isFit ? "rgba(184,151,90,0.22)" : isDark ? "rgba(255,255,255,0.08)" : "rgba(13,31,60,0.055)";
+    return isFit ? "rgba(184,151,90,0.12)" : undefined;
+  };
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -185,18 +194,13 @@ export default function CompanyTargets({ sector }: { sector: string }) {
               <Fragment key={c.id}>
                 <tr
                   onClick={() => setOpenId(openId === c.id ? null : c.id)}
-                  className={`cursor-pointer border-t transition-colors duration-200 ${
+                  onMouseEnter={() => setHovId(c.id)}
+                  onMouseLeave={() => setHovId(null)}
+                  style={{ backgroundColor: rowBg(c, fit.fit), transition: "background-color 200ms ease" }}
+                  className={`cursor-pointer border-t ${
                     fit.fit
-                      ? `border-[#b8975a]/40 dark:border-[#b8975a]/30 ${
-                          openId === c.id
-                            ? "bg-[#b8975a]/25 hover:bg-[#b8975a]/30"
-                            : "bg-[#b8975a]/10 hover:bg-[#b8975a]/20"
-                        }`
-                      : `border-slate-100 dark:border-white/5 ${
-                          openId === c.id
-                            ? "bg-[#0d1f3c]/[0.14] hover:bg-[#0d1f3c]/[0.17] dark:bg-[#b8975a]/[0.25] dark:hover:bg-[#b8975a]/[0.28]"
-                            : "hover:bg-slate-100 dark:hover:bg-white/[0.08]"
-                        }`
+                      ? "border-[#b8975a]/40 dark:border-[#b8975a]/30"
+                      : "border-slate-100 dark:border-white/5"
                   }`}
                 >
                   <td className={`${td} font-medium`}>
