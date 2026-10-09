@@ -17,7 +17,7 @@ import {
   YAxis,
 } from "recharts";
 import PageHero from "@/components/PageHero";
-import SizeProfileRows, { hasSizeProfiles } from "@/components/SizeProfileRows";
+import SizeProfileRow, { hasSizeProfile } from "@/components/SizeProfileRows";
 import ValleyDemographics from "@/components/ValleyDemographics";
 import { useTheme } from "@/components/ThemeProvider";
 import { fmtMoney, fmtDate } from "@/lib/format";
@@ -1454,17 +1454,10 @@ export default function MarketIntelPage() {
               </div>
             </div>
           )}
-          {hasSizeProfiles(obs) && (
-            <SubSection title="Company Size — Target Bands">
-              <p className="mb-4 text-xs text-slate-500 dark:text-white/40">
-                How many Arizona companies in each focus industry sit in the target bands — <b>$5–20M revenue</b> and an estimated <b>$500K–$2M EBITDA</b> — versus smaller and larger firms. Firm counts are Census SUSB actuals for Arizona; the revenue split applies each industry&apos;s U.S. receipts-size distribution (SUSB doesn&apos;t publish receipts size by state). The EBITDA band converts at each industry&apos;s public-company EBITDA margin (Damodaran) and is an estimate.
-              </p>
-              <SizeProfileRows obs={obs} />
-            </SubSection>
-          )}
           <SubSection title="Aerospace & Defense">
             <EventStrip items={industryEvents("Aerospace & Defense")} onDismiss={dismissEvent} />
             {sectorLine("3364")}
+            {hasSizeProfile(obs, "3364") && <SizeProfileRow obs={obs} slug="3364" />}
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
@@ -1520,6 +1513,7 @@ export default function MarketIntelPage() {
           <SubSection title="Healthcare">
             <EventStrip items={industryEvents("Healthcare")} onDismiss={dismissEvent} />
             {sectorLine("62")}
+            {hasSizeProfile(obs, "62") && <SizeProfileRow obs={obs} slug="62" />}
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Healthcare Employment — AZ</h3>
@@ -1542,6 +1536,7 @@ export default function MarketIntelPage() {
           <SubSection title="Advanced Manufacturing">
             <EventStrip items={industryEvents("Advanced Manufacturing")} onDismiss={dismissEvent} />
             {sectorLine("3133")}
+            {hasSizeProfile(obs, "3133") && <SizeProfileRow obs={obs} slug="3133" />}
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Manufacturing Employment — AZ</h3>
@@ -1564,6 +1559,7 @@ export default function MarketIntelPage() {
           <SubSection title="Specialty Trades & Construction">
             <EventStrip items={industryEvents("Specialty Trades & Construction")} onDismiss={dismissEvent} />
             {sectorLine("23")}
+            {hasSizeProfile(obs, "23") && <SizeProfileRow obs={obs} slug="23" />}
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Construction Employment — AZ</h3>
