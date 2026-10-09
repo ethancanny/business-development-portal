@@ -20,13 +20,31 @@ export async function POST(req: NextRequest) {
   }
   const body = await req.json().catch(() => ({}));
   const wantKey = String(body.dedupKey ?? "");
+  const wantSource = String(body.source ?? "");
+  if (body.mode === "ent") {
+    const ents: { sector: string; source: string; dedupKey: string; name: string; signalValue: number | null; detLen: number; valid: boolean }[] = [];
+    for (const sec of ["Aerospace & Defense", "Healthcare", "Advanced Manufacturing", "Specialty Trades & Construction"]) {
+      for (let off = 0; ; off += 5000) {
+        const rows = await getCompanies(sec, 5000, off);
+        if (!rows.length) break;
+        for (const r of rows) {
+          if (!r.dedupKey.startsWith("ENT-")) continue;
+          let valid = true;
+          try { JSON.parse(r.details ?? ""); } catch { valid = false; }
+          ents.push({ sector: sec, source: r.source, dedupKey: r.dedupKey, name: r.name, signalValue: r.signalValue, detLen: (r.details ?? "").length, valid });
+        }
+        if (rows.length < 5000) break;
+      }
+    }
+    return NextResponse.json({ ok: true, ents });
+  }
   if (wantKey) {
     for (const sec of ["Aerospace & Defense", "Healthcare", "Advanced Manufacturing", "Specialty Trades & Construction"]) {
       for (let off = 0; ; off += 5000) {
         const rows = await getCompanies(sec, 5000, off);
         if (!rows.length) break;
         for (const r of rows) {
-          if (r.dedupKey === wantKey) return NextResponse.json({ ok: true, row: r });
+          if (r.dedupKey === wantKey && (!wantSource || r.source === wantSource)) return NextResponse.json({ ok: true, row: r });
         }
         if (rows.length < 5000) break;
       }
