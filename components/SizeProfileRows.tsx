@@ -18,6 +18,69 @@ export function hasSizeProfile(obs: MiIndicatorObs[], slug: string): boolean {
   return obs.some((o) => o.seriesId === `SUSB_AZ_${slug}_FIRMS` && o.value !== null);
 }
 
+/** Sub-sector breakouts per focus industry (mirrors SUSB_SUBSECTORS in
+ * lib/market-ingest.ts). AZ bases are CBP establishments; band counts are
+ * modeled server-side from the SUSB US receipts mix. */
+export const SUBSECTORS_BY_PARENT: Record<string, { naics: string; name: string }[]> = {
+  "3364": [
+    { naics: "336411", name: "Aircraft Manufacturing" },
+    { naics: "336412", name: "Aircraft Engines & Engine Parts" },
+    { naics: "336413", name: "Other Aircraft Parts & Equipment" },
+    { naics: "336414", name: "Guided Missiles & Space Vehicles" },
+    { naics: "336415", name: "Missile & Space Propulsion Units/Parts" },
+    { naics: "336419", name: "Other Missile & Space Vehicle Parts" },
+  ],
+  "62": [
+    { naics: "6211", name: "Offices of Physicians" },
+    { naics: "6212", name: "Offices of Dentists" },
+    { naics: "6213", name: "Other Health Practitioners" },
+    { naics: "6214", name: "Outpatient Care Centers" },
+    { naics: "6215", name: "Medical Laboratories & Imaging" },
+    { naics: "6216", name: "Home Health Care Services" },
+    { naics: "6221", name: "General Medical & Surgical Hospitals" },
+    { naics: "6222", name: "Psychiatric & Substance Abuse Hospitals" },
+    { naics: "6223", name: "Specialty Hospitals" },
+    { naics: "6231", name: "Nursing Care Facilities" },
+    { naics: "6233", name: "Continuing Care & Assisted Living" },
+    { naics: "6244", name: "Child Care Services" },
+  ],
+  "3133": [
+    { naics: "334413", name: "Semiconductor & Circuit Manufacturing" },
+    { naics: "334418", name: "Printed Circuit Assembly" },
+    { naics: "334511", name: "Navigation & Guidance Instruments" },
+    { naics: "333242", name: "Semiconductor Machinery Manufacturing" },
+    { naics: "332710", name: "Machine Shops" },
+    { naics: "332999", name: "Misc. Fabricated Metal Products" },
+    { naics: "339112", name: "Surgical & Medical Instruments" },
+    { naics: "333511", name: "Industrial Mold Manufacturing" },
+    { naics: "335929", name: "Other Communication & Energy Wire/Cable" },
+    { naics: "326199", name: "Other Plastics Products" },
+  ],
+  "23": [
+    { naics: "236115", name: "New Single-Family Housing Construction" },
+    { naics: "236220", name: "Commercial & Institutional Building Construction" },
+    { naics: "237110", name: "Water, Sewer & Pipeline Construction" },
+    { naics: "237310", name: "Highway, Street & Bridge Construction" },
+    { naics: "237990", name: "Other Heavy & Civil Engineering Construction" },
+    { naics: "238110", name: "Poured Concrete Contractors" },
+    { naics: "238210", name: "Electrical Contractors" },
+    { naics: "238220", name: "Plumbing & HVAC Contractors" },
+    { naics: "238310", name: "Drywall & Insulation Contractors" },
+    { naics: "238320", name: "Painting & Wall Covering Contractors" },
+    { naics: "238910", name: "Site Preparation Contractors" },
+  ],
+};
+export const SUBSECTOR_IDS_CSV = Object.values(SUBSECTORS_BY_PARENT)
+  .flat()
+  .flatMap((s) => [
+    `CBP_AZ_SUB_${s.naics}_ESTAB`,
+    `CBP_AZ_SUB_${s.naics}_EMP`,
+    `SUSB_AZ_SUB_${s.naics}_FIRMS`,
+    `SUSB_AZ_SUB_${s.naics}_BAND`,
+    `SUSB_AZ_SUB_${s.naics}_EBD`,
+  ])
+  .join(",");
+
 export default function SizeProfileRow({ obs, slug }: { obs: MiIndicatorObs[]; slug: string }) {
   const latestObs = (id: string) => {
     const s = obs
@@ -68,6 +131,17 @@ export default function SizeProfileRow({ obs, slug }: { obs: MiIndicatorObs[]; s
     }
     ebitdaCount = Math.round(est);
   }
+
+  const subRows = (SUBSECTORS_BY_PARENT[slug] ?? [])
+    .map((s) => ({
+      ...s,
+      firms: latestVal(`SUSB_AZ_SUB_${s.naics}_FIRMS`) ?? latestVal(`CBP_AZ_SUB_${s.naics}_ESTAB`),
+      emp: latestVal(`CBP_AZ_SUB_${s.naics}_EMP`),
+      band: latestVal(`SUSB_AZ_SUB_${s.naics}_BAND`),
+      ebd: latestVal(`SUSB_AZ_SUB_${s.naics}_EBD`),
+    }))
+    .filter((r) => r.firms !== null && r.firms > 0)
+    .sort((a, b) => (b.firms ?? 0) - (a.firms ?? 0));
 
   const th = "sticky top-0 bg-white px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-[#132847] dark:text-white/50";
   const td = "px-3 py-2 text-sm text-slate-700 dark:text-white/80";
@@ -140,11 +214,44 @@ export default function SizeProfileRow({ obs, slug }: { obs: MiIndicatorObs[]; s
           </tbody>
         </table>
       </div>
+      {subRows.length > 0 && (
+        <>
+          <div className="mb-1 mt-4 flex flex-wrap items-baseline justify-between gap-x-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/40">Sub-sectors</p>
+            <p className="text-[11px] text-slate-400 dark:text-white/30">selected NAICS breakouts · companies are CBP establishments · band counts modeled</p>
+          </div>
+          <div className="max-h-64 overflow-auto rounded-xl border border-slate-200 dark:border-white/10">
+            <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-white/10">
+                  <th className={th}>Sub-sector</th>
+                  <th className={th}>Companies</th>
+                  <th className={th}>Employees</th>
+                  <th className={th}>In $5–20M band</th>
+                  <th className={th}>In EBITDA band</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subRows.map((r) => (
+                  <tr key={r.naics} className="border-b border-slate-100 dark:border-white/5">
+                    <td className={td}>{r.name}</td>
+                    <td className={`${td} font-medium`}>{r.firms?.toLocaleString()}</td>
+                    <td className={td}>{r.emp !== null ? r.emp.toLocaleString() : "—"}</td>
+                    <td className={`${td} font-medium text-[#8a6f3e] dark:text-[#d4b37a]`}>{r.band !== null ? `≈${r.band.toLocaleString()}` : "—"}</td>
+                    <td className={td}>{r.ebd !== null ? `≈${r.ebd.toLocaleString()}` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
       <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
         Firm counts: Census SUSB {susbYear} (Arizona actuals). The revenue split is modeled — the industry&apos;s U.S.
         receipts-size mix applied to AZ firm counts (SUSB doesn&apos;t publish receipts size by state) — and
         cross-checked against BLS QCEW on every refresh (sector-xcheck). EBITDA band uses Damodaran (NYU Stern)
-        public-company EBITDA margins.
+        public-company EBITDA margins. Sub-sector company counts are Census CBP establishments with the same
+        receipts-mix modeling per NAICS code.
         {slug === "3364" && " A&D firm base is the CBP establishment count, since the SUSB state file doesn't break out NAICS 3364."}
       </p>
     </div>
