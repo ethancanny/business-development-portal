@@ -243,7 +243,7 @@ function computeFit(r: CompanyInput): { fit: boolean; why: string } {
   }
   if (r.source === "AZ ROC") {
     const n = typeof details.licenseCount === "number" ? details.licenseCount : 1;
-    const fit = age !== null && age >= 7 && (n >= 2 || /General|Engineering/.test(r.subsector));
+    const fit = age !== null && age >= 7 && (n >= 2 || /General|Engineering/.test(r.subsector ?? ""));
     return { fit, why: fit ? `Licensed since ${yr} · ${n} license${n > 1 ? "s" : ""} on file` : "" };
   }
   return { fit: false, why: "" };
