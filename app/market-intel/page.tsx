@@ -70,6 +70,17 @@ const COMMODITY_SERIES: { id: string; name: string; unit: string; digits: number
   { id: "WPU0121", name: "Hay & Forage (alfalfa)", unit: "PPI index", digits: 1 },
 ];
 const COMMODITY_IDS = COMMODITY_SERIES.map((c) => c.id).join(",");
+/** Exchange spot prices (Yahoo futures) paired with the FRED monthly
+ * benchmarks above: chips show the spot price people actually quote; the
+ * FRED series remain the long-history benchmarks, and the daily ingest
+ * reconciles the two (commodity-xcheck in Data freshness). */
+const SPOT_BY_FRED: Record<string, { id: string; venue: string; unit: string; digits: number }> = {
+  PCOPPUSDM: { id: "SPOT_COPPER", venue: "COMEX", unit: "$/lb", digits: 2 },
+  MCOILWTICO: { id: "SPOT_WTI", venue: "NYMEX", unit: "$/bbl", digits: 2 },
+  MHHNGSP: { id: "SPOT_NATGAS", venue: "NYMEX", unit: "$/MMBtu", digits: 2 },
+  WPU01220101: { id: "SPOT_COTTON", venue: "ICE", unit: "¢/lb", digits: 1 },
+};
+const SPOT_IDS = Object.values(SPOT_BY_FRED).map((s) => s.id).join(",");
 const COUNTY_PERMIT_SERIES = PERMIT_COUNTIES.flatMap((n) => [
   `AZPERMIT_${countySlug(n)}`,
   `AZPERMIT_SF_${countySlug(n)}`,
@@ -323,7 +334,9 @@ export default function MarketIntelPage() {
               "," +
               SECTOR_SERIES +
               "," +
-              COMMODITY_IDS
+              COMMODITY_IDS +
+              "," +
+              SPOT_IDS
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
@@ -567,6 +580,20 @@ export default function MarketIntelPage() {
         .filter((o) => o.seriesId === c.id && o.value !== null)
         .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
       const recent = rows.filter((o) => o.obsDate >= fiveYearCutoff);
+      const spotDef = SPOT_BY_FRED[c.id] ?? null;
+      let spot: MiIndicatorObs | null = null;
+      let spotChg: number | null = null;
+      if (spotDef) {
+        const sr = obs
+          .filter((o) => o.seriesId === spotDef.id && o.value !== null)
+          .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+        if (sr.length) {
+          spot = sr[sr.length - 1];
+          const cutoff = new Date(Date.parse(spot.obsDate) - 30 * 864e5).toISOString().slice(0, 10);
+          const prev = sr.filter((o) => o.obsDate <= cutoff).pop();
+          if (prev && prev.value && spot.value) spotChg = ((spot.value - prev.value) / prev.value) * 100;
+        }
+      }
       return {
         ...c,
         rows,
@@ -574,6 +601,9 @@ export default function MarketIntelPage() {
         base: recent.length ? recent[0].value : null,
         latest: rows.length ? rows[rows.length - 1] : null,
         yearAgo: rows.length > 12 ? rows[rows.length - 13] : null,
+        spotDef,
+        spot,
+        spotChg,
       };
     }).filter((s) => s.latest);
     const byMonth = new Map<string, Record<string, number | string>>();
@@ -1644,7 +1674,7 @@ export default function MarketIntelPage() {
           {commodityData.series.length > 0 && (
             <SubSection title="Commodity Prices">
               <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-                Arizona supplies roughly 70% of U.S. copper, and alfalfa and cotton are among its top cash crops — mining, construction, energy, and farm input costs drive operator margins across the focus sectors. Latest monthly prices below; hay and cotton have no exchange-traded price, so they are tracked as producer price indexes (BLS PPI). The chart indexes each series to 100 five years ago so unlike units can be compared on one axis.
+                Arizona supplies roughly 70% of U.S. copper, and alfalfa and cotton are among its top cash crops — mining, construction, energy, and farm input costs drive operator margins across the focus sectors. The chips show current exchange futures prices (COMEX / NYMEX / ICE), reconciled against FRED monthly benchmarks on every daily run — the verdict is logged in Data freshness below (commodity-xcheck). Hay and lumber have no exchange-traded price, so they are tracked as BLS producer-price indexes. The chart indexes each monthly benchmark series to 100 five years ago so unlike units can be compared on one axis.
               </p>
               <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
                 {commodityData.series.map((s, i) => {
@@ -1658,18 +1688,37 @@ export default function MarketIntelPage() {
                         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
                         {s.name}
                       </p>
-                      <p className="mt-1 text-lg font-bold text-[#0d1f3c] dark:text-white">
-                        {s.latest?.value?.toLocaleString(undefined, { maximumFractionDigits: s.digits })}
-                        <span className="ml-1 text-[10px] font-normal text-slate-400 dark:text-white/40">{s.unit}</span>
-                      </p>
-                      <p className="text-[11px] text-slate-400 dark:text-white/40">
-                        {s.latest?.obsDate?.slice(0, 7)}
-                        {yoy !== null && (
-                          <span>
-                            {" "}· {yoy >= 0 ? "▲" : "▼"} {Math.abs(yoy).toFixed(1)}% YoY
-                          </span>
-                        )}
-                      </p>
+                      {s.spot && s.spotDef ? (
+                        <>
+                          <p className="mt-1 text-lg font-bold text-[#0d1f3c] dark:text-white">
+                            {s.spot.value?.toLocaleString(undefined, { minimumFractionDigits: s.spotDef.digits, maximumFractionDigits: s.spotDef.digits })}
+                            <span className="ml-1 text-[10px] font-normal text-slate-400 dark:text-white/40">{s.spotDef.unit}</span>
+                          </p>
+                          <p className="text-[11px] text-slate-400 dark:text-white/40">
+                            {s.spotDef.venue} futures · {fmtDate(s.spot.obsDate)}
+                            {s.spotChg !== null && (
+                              <span className={s.spotChg >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                                {" "}· {s.spotChg >= 0 ? "▲" : "▼"} {Math.abs(s.spotChg).toFixed(1)}% 30d
+                              </span>
+                            )}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="mt-1 text-lg font-bold text-[#0d1f3c] dark:text-white">
+                            {s.latest?.value?.toLocaleString(undefined, { maximumFractionDigits: s.digits })}
+                            <span className="ml-1 text-[10px] font-normal text-slate-400 dark:text-white/40">{s.unit}</span>
+                          </p>
+                          <p className="text-[11px] text-slate-400 dark:text-white/40">
+                            PPI index · {s.latest?.obsDate?.slice(0, 7)}
+                            {yoy !== null && (
+                              <span>
+                                {" "}· {yoy >= 0 ? "▲" : "▼"} {Math.abs(yoy).toFixed(1)}% YoY
+                              </span>
+                            )}
+                          </p>
+                        </>
+                      )}
                     </div>
                   );
                 })}
@@ -1700,7 +1749,7 @@ export default function MarketIntelPage() {
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
-                <p className="mt-2 text-xs text-slate-400 dark:text-white/30">Indexed: 100 = price five years ago · Sources: IMF commodity prices, EIA, BLS PPI via FRED · refreshed daily</p>
+                <p className="mt-2 text-xs text-slate-400 dark:text-white/30">Indexed: 100 = price five years ago · Monthly benchmarks: IMF, EIA, BLS PPI via FRED · Spot chips: exchange futures (Yahoo), cross-checked against these benchmarks every daily run</p>
               </div>
             </SubSection>
           )}
