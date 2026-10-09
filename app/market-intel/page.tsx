@@ -479,13 +479,17 @@ export default function MarketIntelPage() {
         .reduce((s, w) => s + (w.headcount || 0), 0);
     const layNow = sumWin(now - d90, now + 1);
     const layPrev = sumWin(now - 2 * d90, now - d90);
-    if (layPrev > 0) {
+    // Layoffs only qualify as an anomaly on a MASSIVE increase (Ethan's
+    // rule) — a drop in layoffs, or a small uptick, is not anomaly-worthy.
+    if (layPrev > 0 && layNow >= 500) {
       const chg = ((layNow - layPrev) / layPrev) * 100;
-      cands.push({
-        score: Math.abs(chg),
-        headline: `Layoffs ${chg >= 0 ? "▲" : "▼"}${Math.abs(Math.round(chg))}%`,
-        detail: `${layNow.toLocaleString()} workers in 90 days vs ${layPrev.toLocaleString()} prior · WARN`,
-      });
+      if (chg >= 50) {
+        cands.push({
+          score: Math.abs(chg),
+          headline: `Layoffs ▲${Math.round(chg)}%`,
+          detail: `${layNow.toLocaleString()} workers in 90 days vs ${layPrev.toLocaleString()} prior · WARN`,
+        });
+      }
     }
     if (permitChg !== null && pLast && avg12) {
       cands.push({
