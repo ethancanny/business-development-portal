@@ -6,15 +6,18 @@ import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
 import { fmtMoney } from "@/lib/format";
 import type { Deal, Executive } from "@/lib/types";
+import type { Investor } from "@/lib/investors-db";
 
 /**
  * Directory (Ethan, Oct 9, 2026): every operator and business the firm
  * interacts with, on one page, with a pull-up profile for each — contact
  * details, background/notes, pairings, and a link into the Pipeline.
+ * Investors tab added the same day: investor contacts imported from
+ * Ethan's "Investment Database" sheet (only those marked Contacted).
  */
 
 interface Entry {
-  kind: "operator" | "business";
+  kind: "operator" | "business" | "investor";
   id: string;
   name: string;
   sub: string;
@@ -40,17 +43,19 @@ export default function Directory() {
   const [loading, setLoading] = useState(true);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [execs, setExecs] = useState<Executive[]>([]);
+  const [investors, setInvestors] = useState<Investor[]>([]);
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState<"operator" | "business">("operator");
+  const [tab, setTab] = useState<"operator" | "business" | "investor">("operator");
   const [sel, setSel] = useState<{ kind: string; id: string } | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [meRes, dealsRes, execsRes] = await Promise.all([
+        const [meRes, dealsRes, execsRes, invRes] = await Promise.all([
           fetch("/api/auth/me"),
           fetch("/api/deals"),
           fetch("/api/executives"),
+          fetch("/api/investors"),
         ]);
         if (meRes.status === 401 || dealsRes.status === 401) {
           router.replace("/login");
@@ -58,6 +63,10 @@ export default function Directory() {
         }
         if (dealsRes.ok) setDeals(await dealsRes.json());
         if (execsRes.ok) setExecs(await execsRes.json());
+        if (invRes.ok) {
+          const d = await invRes.json();
+          if (Array.isArray(d.investors)) setInvestors(d.investors);
+        }
         const param = new URLSearchParams(window.location.search).get("q");
         if (param) setQ(param);
       } finally {
@@ -89,8 +98,19 @@ export default function Directory() {
       searchText:
         `${d.companyName} ${d.industry} ${d.city} ${d.broker} ${d.contactName} ${d.notes}`.toLowerCase(),
     }));
-    return [...ops, ...biz];
-  }, [deals, execs]);
+    const inv: Entry[] = investors.map((i) => ({
+      kind: "investor",
+      id: i.id,
+      name: i.name,
+      sub: [i.title, i.firm].filter((s) => s && s.trim()).join(" · ") || "Investor",
+      stage: i.status || "",
+      owner: "",
+      tags: [i.industry, i.investmentType].filter((s) => s && s.trim()),
+      searchText:
+        `${i.name} ${i.firm} ${i.title} ${i.email} ${i.industry} ${i.investmentType} ${i.notes}`.toLowerCase(),
+    }));
+    return [...ops, ...biz, ...inv];
+  }, [deals, execs, investors]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -111,18 +131,25 @@ export default function Directory() {
     return visible[0] ?? null;
   }, [visible, sel, tab]);
 
-  // If a search (e.g. a /directory?q= deep link) only matches the other tab,
+  // If a search (e.g. a /directory?q= deep link) only matches another tab,
   // switch to it automatically.
   useEffect(() => {
     if (!q.trim() || visible.length > 0) return;
-    const other = tab === "operator" ? "business" : "operator";
-    if (filtered.some((e) => e.kind === other)) setTab(other);
+    const kinds: Entry["kind"][] = ["operator", "business", "investor"];
+    const hit = kinds.find(
+      (k) => k !== tab && filtered.some((e) => e.kind === k)
+    );
+    if (hit) setTab(hit);
   }, [q, visible, filtered, tab]);
 
   const selExec =
     selected?.kind === "operator" ? execs.find((e) => e.id === selected.id) : undefined;
   const selDeal =
     selected?.kind === "business" ? deals.find((d) => d.id === selected.id) : undefined;
+  const selInvestor =
+    selected?.kind === "investor"
+      ? investors.find((i) => i.id === selected.id)
+      : undefined;
   const pairedExecs = selDeal
     ? execs.filter((e) => (selDeal.operatorIds ?? []).indexOf(e.id) >= 0)
     : [];
@@ -174,7 +201,7 @@ export default function Directory() {
       <PageHero
         eyebrow="Canny Capital Partners"
         title="Directory"
-        subtitle="Every operator and business we interact with — pull up a profile"
+        subtitle="Every operator, business, and investor we interact with — pull up a profile"
       />
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
         {loading ? (
@@ -193,6 +220,7 @@ export default function Directory() {
                   [
                     ["operator", "Operators"],
                     ["business", "Businesses"],
+                    ["investor", "Investors"],
                   ] as const
                 ).map(([k, label]) => (
                   <button
@@ -229,10 +257,16 @@ export default function Directory() {
                       className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
                         selected.kind === "operator"
                           ? "bg-violet-100 text-violet-800 dark:bg-violet-500/15 dark:text-violet-300"
-                          : "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300"
+                          : selected.kind === "business"
+                            ? "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300"
+                            : "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300"
                       }`}
                     >
-                      {selected.kind === "operator" ? "Operator" : "Business"}
+                      {selected.kind === "operator"
+                        ? "Operator"
+                        : selected.kind === "business"
+                          ? "Business"
+                          : "Investor"}
                     </span>
                     <span className="rounded-full bg-[#b8975a]/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8a6f3e] dark:text-[#d4b37a]">
                       {selected.stage}
@@ -306,6 +340,61 @@ export default function Directory() {
                       <Field label="Source">{selDeal.source || "—"}</Field>
                     </div>
                   )}
+                  {selInvestor && (
+                    <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3">
+                      <Field label="Firm">{selInvestor.firm || "—"}</Field>
+                      <Field label="Title">{selInvestor.title || "—"}</Field>
+                      <Field label="Status">{selInvestor.status || "—"}</Field>
+                      {selInvestor.email && (
+                        <Field label="Email">
+                          <a
+                            href={`mailto:${selInvestor.email}`}
+                            className="underline decoration-[#b8975a] decoration-2 underline-offset-2"
+                          >
+                            {selInvestor.email}
+                          </a>
+                        </Field>
+                      )}
+                      {selInvestor.phone && (
+                        <Field label="Phone">
+                          <a href={`tel:${selInvestor.phone.replace(/[^+\d]/g, "")}`}>
+                            {selInvestor.phone}
+                          </a>
+                        </Field>
+                      )}
+                      {selInvestor.website && (
+                        <Field label="Website">
+                          <a
+                            href={
+                              /^https?:\/\//i.test(selInvestor.website)
+                                ? selInvestor.website
+                                : `https://${selInvestor.website}`
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline decoration-[#b8975a] decoration-2 underline-offset-2"
+                          >
+                            {selInvestor.website.replace(/^https?:\/\//i, "")}
+                          </a>
+                        </Field>
+                      )}
+                      {selInvestor.investmentType && (
+                        <Field label="Investment type">{selInvestor.investmentType}</Field>
+                      )}
+                      {selInvestor.industry && (
+                        <Field label="Industry focus">{selInvestor.industry}</Field>
+                      )}
+                      {selInvestor.ebitdaSize && (
+                        <Field label="EBITDA size">{selInvestor.ebitdaSize}</Field>
+                      )}
+                      {selInvestor.checkSize && (
+                        <Field label="Check size">{selInvestor.checkSize}</Field>
+                      )}
+                      {selInvestor.source && (
+                        <Field label="Source">{selInvestor.source}</Field>
+                      )}
+                    </div>
+                  )}
 
                   {selExec && selExec.background && (
                     <div className="mt-5">
@@ -317,13 +406,15 @@ export default function Directory() {
                       </div>
                     </div>
                   )}
-                  {((selExec && selExec.notes) || (selDeal && selDeal.notes)) && (
+                  {((selExec && selExec.notes) ||
+                    (selDeal && selDeal.notes) ||
+                    (selInvestor && selInvestor.notes)) && (
                     <div className="mt-4">
                       <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-white/40">
                         Notes
                       </p>
                       <div className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-600 dark:bg-white/[0.04] dark:text-white/75">
-                        {selExec ? selExec.notes : selDeal?.notes}
+                        {selExec ? selExec.notes : selDeal ? selDeal.notes : selInvestor?.notes}
                       </div>
                     </div>
                   )}
@@ -365,14 +456,16 @@ export default function Directory() {
                     </div>
                   )}
 
-                  <div className="mt-6 border-t border-slate-100 pt-4 dark:border-white/10">
-                    <Link
-                      href="/pipeline"
-                      className="text-sm font-semibold text-[#8a6f3e] underline decoration-[#b8975a] decoration-2 underline-offset-2 dark:text-[#d4b37a]"
-                    >
-                      Open in Pipeline →
-                    </Link>
-                  </div>
+                  {selected.kind !== "investor" && (
+                    <div className="mt-6 border-t border-slate-100 pt-4 dark:border-white/10">
+                      <Link
+                        href="/pipeline"
+                        className="text-sm font-semibold text-[#8a6f3e] underline decoration-[#b8975a] decoration-2 underline-offset-2 dark:text-[#d4b37a]"
+                      >
+                        Open in Pipeline →
+                      </Link>
+                    </div>
+                  )}
                 </>
               )}
             </div>
