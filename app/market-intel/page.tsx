@@ -343,37 +343,24 @@ export default function MarketIntelPage() {
   const [multBand, setMultBand] = useState("EV $5–25M");
   const [sectorView, setSectorView] = useState<"trend" | "share">("share");
   const [hoverSlug, setHoverSlug] = useState<string | null>(null);
-  // Row hover + click-to-select highlighting for the data tables (Ethan, Oct 9, 2026).
-  const [selRow, setSelRow] = useState("");
-  const toggleRow = (key: string) => setSelRow((s) => (s === key ? "" : key));
-  // Row highlighting is painted from React state with inline styles (not
-  // utility classes) so hover/select always render. (Ethan, Oct 9, 2026.)
+  // Row hover highlighting for the data tables — hover only, painted from
+  // React state with inline styles. (Click-to-select removed at Ethan's
+  // request, Oct 9, 2026.)
   const [hovRow, setHovRow] = useState("");
   const rowStyle = (key: string) => ({
     backgroundColor:
-      selRow === key
+      hovRow === key
         ? dark
-          ? "rgba(184,151,90,0.28)"
-          : "rgba(13,31,60,0.10)"
-        : hovRow === key
-          ? dark
-            ? "rgba(255,255,255,0.08)"
-            : "rgb(230,237,246)"
-          : undefined,
+          ? "rgba(255,255,255,0.08)"
+          : "rgb(230,237,246)"
+        : undefined,
     transition: "background-color 200ms ease",
   });
   const rowProps = (key: string) => ({
     onMouseEnter: () => setHovRow(key),
     onMouseLeave: () => setHovRow((h: string) => (h === key ? "" : h)),
-    onClick: () => toggleRow(key),
     style: rowStyle(key),
-    className: `border-b border-slate-100 dark:border-white/5 cursor-pointer ${
-      selRow === key
-        ? "bg-[#0d1f3c]/[0.10] dark:bg-[#b8975a]/[0.18]"
-        : hovRow === key
-          ? "bg-[#e6edf6] dark:bg-white/[0.08]"
-          : ""
-    }`,
+    className: "border-b border-slate-100 dark:border-white/5",
   });
   const [hoverCommodity, setHoverCommodity] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -1492,25 +1479,20 @@ export default function MarketIntelPage() {
                         key={r.slug}
                         onMouseEnter={() => { setHoverSlug(r.slug); setHovRow(`sector:${r.slug}`); }}
                         onMouseLeave={() => { setHoverSlug(null); setHovRow(""); }}
-                        onClick={() => toggleRow(`sector:${r.slug}`)}
                         style={{
                           backgroundColor:
-                            selRow === `sector:${r.slug}`
+                            hoverSlug === r.slug
                               ? dark
-                                ? "rgba(184,151,90,0.28)"
-                                : "rgba(13,31,60,0.10)"
-                              : hoverSlug === r.slug
+                                ? "rgba(255,255,255,0.10)"
+                                : "rgb(215,225,240)"
+                              : hovRow === `sector:${r.slug}`
                                 ? dark
-                                  ? "rgba(255,255,255,0.10)"
-                                  : "rgb(215,225,240)"
-                                : hovRow === `sector:${r.slug}`
-                                  ? dark
-                                    ? "rgba(255,255,255,0.08)"
-                                    : "rgb(230,237,246)"
-                                  : undefined,
+                                  ? "rgba(255,255,255,0.08)"
+                                  : "rgb(230,237,246)"
+                                : undefined,
                           transition: "background-color 200ms ease",
                         }}
-                        className="border-b border-slate-100 dark:border-white/5 cursor-pointer"
+                        className="border-b border-slate-100 dark:border-white/5"
                       >
                         <td className={td}>{r.name}</td>
                         <td className={`${td} font-medium`}>{r.estab.toLocaleString()}</td>
