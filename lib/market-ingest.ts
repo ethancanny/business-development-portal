@@ -990,6 +990,115 @@ export async function ingestCensus(): Promise<number> {
   return total;
 }
 
+/* ---------- Census CBP: AZ establishments by sector (target universe) --- */
+
+/** NAICS sectors tracked for the "Arizona companies by sector" census.
+ * slug sanitizes the code for series ids ("31-33" -> "3133"). */
+const CBP_SECTORS: { code: string; slug: string; name: string }[] = [
+  { code: "11", slug: "11", name: "Agriculture & Forestry" },
+  { code: "21", slug: "21", name: "Mining & Oil/Gas" },
+  { code: "22", slug: "22", name: "Utilities" },
+  { code: "23", slug: "23", name: "Construction" },
+  { code: "31-33", slug: "3133", name: "Manufacturing" },
+  { code: "3364", slug: "3364", name: "Aerospace & Defense" },
+  { code: "42", slug: "42", name: "Wholesale Trade" },
+  { code: "44-45", slug: "4445", name: "Retail Trade" },
+  { code: "48-49", slug: "4849", name: "Transportation & Warehousing" },
+  { code: "51", slug: "51", name: "Information" },
+  { code: "52", slug: "52", name: "Finance & Insurance" },
+  { code: "53", slug: "53", name: "Real Estate" },
+  { code: "54", slug: "54", name: "Professional & Technical Services" },
+  { code: "55", slug: "55", name: "Management of Companies" },
+  { code: "56", slug: "56", name: "Administrative & Waste Services" },
+  { code: "61", slug: "61", name: "Educational Services" },
+  { code: "62", slug: "62", name: "Healthcare & Social Assistance" },
+  { code: "71", slug: "71", name: "Arts, Entertainment & Recreation" },
+  { code: "72", slug: "72", name: "Accommodation & Food Services" },
+  { code: "81", slug: "81", name: "Other Services" },
+];
+
+/** How many companies (employer establishments) operate in each Arizona
+ * sector — the acquisition target universe. Census County Business
+ * Patterns, annual; stored as CBP_AZ_SEC_<slug>_ESTAB / _EMP series for
+ * the latest two published years. Runs in the daily `all` ingest. */
+export async function ingestSectorCounts(): Promise<number> {
+  const key = process.env.CENSUS_KEY;
+  if (!key) {
+    await logSync("sector_counts", "skipped", 0, "CENSUS_KEY not set");
+    return 0;
+  }
+  const fetchSector = async (year: number, code: string) => {
+    const url =
+      `https://api.census.gov/data/${year}/cbp?get=NAME,ESTAB,EMP&for=state:04` +
+      `&NAICS2017=${encodeURIComponent(code)}&key=${key}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = (await res.json()) as string[][];
+    if (!Array.isArray(data) || data.length < 2) return null;
+    const headers = data[0];
+    const vals = data[1];
+    const get = (c: string) => {
+      const i = headers.indexOf(c);
+      return i >= 0 && vals[i] ? Number(vals[i]) : null;
+    };
+    return { estab: get("ESTAB"), emp: get("EMP") };
+  };
+  // Find the latest published CBP year (probe with Construction).
+  const thisYear = new Date().getFullYear();
+  let latestYear = 0;
+  for (const y of [thisYear - 2, thisYear - 3, thisYear - 4]) {
+    try {
+      if (await fetchSector(y, "23")) {
+        latestYear = y;
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+  if (!latestYear) {
+    await logSync("sector_counts", "error", 0, "No published CBP year found");
+    return 0;
+  }
+  let total = 0;
+  for (const year of [latestYear, latestYear - 1]) {
+    const rows: IndicatorInput[] = [];
+    for (const s of CBP_SECTORS) {
+      try {
+        const v = await fetchSector(year, s.code);
+        if (v) {
+          if (v.estab !== null)
+            rows.push({
+              source: "census",
+              seriesId: `CBP_AZ_SEC_${s.slug}_ESTAB`,
+              title: `${s.name} — AZ Establishments`,
+              units: "Establishments",
+              frequency: "Annual",
+              obsDate: `${year}-01-01`,
+              value: v.estab,
+            });
+          if (v.emp !== null)
+            rows.push({
+              source: "census",
+              seriesId: `CBP_AZ_SEC_${s.slug}_EMP`,
+              title: `${s.name} — AZ Employment`,
+              units: "Employees",
+              frequency: "Annual",
+              obsDate: `${year}-01-01`,
+              value: v.emp,
+            });
+        }
+      } catch {
+        continue;
+      }
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    total += await upsertIndicatorObs(rows);
+  }
+  await logSync("sector_counts", "ok", total, `CBP sector establishments, latest ${latestYear}`);
+  return total;
+}
+
 /** Arizona state government revenue & expenditure from the Census Annual Survey
  *  of State and Local Government Finances (timeseries/govslocalfin), GOVTYPE=002
  *  (state government only). Requires CENSUS_KEY. LF0001 = Total Revenue,
@@ -1253,7 +1362,7 @@ export async function ingestCountyPermits(): Promise<number> {
   return total;
 }
 
-export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "all";
+export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "sector_counts" | "all";
 
 export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -1271,6 +1380,7 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["census", ingestCensus],
     ["census", ingestCensusStateFin],
     ["county_permits", ingestCountyPermits],
+    ["sector_counts", ingestSectorCounts],
   ];
   for (const [name, fn] of jobs) {
     if (source !== "all" && source !== name) continue;
