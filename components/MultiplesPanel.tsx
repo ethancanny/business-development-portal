@@ -33,7 +33,13 @@ export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples
     onMouseLeave: () => setHovRow((h: string) => (h === key ? "" : h)),
     onClick: () => toggleRow(key),
     style: rowStyle(key),
-    className: "border-b border-slate-100 dark:border-white/5 cursor-pointer",
+    className: `border-b border-slate-100 dark:border-white/5 cursor-pointer ${
+      selRow === key
+        ? "bg-slate-300 dark:bg-white/20"
+        : hovRow === key
+          ? "bg-slate-200 dark:bg-white/10"
+          : ""
+    }`,
   });
   const set = (k: string) => (e: ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const input = "rounded-lg border border-slate-300 px-2 py-1.5 text-sm dark:border-white/15 dark:bg-white/5 dark:text-white";
