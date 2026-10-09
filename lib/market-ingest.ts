@@ -939,7 +939,75 @@ export async function ingestDamodaranMultiples(): Promise<number> {
     });
     added++;
   }
-  await logSync("multiples", "ok", added, `Damodaran ${period}: ${added} public-comp industries`);
+
+  // EBITDA margins (EBITDA/Sales) from Damodaran's companion margin dataset,
+  // aggregated to the portal's focus sectors (lower median across the mapped
+  // public industries). These convert the SUSB revenue bands into the
+  // $500K–$2M EBITDA target band on the size-profile chart.
+  let marginNote = "";
+  try {
+    const mRes = await fetch("https://pages.stern.nyu.edu/~adamodar/pc/datasets/margin.xls", {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" },
+    });
+    if (!mRes.ok) throw new Error(`HTTP ${mRes.status}`);
+    const mBuf = Buffer.from(await mRes.arrayBuffer());
+    const mWb = XLSX.read(mBuf, { type: "buffer" });
+    const mWs = mWb.Sheets["Industry Averages"];
+    if (!mWs) throw new Error("'Industry Averages' sheet missing");
+    const mRows = XLSX.utils.sheet_to_json<unknown[]>(mWs, { header: 1 });
+    const mHdr = mRows.findIndex((r) => String(r[0]).includes("Industry"));
+    if (mHdr < 0) throw new Error("header row not found");
+    const mCol = (mRows[mHdr] as unknown[]).indexOf("EBITDA/Sales");
+    if (mCol < 0) throw new Error("EBITDA/Sales column not found");
+    const groups: Record<string, { name: string; test: (n: string) => boolean }> = {
+      "3364": { name: "Aerospace & Defense", test: (n) => /^aerospace/i.test(n) },
+      "62": { name: "Healthcare", test: (n) => /health|hospital|medical|drug|biotech/i.test(n) },
+      "23": { name: "Specialty Trades & Construction", test: (n) => /engineering\/construction|homebuilding/i.test(n) },
+      "3133": {
+        name: "Advanced Manufacturing",
+        test: (n) =>
+          /machinery|electrical|electronics|semiconductor|auto|chemical|steel|metals|mining|packaging|industrial|paper|rubber/i.test(n) &&
+          !/^aerospace/i.test(n),
+      },
+    };
+    const byGroup = new Map<string, number[]>();
+    for (let i = mHdr + 1; i < mRows.length; i++) {
+      const r = mRows[i] as unknown[];
+      const name = String(r[0] ?? "").trim();
+      const m = Number(r[mCol]);
+      if (!name || !Number.isFinite(m) || m <= 0 || m >= 0.6) continue;
+      for (const [slug, g] of Object.entries(groups)) {
+        if (g.test(name)) {
+          if (!byGroup.has(slug)) byGroup.set(slug, []);
+          byGroup.get(slug)!.push(m);
+          break;
+        }
+      }
+    }
+    const mObs: IndicatorInput[] = [];
+    const parts: string[] = [];
+    for (const [slug, g] of Object.entries(groups)) {
+      const xs = (byGroup.get(slug) ?? []).slice().sort((a, b) => a - b);
+      if (!xs.length) continue;
+      const lowerMedian = xs[Math.floor((xs.length - 1) / 2)];
+      mObs.push({
+        source: "damodaran",
+        seriesId: `DAMO_EBITDA_MARGIN_${slug}`,
+        title: `Damodaran EBITDA margin — ${g.name} (public comps)`,
+        units: "% of sales",
+        frequency: "Annual",
+        obsDate: `${period}-01`,
+        value: Math.round(lowerMedian * 1000) / 10,
+      });
+      parts.push(`${g.name} ${(lowerMedian * 100).toFixed(1)}% (n=${xs.length})`);
+    }
+    if (mObs.length) await upsertIndicatorObs(mObs);
+    marginNote = parts.length ? ` · EBITDA margins: ${parts.join(" · ")}` : "";
+    if (parts.length < 4) throw new Error(`only ${parts.length}/4 sector margins mapped`);
+  } catch (err) {
+    await logSync("damodaran_margins", "error", 0, `margin.xls: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  await logSync("multiples", "ok", added, `Damodaran ${period}: ${added} public-comp industries${marginNote}`);
   return added;
 }
 
