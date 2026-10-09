@@ -46,8 +46,6 @@ const FRED_SERIES: { id: string; title: string }[] = [
   // Commodity prices Arizona's economy depends on (mining, construction,
   // energy): IMF global prices via FRED + EIA energy + PPI lumber.
   { id: "PCOPPUSDM", title: "Copper — Global Price (IMF)" },
-  { id: "PGOLDUSDM", title: "Gold — Global Price (IMF)" },
-  { id: "PSILVUSDM", title: "Silver — Global Price (IMF)" },
   { id: "MCOILWTICO", title: "WTI Crude Oil Price" },
   { id: "MHHNGSP", title: "Natural Gas — Henry Hub Price" },
   { id: "WPU081", title: "Lumber & Wood Products PPI" },
