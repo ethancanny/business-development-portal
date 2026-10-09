@@ -17,7 +17,7 @@ import {
   YAxis,
 } from "recharts";
 import PageHero from "@/components/PageHero";
-import SizeProfileRow, { hasSizeProfile } from "@/components/SizeProfileRows";
+import SizeProfileRow, { hasSizeProfile, SUBSECTOR_IDS_CSV } from "@/components/SizeProfileRows";
 import ValleyDemographics from "@/components/ValleyDemographics";
 import { useTheme } from "@/components/ThemeProvider";
 import { fmtMoney, fmtDate } from "@/lib/format";
@@ -379,7 +379,9 @@ export default function MarketIntelPage() {
               "," +
               SPOT_IDS +
               "," +
-              SUSB_IDS
+              SUSB_IDS +
+              "," +
+              SUBSECTOR_IDS_CSV
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
