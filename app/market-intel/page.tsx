@@ -1334,6 +1334,228 @@ export default function MarketIntelPage() {
           </div>
         </Section>
 
+        <Section title="Industries" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades">
+          {sectorRows.length > 0 && (
+            <div className={`${chartCard} mb-4`}>
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona Companies by Sector</h3>
+                <div className="flex gap-1">
+                  {(["trend", "share"] as const).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setSectorView(v)}
+                      className={
+                        sectorView === v
+                          ? "rounded-full bg-[#b8975a] px-3 py-1 text-xs font-semibold text-white"
+                          : "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-500 hover:border-[#b8975a] dark:border-white/15 dark:text-white/50"
+                      }
+                    >
+                      {v === "trend" ? "Trend" : "Share"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+                Employer establishments by NAICS sector · U.S. Census Bureau, County Business Patterns · refreshed daily (CBP publishes annually)
+              </p>
+              {sectorView === "trend" ? (
+                <div className="h-[380px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="year" tick={{ fontSize: 11, fill: tick }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
+                      <Tooltip
+                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12, borderRadius: 8 }}
+                        cursor={{ stroke: grid }}
+                        formatter={(v, name) => [Number(v).toLocaleString(), name]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
+                      {sectorTrend.slugs.map((slug, i) => (
+                        <Line
+                          key={slug}
+                          type="monotone"
+                          dataKey={slug}
+                          name={SECTOR_SHORT[slug] ?? slug}
+                          stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                          strokeWidth={2}
+                          dot={false}
+                          activeDot={{ r: 3.5 }}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="h-[380px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={sectorPieData} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={1} stroke={dark ? "#132847" : "#ffffff"} strokeWidth={1}>
+                        {sectorPieData.map((d, i) => (
+                          <Cell key={d.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                        formatter={(v, name) => [`${Number(v).toLocaleString()} (${sectorTotal ? ((Number(v) / sectorTotal) * 100).toFixed(1) : "0"}%)`, name]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
+                {sectorView === "trend" ? "Establishments per year — top 8 sectors" : `CBP ${sectorYear} mix`} · {sectorTotal.toLocaleString()} establishments statewide (CBP {sectorYear})
+              </p>
+              <div className={`${tableWrap} mt-3 max-h-[320px] overflow-y-auto`}>
+                <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                  <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                    <th className={th}>Sector</th><th className={th}>Companies</th><th className={th}>Employees</th><th className={th}>Share</th>
+                  </tr></thead>
+                  <tbody>
+                    {sectorRows.map((r) => (
+                      <tr key={r.slug} className="border-b border-slate-100 dark:border-white/5">
+                        <td className={td}>{r.name}</td>
+                        <td className={`${td} font-medium`}>{r.estab.toLocaleString()}</td>
+                        <td className={td}>{r.emp ? r.emp.toLocaleString() : "—"}</td>
+                        <td className={td}>{sectorTotal ? `${((r.estab / sectorTotal) * 100).toFixed(1)}%` : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {hasSizeProfiles(obs) && (
+            <SubSection title="Company Size — Target Bands">
+              <p className="mb-4 text-xs text-slate-500 dark:text-white/40">
+                How many Arizona companies in each focus industry sit in the target bands — <b>$5–20M revenue</b> and an estimated <b>$500K–$2M EBITDA</b> — versus smaller and larger firms. Firm counts are Census SUSB actuals for Arizona; the revenue split applies each industry&apos;s U.S. receipts-size distribution (SUSB doesn&apos;t publish receipts size by state). The EBITDA band converts at each industry&apos;s public-company EBITDA margin (Damodaran) and is an estimate.
+              </p>
+              <SizeProfileRows obs={obs} />
+            </SubSection>
+          )}
+          <SubSection title="Aerospace & Defense">
+            <EventStrip items={industryEvents("Aerospace & Defense")} onDismiss={dismissEvent} />
+            {sectorLine("3364")}
+            <div className="grid gap-4 lg:grid-cols-2">
+<div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly DoD contract obligations performed in AZ, $M · USASpending.gov. Cross-check: DoD&apos;s Defense Spending by State report counts $14.5B (FY2023) / $14.7B (FY2024) in AZ contract spending — USASpending obligations run ~5–15% higher on a different methodology, and single awards (Raytheon missile lots, Boeing Apache, TriWest TRICARE) move individual months by billions, so judge the trend on 12-month windows, not single months.</p>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={defenseRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="AZ_DOD_CONTRACTS" name="All DoD ($M)" fill={blue} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="AZ_AEROSPACE_CONTRACTS" name="Aerospace NAICS 3364 ($M)" fill={gold} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            {(() => {
+              const fy25 = obs
+                .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.obsDate >= "2024-10-01" && o.obsDate <= "2025-09-01")
+                .reduce((s, o) => s + (o.value || 0), 0);
+              return fy25 > 0 ? (
+                <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
+                  Cross-reference: this series computes to ${(fy25 / 1e9).toFixed(1)}B for federal FY2025 · DoD&apos;s published Defense Spending by State report: $14.5B (FY2023) / $14.7B (FY2024) AZ contract spending — different methodology, shown for comparison. The daily ingest re-verifies these monthly figures against USASpending&apos;s fiscal-year totals every run (see Data freshness below).
+                </p>
+              ) : null;
+            })()}
+          </div>
+<div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Contracts — Recent Months</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Source data · USASpending.gov, $M</p>
+            <div className={tableWrap}>
+              <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                  <th className={th}>Month</th><th className={th}>All DoD</th><th className={th}>Aerospace</th>
+                </tr></thead>
+                <tbody>
+                  {[...defenseRows].slice(-12).reverse().map((r) => (
+                    <tr key={r.date} className="border-b border-slate-100 dark:border-white/5">
+                      <td className={td}>{shortDate(r.date)}</td>
+                      <td className={`${td} font-medium`}>{typeof r.AZ_DOD_CONTRACTS === "number" ? `$${r.AZ_DOD_CONTRACTS.toLocaleString()}M` : "—"}</td>
+                      <td className={td}>{typeof r.AZ_AEROSPACE_CONTRACTS === "number" ? `$${r.AZ_AEROSPACE_CONTRACTS.toLocaleString()}M` : "—"}</td>
+                    </tr>
+                  ))}
+                  {defenseRows.length === 0 && <tr><td className={td} colSpan={3}>No contract data yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+            </div>
+          </SubSection>
+
+          <SubSection title="Healthcare">
+            <EventStrip items={industryEvents("Healthcare")} onDismiss={dismissEvent} />
+            {sectorLine("62")}
+            <div className="grid gap-4 lg:grid-cols-2">
+          <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Healthcare Employment — AZ</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={healthRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="SMS04000006562000001" name="Healthcare" stroke={green} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+            </div>
+          </SubSection>
+
+          <SubSection title="Advanced Manufacturing">
+            <EventStrip items={industryEvents("Advanced Manufacturing")} onDismiss={dismissEvent} />
+            {sectorLine("3133")}
+            <div className="grid gap-4 lg:grid-cols-2">
+          <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Manufacturing Employment — AZ</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={mfgRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="AZMFG" name="Manufacturing" stroke={gold} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+            </div>
+          </SubSection>
+
+          <SubSection title="Specialty Trades & Construction">
+            <EventStrip items={industryEvents("Specialty Trades & Construction")} onDismiss={dismissEvent} />
+            {sectorLine("23")}
+            <div className="grid gap-4 lg:grid-cols-2">
+          <div className={chartCard}>
+            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Construction Employment — AZ</h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={consRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="AZCONS" name="Construction" stroke={orange} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+            </div>
+          </SubSection>
+        </Section>
+
         <Section title="Arizona Economic Data" sub="State-level indicators, budget, demographics, and permitting">
           <SubSection title="Economic Indicators">
             <EventStrip items={allEvents} onDismiss={dismissEvent} />
@@ -1811,228 +2033,6 @@ export default function MarketIntelPage() {
             </div>
             <p className="px-3 py-2 text-xs text-slate-400 dark:text-white/30">Layoffs often precede sales — worth a look when a target-industry employer appears. Source: WARN Act notices dataset.</p>
           </div>
-          </SubSection>
-        </Section>
-
-        <Section title="Industries" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades">
-          {sectorRows.length > 0 && (
-            <div className={`${chartCard} mb-4`}>
-              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona Companies by Sector</h3>
-                <div className="flex gap-1">
-                  {(["trend", "share"] as const).map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => setSectorView(v)}
-                      className={
-                        sectorView === v
-                          ? "rounded-full bg-[#b8975a] px-3 py-1 text-xs font-semibold text-white"
-                          : "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-500 hover:border-[#b8975a] dark:border-white/15 dark:text-white/50"
-                      }
-                    >
-                      {v === "trend" ? "Trend" : "Share"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-                Employer establishments by NAICS sector · U.S. Census Bureau, County Business Patterns · refreshed daily (CBP publishes annually)
-              </p>
-              {sectorView === "trend" ? (
-                <div className="h-[380px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
-                      <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="year" tick={{ fontSize: 11, fill: tick }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
-                      <Tooltip
-                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12, borderRadius: 8 }}
-                        cursor={{ stroke: grid }}
-                        formatter={(v, name) => [Number(v).toLocaleString(), name]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
-                      {sectorTrend.slugs.map((slug, i) => (
-                        <Line
-                          key={slug}
-                          type="monotone"
-                          dataKey={slug}
-                          name={SECTOR_SHORT[slug] ?? slug}
-                          stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                          strokeWidth={2}
-                          dot={false}
-                          activeDot={{ r: 3.5 }}
-                        />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <div className="h-[380px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={sectorPieData} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={1} stroke={dark ? "#132847" : "#ffffff"} strokeWidth={1}>
-                        {sectorPieData.map((d, i) => (
-                          <Cell key={d.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
-                        formatter={(v, name) => [`${Number(v).toLocaleString()} (${sectorTotal ? ((Number(v) / sectorTotal) * 100).toFixed(1) : "0"}%)`, name]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-              <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
-                {sectorView === "trend" ? "Establishments per year — top 8 sectors" : `CBP ${sectorYear} mix`} · {sectorTotal.toLocaleString()} establishments statewide (CBP {sectorYear})
-              </p>
-              <div className={`${tableWrap} mt-3 max-h-[320px] overflow-y-auto`}>
-                <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
-                  <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                    <th className={th}>Sector</th><th className={th}>Companies</th><th className={th}>Employees</th><th className={th}>Share</th>
-                  </tr></thead>
-                  <tbody>
-                    {sectorRows.map((r) => (
-                      <tr key={r.slug} className="border-b border-slate-100 dark:border-white/5">
-                        <td className={td}>{r.name}</td>
-                        <td className={`${td} font-medium`}>{r.estab.toLocaleString()}</td>
-                        <td className={td}>{r.emp ? r.emp.toLocaleString() : "—"}</td>
-                        <td className={td}>{sectorTotal ? `${((r.estab / sectorTotal) * 100).toFixed(1)}%` : "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          {hasSizeProfiles(obs) && (
-            <SubSection title="Company Size — Target Bands">
-              <p className="mb-4 text-xs text-slate-500 dark:text-white/40">
-                How many Arizona companies in each focus industry sit in the target bands — <b>$5–20M revenue</b> and an estimated <b>$500K–$2M EBITDA</b> — versus smaller and larger firms. Firm counts are Census SUSB actuals for Arizona; the revenue split applies each industry&apos;s U.S. receipts-size distribution (SUSB doesn&apos;t publish receipts size by state). The EBITDA band converts at each industry&apos;s public-company EBITDA margin (Damodaran) and is an estimate.
-              </p>
-              <SizeProfileRows obs={obs} />
-            </SubSection>
-          )}
-          <SubSection title="Aerospace & Defense">
-            <EventStrip items={industryEvents("Aerospace & Defense")} onDismiss={dismissEvent} />
-            {sectorLine("3364")}
-            <div className="grid gap-4 lg:grid-cols-2">
-<div className={chartCard}>
-            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly DoD contract obligations performed in AZ, $M · USASpending.gov. Cross-check: DoD&apos;s Defense Spending by State report counts $14.5B (FY2023) / $14.7B (FY2024) in AZ contract spending — USASpending obligations run ~5–15% higher on a different methodology, and single awards (Raytheon missile lots, Boeing Apache, TriWest TRICARE) move individual months by billions, so judge the trend on 12-month windows, not single months.</p>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={defenseRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
-                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
-                  <YAxis tick={{ fontSize: 11, fill: tick }} />
-                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="AZ_DOD_CONTRACTS" name="All DoD ($M)" fill={blue} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="AZ_AEROSPACE_CONTRACTS" name="Aerospace NAICS 3364 ($M)" fill={gold} radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            {(() => {
-              const fy25 = obs
-                .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.obsDate >= "2024-10-01" && o.obsDate <= "2025-09-01")
-                .reduce((s, o) => s + (o.value || 0), 0);
-              return fy25 > 0 ? (
-                <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
-                  Cross-reference: this series computes to ${(fy25 / 1e9).toFixed(1)}B for federal FY2025 · DoD&apos;s published Defense Spending by State report: $14.5B (FY2023) / $14.7B (FY2024) AZ contract spending — different methodology, shown for comparison. The daily ingest re-verifies these monthly figures against USASpending&apos;s fiscal-year totals every run (see Data freshness below).
-                </p>
-              ) : null;
-            })()}
-          </div>
-<div className={chartCard}>
-            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Contracts — Recent Months</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Source data · USASpending.gov, $M</p>
-            <div className={tableWrap}>
-              <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
-                <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                  <th className={th}>Month</th><th className={th}>All DoD</th><th className={th}>Aerospace</th>
-                </tr></thead>
-                <tbody>
-                  {[...defenseRows].slice(-12).reverse().map((r) => (
-                    <tr key={r.date} className="border-b border-slate-100 dark:border-white/5">
-                      <td className={td}>{shortDate(r.date)}</td>
-                      <td className={`${td} font-medium`}>{typeof r.AZ_DOD_CONTRACTS === "number" ? `$${r.AZ_DOD_CONTRACTS.toLocaleString()}M` : "—"}</td>
-                      <td className={td}>{typeof r.AZ_AEROSPACE_CONTRACTS === "number" ? `$${r.AZ_AEROSPACE_CONTRACTS.toLocaleString()}M` : "—"}</td>
-                    </tr>
-                  ))}
-                  {defenseRows.length === 0 && <tr><td className={td} colSpan={3}>No contract data yet.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-            </div>
-          </SubSection>
-
-          <SubSection title="Healthcare">
-            <EventStrip items={industryEvents("Healthcare")} onDismiss={dismissEvent} />
-            {sectorLine("62")}
-            <div className="grid gap-4 lg:grid-cols-2">
-          <div className={chartCard}>
-            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Healthcare Employment — AZ</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={healthRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
-                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
-                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
-                  <Line type="monotone" dataKey="SMS04000006562000001" name="Healthcare" stroke={green} strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-            </div>
-          </SubSection>
-
-          <SubSection title="Advanced Manufacturing">
-            <EventStrip items={industryEvents("Advanced Manufacturing")} onDismiss={dismissEvent} />
-            {sectorLine("3133")}
-            <div className="grid gap-4 lg:grid-cols-2">
-          <div className={chartCard}>
-            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Manufacturing Employment — AZ</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={mfgRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
-                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
-                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
-                  <Line type="monotone" dataKey="AZMFG" name="Manufacturing" stroke={gold} strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-            </div>
-          </SubSection>
-
-          <SubSection title="Specialty Trades & Construction">
-            <EventStrip items={industryEvents("Specialty Trades & Construction")} onDismiss={dismissEvent} />
-            {sectorLine("23")}
-            <div className="grid gap-4 lg:grid-cols-2">
-          <div className={chartCard}>
-            <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Construction Employment — AZ</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={consRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
-                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
-                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
-                  <Line type="monotone" dataKey="AZCONS" name="Construction" stroke={orange} strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-            </div>
           </SubSection>
         </Section>
 
