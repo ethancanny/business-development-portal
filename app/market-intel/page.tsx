@@ -63,8 +63,6 @@ const CHART_COLORS = ["#b8975a", "#7aa2f7", "#6abf8b", "#e07856", "#9b8cf2", "#4
 /** Commodity prices Arizona's economy depends on (FRED: IMF metals, EIA energy, PPI lumber). */
 const COMMODITY_SERIES: { id: string; name: string; unit: string; digits: number }[] = [
   { id: "PCOPPUSDM", name: "Copper", unit: "$/metric ton", digits: 0 },
-  { id: "PGOLDUSDM", name: "Gold", unit: "$/troy oz", digits: 0 },
-  { id: "PSILVUSDM", name: "Silver", unit: "$/troy oz", digits: 2 },
   { id: "MCOILWTICO", name: "WTI Crude Oil", unit: "$/barrel", digits: 2 },
   { id: "MHHNGSP", name: "Natural Gas", unit: "$/MMBtu", digits: 2 },
   { id: "WPU081", name: "Lumber & Wood Products", unit: "PPI index", digits: 1 },
