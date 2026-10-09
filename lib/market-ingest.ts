@@ -991,9 +991,16 @@ export async function ingestDefenseContracts(): Promise<number> {
             ? `${s.id} cross-check MISMATCH — ${bad.join("; ")}`
             : `${s.id} cross-check OK: monthly sums reconcile with USASpending fiscal-year totals`
         );
+      } else {
+        await logSync("defense-xcheck", "error", 0, `${s.id} cross-check could not run: USASpending FY query HTTP ${fyRes.status}`);
       }
     } catch {
-      /* cross-check is best-effort; the ingest itself already succeeded */
+      // A cross-check that silently doesn't run is worse than none — log it.
+      try {
+        await logSync("defense-xcheck", "error", 0, `${s.id} cross-check could not run (fetch failed)`);
+      } catch {
+        /* logging itself failed; the ingest result stands */
+      }
     }
   }
   await logSync("defense", "ok", total, `USASpending: ${series.length} AZ contract series`);
