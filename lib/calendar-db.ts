@@ -15,6 +15,8 @@ export interface CalendarEvent {
   location: string;
   attendees: string[];
   allDay: boolean;
+  webUrl: string; // Outlook web link for the event
+  dismissed: boolean; // hidden from the weekly summary (survives syncs)
 }
 
 function sql() {
@@ -37,6 +39,8 @@ async function ensure() {
     all_day BOOLEAN NOT NULL DEFAULT false,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  await q`ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS web_url TEXT NOT NULL DEFAULT ''`;
+  await q`ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS dismissed BOOLEAN NOT NULL DEFAULT false`;
   ensured = true;
 }
 
@@ -50,8 +54,8 @@ export async function importCalendarEvents(
   await ensure();
   const q = sql();
   for (const e of events) {
-    await q`INSERT INTO calendar_events (event_id, title, starts_at, ends_at, location, attendees, all_day, updated_at)
-      VALUES (${e.eventId}, ${e.title}, ${e.startsAt}, ${e.endsAt}, ${e.location}, ${JSON.stringify(e.attendees)}, ${e.allDay}, now())
+    await q`INSERT INTO calendar_events (event_id, title, starts_at, ends_at, location, attendees, all_day, web_url, updated_at)
+      VALUES (${e.eventId}, ${e.title}, ${e.startsAt}, ${e.endsAt}, ${e.location}, ${JSON.stringify(e.attendees)}, ${e.allDay}, ${e.webUrl}, now())
       ON CONFLICT (event_id) DO UPDATE SET
         title = EXCLUDED.title,
         starts_at = EXCLUDED.starts_at,
@@ -59,6 +63,7 @@ export async function importCalendarEvents(
         location = EXCLUDED.location,
         attendees = EXCLUDED.attendees,
         all_day = EXCLUDED.all_day,
+        web_url = EXCLUDED.web_url,
         updated_at = now()`;
   }
   // Prune events inside the synced window that no longer exist upstream
@@ -77,7 +82,7 @@ export async function importCalendarEvents(
 export async function getCalendarEvents(from: string, to: string): Promise<CalendarEvent[]> {
   await ensure();
   const q = sql();
-  const rows = await q`SELECT event_id, title, starts_at, ends_at, location, attendees, all_day
+  const rows = await q`SELECT event_id, title, starts_at, ends_at, location, attendees, all_day, web_url, dismissed
     FROM calendar_events
     WHERE starts_at >= ${from} AND starts_at < ${to}
     ORDER BY starts_at ASC`;
@@ -97,6 +102,17 @@ export async function getCalendarEvents(from: string, to: string): Promise<Calen
       location: str(r.location),
       attendees,
       allDay: Boolean(r.all_day),
+      webUrl: str(r.web_url),
+      dismissed: Boolean(r.dismissed),
     };
   });
+}
+
+export async function setCalendarEventDismissed(
+  eventId: string,
+  dismissed: boolean
+): Promise<void> {
+  await ensure();
+  const q = sql();
+  await q`UPDATE calendar_events SET dismissed = ${dismissed}, updated_at = now() WHERE event_id = ${eventId}`;
 }

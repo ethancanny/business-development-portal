@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import {
   getCalendarEvents,
   importCalendarEvents,
+  setCalendarEventDismissed,
   type CalendarEvent,
 } from "@/lib/calendar-db";
 
@@ -41,6 +42,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const body = await req.json().catch(() => ({}));
+  if (body.action === "dismiss") {
+    // Weekly-summary dismissal (Ethan, Oct 9, 2026): hide an event from the
+    // summary without touching the Outlook calendar; survives re-syncs.
+    const eventId = String(body.eventId ?? "");
+    if (!eventId) {
+      return NextResponse.json({ error: "eventId required" }, { status: 400 });
+    }
+    try {
+      await setCalendarEventDismissed(eventId, Boolean(body.dismissed));
+      return NextResponse.json({ ok: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
+  }
   const rawEvents: unknown[] = Array.isArray(body.events) ? body.events : [];
   const events: CalendarEvent[] = rawEvents
     .map((r) => {
@@ -53,6 +69,8 @@ export async function POST(req: NextRequest) {
         location: String(o.location ?? ""),
         attendees: Array.isArray(o.attendees) ? o.attendees.map((a) => String(a)) : [],
         allDay: Boolean(o.allDay),
+        webUrl: String(o.webUrl ?? ""),
+        dismissed: false,
       };
     })
     .filter((e) => e.eventId && e.title && e.startsAt);

@@ -38,6 +38,17 @@ const fmtWhen = (iso: string, allDay: boolean): string => {
   return `${day} · ${time}`;
 };
 
+// A location that is a raw meeting URL renders as a short label, never the
+// full link (Ethan, Oct 9, 2026 — a Zoom URL ran the full width of the card).
+const locText = (loc: string): string => {
+  if (!loc) return "";
+  if (/^https?:\/\//i.test(loc)) {
+    const l = loc.toLowerCase();
+    return l.includes("zoom") ? "Zoom" : l.includes("teams") ? "Microsoft Teams" : "Online";
+  }
+  return loc;
+};
+
 export default function Overview() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -80,7 +91,9 @@ export default function Overview() {
       if (flowRes.ok) setFlow(await flowRes.json());
       if (calRes.ok) {
         const cal = await calRes.json();
-        if (Array.isArray(cal.events)) setCalEvents(cal.events);
+        if (Array.isArray(cal.events)) {
+          setCalEvents(cal.events.filter((e: CalendarEvent) => !e.dismissed));
+        }
       }
     } finally {
       setLoading(false);
@@ -200,7 +213,7 @@ export default function Overview() {
       if (t >= startMs && t < endMs) held.push(e);
       else if (t >= endMs && t < endMs + 21 * 86400000) after.push(e);
     });
-    const lines: string[] = [];
+    const lines: { id: string; text: string; person: string }[] = [];
     const usedNext: string[] = [];
     held.forEach((e) => {
       const person = personOf(e.title);
@@ -216,11 +229,13 @@ export default function Overview() {
         usedNext.push(next.eventId);
         const a = e.title.charAt(0).toLowerCase() + e.title.slice(1);
         const b = next.title.charAt(0).toLowerCase() + next.title.slice(1);
-        lines.push(
-          `Moved from ${a} to ${b} — ${fmtWhen(next.startsAt, next.allDay)}${next.location ? ` · ${next.location}` : ""}`
-        );
+        lines.push({
+          id: e.eventId,
+          person,
+          text: `Moved from ${a} to ${b} — ${fmtWhen(next.startsAt, next.allDay)}${next.location ? ` · ${locText(next.location)}` : ""}`,
+        });
       } else {
-        lines.push(`${e.title} — ${fmtWhen(e.startsAt, e.allDay)}`);
+        lines.push({ id: e.eventId, person, text: `${e.title} — ${fmtWhen(e.startsAt, e.allDay)}` });
       }
     });
     const nowMs = Date.now();
@@ -232,6 +247,65 @@ export default function Overview() {
       .slice(0, 6);
     return { lines: lines.slice(0, 5), upcoming };
   }, [calEvents, execs, weekWindow]);
+
+  const dismissEvent = async (eventId: string) => {
+    setCalEvents((prev) => prev.filter((e) => e.eventId !== eventId));
+    try {
+      await fetch("/api/calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dismiss", eventId, dismissed: true }),
+      });
+    } catch {
+      /* optimistic removal stands for this session */
+    }
+  };
+
+  const renderLoc = (loc: string) => {
+    if (!loc) return null;
+    if (/^https?:\/\//i.test(loc)) {
+      return (
+        <a href={loc} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-[#8a6f3e]">
+          {locText(loc)}
+        </a>
+      );
+    }
+    if (/teams|zoom|online|phone|call/i.test(loc)) return <span>{loc}</span>;
+    return (
+      <a
+        href={`https://www.google.com/maps/search/${encodeURIComponent(loc)}`}
+        target="_blank"
+        rel="noreferrer"
+        className="hover:underline"
+      >
+        {loc}
+      </a>
+    );
+  };
+
+  const renderLine = (line: { text: string; person: string }) => {
+    if (!line.person) return line.text;
+    let idx = line.text.indexOf(line.person);
+    let matched = line.person;
+    if (idx < 0) {
+      const first = line.person.split(" ")[0];
+      idx = line.text.indexOf(first);
+      matched = first;
+    }
+    if (idx < 0) return line.text;
+    return (
+      <>
+        {line.text.slice(0, idx)}
+        <Link
+          href={`/directory?q=${encodeURIComponent(line.person)}`}
+          className="font-semibold text-[#0d1f3c] underline decoration-[#b8975a] decoration-2 underline-offset-2 dark:text-white"
+        >
+          {matched}
+        </Link>
+        {line.text.slice(idx + matched.length)}
+      </>
+    );
+  };
 
   const staleDeals = useMemo(() => {
     const cutoff = new Date();
@@ -378,10 +452,22 @@ export default function Overview() {
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
               Activity highlights
             </p>
-            <ul className="space-y-1">
-              {calSummary.lines.map((line, i) => (
-                <li key={i} className="text-sm text-slate-600 dark:text-white/75">
-                  • {line}
+            <ul className="divide-y divide-slate-100 dark:divide-white/5">
+              {calSummary.lines.map((line) => (
+                <li
+                  key={line.id}
+                  className="group flex items-baseline gap-2 py-1.5 text-sm text-slate-600 dark:text-white/75"
+                >
+                  <span className="shrink-0 text-[#b8975a]">▸</span>
+                  <span className="flex-1">{renderLine(line)}</span>
+                  <button
+                    onClick={() => dismissEvent(line.id)}
+                    title="Dismiss"
+                    aria-label="Dismiss highlight"
+                    className="shrink-0 rounded px-1 text-base leading-none text-slate-300 opacity-0 transition hover:text-red-400 group-hover:opacity-100 dark:text-white/25"
+                  >
+                    ×
+                  </button>
                 </li>
               ))}
             </ul>
@@ -392,16 +478,51 @@ export default function Overview() {
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
               Important dates
             </p>
-            <ul className="space-y-1">
-              {calSummary.upcoming.map((e) => (
-                <li key={e.eventId} className="flex items-baseline justify-between gap-2 text-sm">
-                  <span className="truncate font-medium text-[#0d1f3c] dark:text-white">{e.title}</span>
-                  <span className="shrink-0 text-xs text-slate-400 dark:text-white/40">
-                    {fmtWhen(e.startsAt, e.allDay)}
-                    {e.location ? ` · ${e.location}` : ""}
-                  </span>
-                </li>
-              ))}
+            <ul className="space-y-1.5">
+              {calSummary.upcoming.map((e) => {
+                const d = new Date(e.startsAt);
+                return (
+                  <li
+                    key={e.eventId}
+                    className="group flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-2.5 py-2 dark:border-white/5 dark:bg-white/[0.03]"
+                  >
+                    <div className="flex h-10 w-11 shrink-0 flex-col items-center justify-center rounded-md bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
+                      <span className="text-[9px] font-bold uppercase leading-none tracking-wider">
+                        {d.toLocaleDateString("en-US", { month: "short", timeZone: "America/Phoenix" })}
+                      </span>
+                      <span className="text-base font-bold leading-tight">
+                        {d.toLocaleDateString("en-US", { day: "numeric", timeZone: "America/Phoenix" })}
+                      </span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      {e.webUrl ? (
+                        <a
+                          href={e.webUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block truncate text-sm font-semibold text-[#0d1f3c] hover:underline dark:text-white"
+                        >
+                          {e.title}
+                        </a>
+                      ) : (
+                        <p className="truncate text-sm font-semibold text-[#0d1f3c] dark:text-white">{e.title}</p>
+                      )}
+                      <p className="truncate text-xs text-slate-400 dark:text-white/40">
+                        {fmtWhen(e.startsAt, e.allDay)}
+                        {e.location ? <> · {renderLoc(e.location)}</> : null}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => dismissEvent(e.eventId)}
+                      title="Dismiss"
+                      aria-label="Dismiss event"
+                      className="shrink-0 rounded px-1.5 text-lg leading-none text-slate-300 opacity-0 transition hover:text-red-400 group-hover:opacity-100 dark:text-white/25"
+                    >
+                      ×
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
