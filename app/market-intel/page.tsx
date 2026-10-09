@@ -1769,30 +1769,29 @@ export default function MarketIntelPage() {
               {sectorView === "trend" ? (
                 <div className="h-[380px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }} barCategoryGap="28%">
+                    <LineChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
                       <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
                       <XAxis dataKey="year" tick={{ fontSize: 11, fill: tick }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
                       <Tooltip
                         contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12, borderRadius: 8 }}
-                        cursor={{ fill: dark ? "rgba(255,255,255,0.05)" : "rgba(13,31,60,0.05)" }}
+                        cursor={{ stroke: grid }}
                         formatter={(v, name) => [Number(v).toLocaleString(), name]}
                       />
                       <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
                       {sectorTrend.slugs.map((slug, i) => (
-                        <Bar
+                        <Line
                           key={slug}
+                          type="monotone"
                           dataKey={slug}
                           name={SECTOR_SHORT[slug] ?? slug}
-                          stackId="estab"
-                          fill={CHART_COLORS[i % CHART_COLORS.length]}
-                          stroke={dark ? "#132847" : "#ffffff"}
-                          strokeWidth={1}
-                          maxBarSize={56}
-                          radius={i === sectorTrend.slugs.length - 1 ? [5, 5, 0, 0] : [0, 0, 0, 0]}
+                          stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                          strokeWidth={2}
+                          dot={false}
+                          activeDot={{ r: 3.5 }}
                         />
                       ))}
-                    </BarChart>
+                    </LineChart>
                   </ResponsiveContainer>
                 </div>
               ) : (
