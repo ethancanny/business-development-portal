@@ -194,8 +194,8 @@ export default function CompanyTargets({ sector }: { sector: string }) {
                         }`
                       : `border-slate-100 dark:border-white/5 ${
                           openId === c.id
-                            ? "bg-[#0d1f3c]/[0.09] hover:bg-[#0d1f3c]/[0.12] dark:bg-[#b8975a]/[0.18] dark:hover:bg-[#b8975a]/[0.22]"
-                            : "hover:bg-slate-50 dark:hover:bg-white/5"
+                            ? "bg-[#0d1f3c]/[0.14] hover:bg-[#0d1f3c]/[0.17] dark:bg-[#b8975a]/[0.25] dark:hover:bg-[#b8975a]/[0.28]"
+                            : "hover:bg-slate-100 dark:hover:bg-white/[0.08]"
                         }`
                   }`}
                 >
