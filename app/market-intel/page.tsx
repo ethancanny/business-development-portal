@@ -201,6 +201,7 @@ function EventStrip({
   items: MiAcquisition[];
   onDismiss: (a: MiAcquisition) => void;
 }) {
+  const [openId, setOpenId] = useState<string | null>(null);
   if (items.length === 0) return null;
   const typeLabel: Record<string, string> = {
     acquisition: "Acquisition",
@@ -229,10 +230,25 @@ function EventStrip({
                 {a.announcedDate ? ` · ${fmtDate(a.announcedDate)}` : ""}
               </p>
               <p className="mt-0.5 pr-4 text-sm font-semibold text-[#0d1f3c] dark:text-white">
-                {decodeEntities(a.target || a.acquirer || "Unnamed")}
+                {decodeEntities(a.headline || a.target || a.acquirer || "Unnamed")}
               </p>
               <p className="text-xs text-slate-500 dark:text-white/50">{a.publisher || "News"}</p>
             </a>
+            {a.summary && (
+              <div className="mt-1.5">
+                <button
+                  onClick={() => setOpenId(openId === a.id ? null : a.id)}
+                  className="text-[11px] font-medium text-[#8a6f3c] underline-offset-2 hover:underline dark:text-[#d4b37a]"
+                >
+                  {openId === a.id ? "Hide summary ▴" : "Summary ▾"}
+                </button>
+                {openId === a.id && (
+                  <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-white/60">
+                    {decodeEntities(a.summary)}
+                  </p>
+                )}
+              </div>
+            )}
             <button
               onClick={() => onDismiss(a)}
               aria-label="Dismiss event"
@@ -247,6 +263,14 @@ function EventStrip({
     </div>
   );
 }
+
+/** Display-side quality gates for event headlines (mirror the ingest
+ * filters): no commentary/stock/drama noise; policy items must be market
+ * policy — budgets, taxes, spending, incentives, funding. */
+const JUNK =
+  /\b(how to|what to know|opinion|editorial|podcast|webinar|sponsored|price target|dividend|earnings call|top \d+|best stocks?|stocks? to (buy|watch)|shares? (rise|risen|fall|fell|jump|drop|surge|plunge|slide|soar|climb|dip)|lawsuit|indicted|arrested|coupon|giveaway|campaign|endorses?|endorsement|poll (shows|says|finds)|slams|blasts|feud|scandal)\b/i;
+const MARKET_POLICY =
+  /\b(budget|spending|tax|funding|funds|bond|incentive|appropriation|infrastructure|water|housing|economic|business|jobs|tariff|zoning|permit|development|revenue|fiscal|subsid|grant|loan|credit|semiconductor|energy|broadband)\b/i;
 
 /** Color the change figure inside an anomaly headline (▲ green, ▼ red). */
 function renderAnomalyValue(value: string) {
@@ -745,22 +769,50 @@ export default function MarketIntelPage() {
     }
   };
 
-  /** Section event strips: recent major events relevant to each section. */
+  /** Section event strips — single allocation (Ethan: each event is used
+   * exactly once on the page). Specialty sections claim their events
+   * first, in priority order; the Major Events feed below is then built
+   * from what remains (plus bankruptcies via filings and large WARN
+   * layoffs, which have no strip home). */
   const dismissEvent = (a: MiAcquisition) => setStatus("acquisitions", a.id, "dismissed");
   const stripCutoff = new Date(Date.now() - 1 * 864e5).toISOString().slice(0, 10);
-  const recentEvents = (pred: (a: MiAcquisition) => boolean, n = 3) =>
-    acquisitions
-      .filter((a) => a.status !== "dismissed" && a.announcedDate && a.announcedDate >= stripCutoff && pred(a))
-      .sort((x, y) => (y.announcedDate || "").localeCompare(x.announcedDate || ""))
-      .slice(0, n);
-  const policyEvents = recentEvents((a) => a.eventType === "policy");
-  const expansionEvents = recentEvents((a) => a.eventType === "expansion" || a.eventType === "relocation");
-  const acqEvents = recentEvents((a) => a.eventType === "acquisition");
-  const demoEvents = recentEvents((a) =>
-    ["relocation", "expansion", "investment", "policy"].includes(a.eventType)
+  const normCo = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const seenCo = new Set<string>();
+  const stripPool = acquisitions
+    .filter(
+      (a) =>
+        a.status !== "dismissed" &&
+        a.announcedDate &&
+        a.announcedDate >= stripCutoff &&
+        !JUNK.test(a.headline || a.summary || a.target)
+    )
+    .sort((x, y) => (y.announcedDate || "").localeCompare(x.announcedDate || ""))
+    .filter((a) => {
+      const k = `${normCo(a.target || a.headline || "")}|${a.eventType}`;
+      if (seenCo.has(k)) return false;
+      seenCo.add(k);
+      return true;
+    });
+  const claimedIds = new Set<string>();
+  const claim = (pred: (a: MiAcquisition) => boolean, n = 3) => {
+    const picked = stripPool.filter((a) => !claimedIds.has(a.id) && pred(a)).slice(0, n);
+    for (const a of picked) claimedIds.add(a.id);
+    return picked;
+  };
+  const industryClaims: Record<string, MiAcquisition[]> = {
+    "Aerospace & Defense": claim((a) => a.industry === "Aerospace & Defense"),
+    Healthcare: claim((a) => a.industry === "Healthcare"),
+    "Advanced Manufacturing": claim((a) => a.industry === "Advanced Manufacturing"),
+    "Specialty Trades & Construction": claim((a) => a.industry === "Specialty Trades & Construction"),
+  };
+  const policyEvents = claim(
+    (a) => a.eventType === "policy" && MARKET_POLICY.test(`${a.headline || ""} ${a.summary || ""}`)
   );
-  const allEvents = recentEvents(() => true);
-  const industryEvents = (industry: string) => recentEvents((a) => a.industry === industry);
+  const expansionEvents = claim((a) => a.eventType === "expansion" || a.eventType === "relocation");
+  const demoEvents = claim((a) => ["relocation", "expansion", "investment", "policy"].includes(a.eventType));
+  const acqEvents = claim((a) => a.eventType === "acquisition");
+  const allEvents = claim(() => true);
+  const industryEvents = (industry: string) => industryClaims[industry] ?? [];
 
   const healthRows = useMemo(
     () =>
@@ -866,17 +918,12 @@ export default function MarketIntelPage() {
     // news because nothing older is eligible.
     const cutoff = new Date(Date.now() - 1 * 864e5).toISOString().slice(0, 10);
     // Display-side quality gates (mirror the ingest filters so already-stored
-    // junk disappears too): no commentary/stock/drama noise, and policy items
-    // must be market policy — budgets, taxes, spending, incentives, funding.
-    const JUNK =
-      /\b(how to|what to know|opinion|editorial|podcast|webinar|sponsored|price target|dividend|earnings call|top \d+|best stocks?|stocks? to (buy|watch)|shares? (rise|risen|fall|fell|jump|drop|surge|plunge|slide|soar|climb|dip)|lawsuit|indicted|arrested|coupon|giveaway|campaign|endorses?|endorsement|poll (shows|says|finds)|slams|blasts|feud|scandal)\b/i;
-    const MARKET_POLICY =
-      /\b(budget|spending|tax|funding|funds|bond|incentive|appropriation|infrastructure|water|housing|economic|business|jobs|tariff|zoning|permit|development|revenue|fiscal|subsid|grant|loan|credit|semiconductor|energy|broadband)\b/i;
+    // junk disappears too): JUNK and MARKET_POLICY are defined at module scope.
     const items: { id: string; kind: string; title: string; key: string; detail: string; summary: string; date: string; url: string; source: "acquisitions" | "filings" | "warn"; rawId: string }[] = [];
     const fmtVal = (v: number | null) =>
       v === null ? "" : v >= 1e9 ? ` · $${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? ` · $${Math.round(v / 1e6)}M` : "";
     for (const a of acquisitions) {
-      if (a.eventType === "bankruptcy" && a.status !== "dismissed" && a.announcedDate && a.announcedDate >= cutoff) {
+      if (a.eventType === "bankruptcy" && a.status !== "dismissed" && !claimedIds.has(a.id) && a.announcedDate && a.announcedDate >= cutoff) {
         if (JUNK.test(a.headline || a.summary || a.target)) continue;
         items.push({
           id: `news-${a.id}`,
@@ -911,7 +958,7 @@ export default function MarketIntelPage() {
     const byType = (t: string, n: number) =>
       acquisitions
         .filter((a) => {
-          if (a.eventType !== t || a.status === "dismissed" || !a.announcedDate || a.announcedDate < cutoff) return false;
+          if (a.eventType !== t || a.status === "dismissed" || claimedIds.has(a.id) || !a.announcedDate || a.announcedDate < cutoff) return false;
           const text = `${a.headline || ""} ${a.summary || ""} ${a.target || ""} ${a.acquirer || ""}`;
           if (JUNK.test(text)) return false;
           if (t === "policy" && !MARKET_POLICY.test(text)) return false;
@@ -1619,23 +1666,27 @@ export default function MarketIntelPage() {
           </div>
           </div>
 <div className={tableWrap}>
+            <div className="max-h-[380px] overflow-y-auto">
             <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
-              <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                <th className={th}>Employer</th><th className={th}>Industry</th><th className={th}>Location</th><th className={th}>Affected</th><th className={th}>Notice date</th>
+              <thead className="sticky top-0 z-10 bg-white dark:bg-[#132847]"><tr className="border-b border-slate-200 dark:border-white/10">
+                <th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">Employer</th><th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">Industry</th><th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">Location</th><th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">Affected</th><th className="px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">Notice date</th>
               </tr></thead>
               <tbody>
-                {warn.map((w) => (
+                {[...warn]
+                  .sort((a, b) => (b.noticeDate || "").localeCompare(a.noticeDate || ""))
+                  .map((w) => (
                   <tr key={w.id} className="border-b border-slate-100 dark:border-white/5">
-                    <td className={`${td} font-medium`}>{w.employer}</td>
-                    <td className={td}>{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
-                    <td className={td}>{w.location}</td>
-                    <td className={td}>{w.headcount ?? "—"}</td>
-                    <td className={td}>{w.noticeDate ? fmtDate(w.noticeDate) : "—"}</td>
+                    <td className="px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-white/80">{w.employer}</td>
+                    <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-[11px] text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
+                    <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.location}</td>
+                    <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.headcount ?? "—"}</td>
+                    <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.noticeDate ? fmtDate(w.noticeDate) : "—"}</td>
                   </tr>
                 ))}
-                {warn.length === 0 && <tr><td className={td} colSpan={5}>No WARN notices loaded yet.</td></tr>}
+                {warn.length === 0 && <tr><td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80" colSpan={5}>No WARN notices loaded yet.</td></tr>}
               </tbody>
             </table>
+            </div>
             <p className="px-3 py-2 text-xs text-slate-400 dark:text-white/30">Layoffs often precede sales — worth a look when a target-industry employer appears. Source: WARN Act notices dataset.</p>
           </div>
           </SubSection>
@@ -1668,7 +1719,7 @@ export default function MarketIntelPage() {
               {sectorView === "trend" ? (
                 <div className="h-[380px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
+                    <BarChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
                       <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
                       <XAxis dataKey="year" tick={{ fontSize: 11, fill: tick }} />
                       <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} />
@@ -1678,9 +1729,9 @@ export default function MarketIntelPage() {
                       />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
                       {sectorTrend.slugs.map((slug, i) => (
-                        <Line key={slug} type="monotone" dataKey={slug} name={SECTOR_SHORT[slug] ?? slug} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} />
+                        <Bar key={slug} dataKey={slug} name={SECTOR_SHORT[slug] ?? slug} stackId="estab" fill={CHART_COLORS[i % CHART_COLORS.length]} />
                       ))}
-                    </LineChart>
+                    </BarChart>
                   </ResponsiveContainer>
                 </div>
               ) : (
@@ -1702,7 +1753,7 @@ export default function MarketIntelPage() {
                 </div>
               )}
               <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
-                {sectorView === "trend" ? "Top 8 sectors by establishments" : `CBP ${sectorYear} mix`} · {sectorTotal.toLocaleString()} establishments statewide (CBP {sectorYear})
+                {sectorView === "trend" ? "Establishments per year — top 8 sectors, stacked" : `CBP ${sectorYear} mix`} · {sectorTotal.toLocaleString()} establishments statewide (CBP {sectorYear})
               </p>
             </div>
           )}
