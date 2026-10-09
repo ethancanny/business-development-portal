@@ -5,12 +5,12 @@ import { useEffect, useState } from "react";
 type UpdateItem = { kind: string; title: string; detail: string; ts: string };
 
 const KIND: Record<string, { label: string; cls: string }> = {
-  business: { label: "New companies", cls: "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300" },
-  license: { label: "New licenses", cls: "bg-teal-100 text-teal-800 dark:bg-teal-500/15 dark:text-teal-300" },
+  business: { label: "New companies", cls: "bg-[#54708f]/15 text-[#33507c] dark:bg-[#54708f]/25 dark:text-[#a9b8cc]" },
+  license: { label: "New licenses", cls: "bg-slate-200 text-slate-700 dark:bg-white/10 dark:text-white/70" },
   listing: { label: "Businesses for sale", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300" },
-  acquisition: { label: "Acquisitions", cls: "bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300" },
-  operator: { label: "New operators", cls: "bg-violet-100 text-violet-800 dark:bg-violet-500/15 dark:text-violet-300" },
-  multiple: { label: "Multiple move", cls: "bg-[#b8975a]/15 text-[#8a6f3e] dark:bg-[#b8975a]/20 dark:text-[#d4b37a]" },
+  acquisition: { label: "Acquisitions", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300" },
+  operator: { label: "New operators", cls: "bg-slate-200 text-slate-700 dark:bg-white/10 dark:text-white/70" },
+  multiple: { label: "Multiple move", cls: "bg-[#b8975a]/15 text-[#8a6f3c] dark:bg-[#b8975a]/20 dark:text-[#d4b37a]" },
 };
 
 /**

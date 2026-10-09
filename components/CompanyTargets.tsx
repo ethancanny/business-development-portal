@@ -207,7 +207,7 @@ export default function CompanyTargets({ sector }: { sector: string }) {
                     {c.name}
                     {fit.fit && <span className="ml-2 rounded bg-[#b8975a] px-1.5 py-0.5 text-[10px] font-bold text-white">★ FIT</span>}
                     {c.status === "keep" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">KEPT</span>}
-                    {c.status === "added" && <span className="ml-2 rounded bg-[#b8975a]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#8a6f3e] dark:text-[#d4b37a]">IN PIPELINE</span>}
+                    {c.status === "added" && <span className="ml-2 rounded bg-[#b8975a]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">IN PIPELINE</span>}
                   </td>
                   <td className={td}>{c.city || "—"}</td>
                   <td className={td}>{c.subsector || "—"}</td>
@@ -231,7 +231,7 @@ export default function CompanyTargets({ sector }: { sector: string }) {
                         <p><span className="text-slate-400 dark:text-white/40">Source </span>{c.sourceUrl ? <a className="underline" href={c.sourceUrl} target="_blank" rel="noreferrer">{c.source}</a> : c.source}</p>
                       </div>
                       {fit.fit && (
-                        <p className="mt-2 rounded-lg bg-[#b8975a]/15 px-2.5 py-1.5 text-xs font-medium text-[#8a6f3e] dark:text-[#d4b37a]">
+                        <p className="mt-2 rounded-lg bg-[#b8975a]/15 px-2.5 py-1.5 text-xs font-medium text-[#8a6f3c] dark:text-[#d4b37a]">
                           ★ Acquisition fit — {fit.why || "established, right-sized target in a focus sector"}
                         </p>
                       )}
@@ -240,7 +240,7 @@ export default function CompanyTargets({ sector }: { sector: string }) {
                         {c.status !== "added" ? (
                           <button disabled={busy === c.id} onClick={() => addToPipeline(c)} className="rounded-lg bg-[#b8975a] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">＋ Add to pipeline</button>
                         ) : (
-                          <span className="rounded-lg bg-[#b8975a]/15 px-3 py-1.5 text-xs font-semibold text-[#8a6f3e] dark:text-[#d4b37a]">✓ In pipeline</span>
+                          <span className="rounded-lg bg-[#b8975a]/15 px-3 py-1.5 text-xs font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">✓ In pipeline</span>
                         )}
                         {c.status !== "keep" && c.status !== "added" && (
                           <button disabled={busy === c.id} onClick={() => setStatus(c, "keep")} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 disabled:opacity-50 dark:border-white/20 dark:text-white/70">Keep</button>

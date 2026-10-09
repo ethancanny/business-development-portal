@@ -16,7 +16,7 @@ const METRICS: { id: Metric; label: string; format: (v: number) => string }[] = 
 const SCALES: Record<Metric, string[]> = {
   income: ["#fef9e7", "#fde9a7", "#f5c86e", "#e09a3c", "#b8741a"],
   age: ["#e0f2fe", "#a8d8f0", "#6fb3e0", "#3d8bc4", "#1a5f9e"],
-  homeval: ["#f3e8ff", "#dcc4f5", "#b98ae6", "#8f5ccf", "#6b34a8"],
+  homeval: ["#e8eef6", "#c3d2e6", "#7d94b5", "#54708f", "#0d1f3c"],
   growth: ["#fee2e2", "#fecaca", "#fef9e7", "#bbf7d0", "#16a34a"],
 };
 
