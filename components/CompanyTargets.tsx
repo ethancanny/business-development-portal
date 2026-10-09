@@ -185,11 +185,19 @@ export default function CompanyTargets({ sector }: { sector: string }) {
               <Fragment key={c.id}>
                 <tr
                   onClick={() => setOpenId(openId === c.id ? null : c.id)}
-                  className={
+                  className={`cursor-pointer border-t transition-colors duration-200 ${
                     fit.fit
-                      ? "cursor-pointer border-t border-[#b8975a]/40 bg-[#b8975a]/10 hover:bg-[#b8975a]/20 dark:border-[#b8975a]/30"
-                      : "cursor-pointer border-t border-slate-100 hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5"
-                  }
+                      ? `border-[#b8975a]/40 dark:border-[#b8975a]/30 ${
+                          openId === c.id
+                            ? "bg-[#b8975a]/25 hover:bg-[#b8975a]/30"
+                            : "bg-[#b8975a]/10 hover:bg-[#b8975a]/20"
+                        }`
+                      : `border-slate-100 dark:border-white/5 ${
+                          openId === c.id
+                            ? "bg-[#0d1f3c]/[0.09] hover:bg-[#0d1f3c]/[0.12] dark:bg-[#b8975a]/[0.18] dark:hover:bg-[#b8975a]/[0.22]"
+                            : "hover:bg-slate-50 dark:hover:bg-white/5"
+                        }`
+                  }`}
                 >
                   <td className={`${td} font-medium`}>
                     {c.name}
