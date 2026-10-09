@@ -10,6 +10,7 @@ import type { MiCompany } from "@/lib/types";
  * and one-click promotion into the acquisition pipeline. */
 export default function CompanyTargets({ sector }: { sector: string }) {
   const [rows, setRows] = useState<MiCompany[] | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -18,8 +19,11 @@ export default function CompanyTargets({ sector }: { sector: string }) {
     let live = true;
     fetch(`/api/market/companies?sector=${encodeURIComponent(sector)}&limit=800`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((data: MiCompany[]) => {
-        if (live) setRows(Array.isArray(data) ? data : []);
+      .then((data: { companies?: MiCompany[]; total?: number } | MiCompany[]) => {
+        if (!live) return;
+        const list = Array.isArray(data) ? data : (data.companies ?? []);
+        setRows(list);
+        setTotal(Array.isArray(data) ? list.length : (data.total ?? list.length));
       })
       .catch(() => {
         if (live) setRows([]);
@@ -131,8 +135,9 @@ export default function CompanyTargets({ sector }: { sector: string }) {
       <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Company targets</h3>
         <p className="text-xs text-slate-500 dark:text-white/50">
-          {rows.filter((r) => r.status !== "dismissed").length.toLocaleString()} companies · {sources}
+          {(total ?? rows.length).toLocaleString()} companies · {sources}
           {withSignal ? ` · ranked by ${withSignal.toLowerCase()}` : ""}
+          {total !== null && total > rows.length ? ` · showing top ${rows.length}` : ""}
         </p>
       </div>
       <input

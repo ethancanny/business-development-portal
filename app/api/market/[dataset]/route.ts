@@ -8,6 +8,7 @@ import {
   getLatestIndicators,
   getListings,
   getCompanies,
+  countCompanies,
   setCompanyStatus,
   getMultiples,
   getSyncLog,
@@ -57,10 +58,14 @@ export async function GET(
         return NextResponse.json(await getLatestIndicators());
       case "listings":
         return NextResponse.json(await getListings(sp.get("status") ?? undefined));
-      case "companies":
-        return NextResponse.json(
-          await getCompanies(sp.get("sector") ?? undefined, Number(sp.get("limit") ?? 600))
-        );
+      case "companies": {
+        const sector = sp.get("sector") ?? undefined;
+        const [companies, total] = await Promise.all([
+          getCompanies(sector, Number(sp.get("limit") ?? 600)),
+          countCompanies(sector),
+        ]);
+        return NextResponse.json({ companies, total });
+      }
       case "multiples":
         return NextResponse.json(await getMultiples());
       case "acquisitions":

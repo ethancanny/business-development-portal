@@ -207,7 +207,7 @@ export interface CompanyInput {
  * are replaced wholesale (triage status and first_seen are preserved by
  * dedup key); without it, rows upsert by (source, dedup_key). Used by the
  * weekly spine builders (SAM.gov, AZ ROC, NPPES, EPA FRS). */
-export async function importCompanies(source: string, rows: CompanyInput[], reset: boolean): Promise<number> {
+export async function importCompanies(source: string, rows: CompanyInput[], reset: boolean): Promise<{ received: number; total: number }> {
   await ensureSchema();
   const db = sql();
   const clean = rows.filter((r) => r && r.dedupKey && r.name && r.source === source);
@@ -231,7 +231,6 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     }
   }
   const CHUNK = 300;
-  let added = 0;
   for (let i = 0; i < clean.length; i += CHUNK) {
     const chunk = clean.slice(i, i + CHUNK);
     const values: string[] = [];
@@ -249,7 +248,7 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
         (r as CompanyInput & { _firstSeen?: unknown })._firstSeen ?? new Date().toISOString()
       );
     });
-    const res = await db.query(
+    await db.query(
       `INSERT INTO mi_companies (id, dedup_key, name, sector, subsector, naics, city, state, address, zip,
          contact_name, contact_title, phone, website, formed_date, employees, signal_value, signal_label,
          source, source_url, details, status, first_seen)
@@ -260,13 +259,26 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
          contact_title = EXCLUDED.contact_title, phone = EXCLUDED.phone, website = EXCLUDED.website,
          formed_date = EXCLUDED.formed_date, employees = EXCLUDED.employees, signal_value = EXCLUDED.signal_value,
          signal_label = EXCLUDED.signal_label, source_url = EXCLUDED.source_url, details = EXCLUDED.details,
-         last_seen = NOW(), updated_at = NOW()
-       RETURNING (xmax = 0) AS inserted`,
+         last_seen = NOW(), updated_at = NOW()`,
       params
     );
-    added += (res as unknown[]).filter((x) => (x as { inserted?: boolean }).inserted).length;
   }
-  return added;
+  // Ground-truth total for this source (the RETURNING-based insert count
+  // proved unreliable through the HTTP driver on multi-row chunks).
+  const sectors = Array.from(new Set(clean.map((r) => r.sector).filter(Boolean)));
+  const cnt = sectors.length
+    ? await db`SELECT count(*)::int AS n FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
+    : await db`SELECT count(*)::int AS n FROM mi_companies WHERE source = ${source}`;
+  return { received: clean.length, total: num(cnt[0]?.n) };
+}
+
+export async function countCompanies(sector?: string): Promise<number> {
+  await ensureSchema();
+  const db = sql();
+  const rows = sector
+    ? await db`SELECT count(*)::int AS n FROM mi_companies WHERE sector = ${sector}`
+    : await db`SELECT count(*)::int AS n FROM mi_companies`;
+  return num(rows[0]?.n);
 }
 
 export async function getCompanies(sector?: string, limit = 600): Promise<MiCompany[]> {

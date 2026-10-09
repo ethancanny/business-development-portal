@@ -51,8 +51,8 @@ export async function POST(req: NextRequest) {
     }))
     .filter((r: CompanyInput) => r.dedupKey && r.name);
   try {
-    const added = await importCompanies(source, rows, body.reset === true);
-    return NextResponse.json({ ok: true, source, received: rows.length, added });
+    const res = await importCompanies(source, rows, body.reset === true);
+    return NextResponse.json({ ok: true, source, received: res.received, total: res.total });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });
