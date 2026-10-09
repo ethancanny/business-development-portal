@@ -310,7 +310,12 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
       }
       r.details = JSON.stringify(d);
     } catch {
-      /* non-JSON details pass through untouched */
+      // Details that claim to be a JSON object but do not parse (e.g. a
+      // client-truncated document) must never reach the table: read paths
+      // cast details::jsonb and one invalid row fails the whole sector
+      // query. Plain non-JSON notes pass through untouched (the casts
+      // skip anything not starting with '{').
+      if (r.details && r.details.trim().startsWith("{")) r.details = "{}";
     }
   }
   if (reset) {
