@@ -186,7 +186,21 @@ function Section({
         </span>
         <span className="text-xl leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
       </button>
-      {open && <div className="pt-4">{children}</div>}
+      {open && (
+        <div className="pt-4">
+          {children}
+          <button
+            onClick={() => setOpen(false)}
+            aria-label={`Collapse ${title}`}
+            className="mt-3 flex w-full items-center gap-3 text-left"
+          >
+            <span className="h-0 flex-1 border-t-2 border-[#b8975a]/50" />
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-white/30">
+              End of {title} · ↑ Collapse
+            </span>
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -212,7 +226,21 @@ function SubSection({
         <span className="text-base font-bold text-[#0d1f3c] dark:text-white">{title}</span>
         <span className="text-lg leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
       </button>
-      {open && <div className="pt-3">{children}</div>}
+      {open && (
+        <div className="pt-3">
+          {children}
+          <button
+            onClick={() => setOpen(false)}
+            aria-label={`Collapse ${title}`}
+            className="mt-2 flex w-full items-center gap-3 text-left"
+          >
+            <span className="h-0 flex-1 border-t border-slate-200 dark:border-white/10" />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-white/30">
+              End of {title} · ↑ Collapse
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
