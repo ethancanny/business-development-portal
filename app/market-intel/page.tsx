@@ -268,7 +268,7 @@ function EventStrip({
  * filters): no commentary/stock/drama noise; policy items must be market
  * policy — budgets, taxes, spending, incentives, funding. */
 const JUNK =
-  /\b(how to|what to know|opinion|editorial|podcast|webinar|sponsored|price target|dividend|earnings call|top \d+|best stocks?|stocks? to (buy|watch)|shares? (rise|risen|fall|fell|jump|drop|surge|plunge|slide|soar|climb|dip)|lawsuit|indicted|arrested|coupon|giveaway|campaign|endorses?|endorsement|poll (shows|says|finds)|slams|blasts|feud|scandal)\b/i;
+  /\b(how to|what to know|opinion|editorial|podcast|webinar|sponsored|price target|dividend|earnings call|top \d+|best stocks?|stocks? to (buy|watch)|shares? (rise|risen|fall|fell|jump|drop|surge|plunge|slide|soar|climb|dip)|stock is trending|trending stocks?|lawsuit|indicted|arrested|coupon|giveaway|campaign|endorses?|endorsement|poll (shows|says|finds)|slams|blasts|feud|scandal)\b/i;
 const MARKET_POLICY =
   /\b(budget|spending|tax|funding|funds|bond|incentive|appropriation|infrastructure|water|housing|economic|business|jobs|tariff|zoning|permit|development|revenue|fiscal|subsid|grant|loan|credit|semiconductor|energy|broadband)\b/i;
 
@@ -895,12 +895,34 @@ export default function MarketIntelPage() {
   }, [obs, countyPermits, fiveYearCutoff]);
 
   const weekCutoff = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
-  const filteredFilings = (filingCat === "all" ? filings : filings.filter((f) => f.category === filingCat)).filter(
-    (f) => f.filingDate && f.filingDate >= weekCutoff
-  );
-  const visibleAcq = acquisitions.filter(
-    (a) => a.status !== "dismissed" && a.eventType !== "bankruptcy" && a.announcedDate && a.announcedDate >= weekCutoff
-  );
+  const filteredFilings = (filingCat === "all" ? filings : filings.filter((f) => f.category === filingCat))
+    .filter((f) => f.filingDate && f.filingDate >= weekCutoff)
+    .slice()
+    .sort((x, y) => (y.filingDate || "").localeCompare(x.filingDate || ""));
+  // The Acquisitions tab is a ledger of actual Arizona deals (Ethan, Oct 8):
+  // true acquisitions ONLY — expansions, contracts, IPOs, relocations,
+  // investments and policy stories live in their own sections, not here.
+  // Accuracy gates: no junk headlines, and the deal itself must be Arizona
+  // (an AZ place named in the headline/target) — an AZ outlet covering a
+  // national deal like Paramount–Warner Bros. doesn't count. Newest first.
+  const AZ_DEAL_PLACE =
+    /\b(arizona|phoenix|scottsdale|tempe|mesa|tucson|chandler|gilbert|glendale|peoria|surprise|flagstaff|yuma|prescott|avondale|goodyear|buckeye|queen creek|maricopa|pinal|sedona|lake havasu)\b/i;
+  const visibleAcq = acquisitions
+    .filter(
+      (a) =>
+        a.status !== "dismissed" &&
+        a.eventType === "acquisition" &&
+        a.announcedDate &&
+        a.announcedDate >= weekCutoff &&
+        !JUNK.test(a.headline || a.target || "")
+    )
+    .filter((a) => AZ_DEAL_PLACE.test(`${a.headline || ""} ${a.target || ""} ${a.targetLocation || ""}`))
+    .slice()
+    .sort(
+      (x, y) =>
+        (y.announcedDate || "").localeCompare(x.announcedDate || "") ||
+        (y.createdAt || "").localeCompare(x.createdAt || "")
+    );
 
   const multBands = useMemo(() => {
     const order = ["EV < $5M", "EV $5–25M", "EV $25–100M", "EV $100–500M", "EV > $500M", "Public comps"];
@@ -1934,27 +1956,41 @@ export default function MarketIntelPage() {
           <div className={tableWrap}>
             <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
               <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                <th className={th}>Acquirer → Target</th><th className={th}>Industry</th><th className={th}>Announced</th><th className={th}>Source</th><th className={th}></th>
+                <th className={th}>Deal</th><th className={th}>Industry</th><th className={th}>Value</th><th className={th}>Announced</th><th className={th}>Source</th><th className={th}></th>
               </tr></thead>
               <tbody>
-                {visibleAcq.map((a) => (
-                  <tr key={a.id} className="border-b border-slate-100 dark:border-white/5">
-                    <td className={td}>
-                      <span className="font-medium">{a.acquirer || "—"}</span>
-                      <span className="text-slate-400"> → </span>
-                      <span>{a.target}</span>
-                      {a.targetLocation && <span className="text-slate-400 dark:text-white/40"> ({a.targetLocation})</span>}
-                    </td>
-                    <td className={td}>{a.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3e] dark:text-[#d4b37a]">{a.industry}</span>}</td>
-                    <td className={td}>{a.announcedDate ? fmtDate(a.announcedDate) : "—"}</td>
-                    <td className={td}>{a.sourceUrl ? <a href={a.sourceUrl} target="_blank" rel="noreferrer" className="text-[#8a6f3e] underline dark:text-[#d4b37a]">{a.publisher || "Link"}</a> : "—"}</td>
-                    <td className={`${td} whitespace-nowrap`}>
-                      <button onClick={() => setStatus("acquisitions", a.id, "keep")} className="mr-2 text-xs text-emerald-600 dark:text-emerald-400">Keep</button>
-                      <button onClick={() => setStatus("acquisitions", a.id, "dismissed")} className="text-xs text-slate-400">Dismiss</button>
-                    </td>
-                  </tr>
-                ))}
-                {visibleAcq.length === 0 && <tr><td className={td} colSpan={5}>No acquisitions in the last 7 days.</td></tr>}
+                {visibleAcq.map((a) => {
+                  const title = decodeEntities(a.headline || a.target || "Deal");
+                  // Show the parsed Acquirer → Target pair only when it reads
+                  // like real company names (short), not a headline fragment.
+                  const pairOk =
+                    !!a.acquirer &&
+                    !!a.target &&
+                    a.target.split(/\s+/).length <= 5 &&
+                    a.target !== (a.headline || "");
+                  return (
+                    <tr key={a.id} className="border-b border-slate-100 dark:border-white/5">
+                      <td className={`${td} max-w-md`}>
+                        <span className="font-medium">{title}</span>
+                        {pairOk && (
+                          <span className="block text-xs text-slate-400 dark:text-white/40">
+                            {decodeEntities(a.acquirer)} → {decodeEntities(a.target)}
+                            {a.targetLocation ? ` (${decodeEntities(a.targetLocation)})` : ""}
+                          </span>
+                        )}
+                      </td>
+                      <td className={td}>{a.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3e] dark:text-[#d4b37a]">{a.industry}</span>}</td>
+                      <td className={`${td} whitespace-nowrap`}>{a.dealValue ? fmtMoney(a.dealValue) : "—"}</td>
+                      <td className={`${td} whitespace-nowrap`}>{a.announcedDate ? fmtDate(a.announcedDate) : "—"}</td>
+                      <td className={td}>{a.sourceUrl ? <a href={a.sourceUrl} target="_blank" rel="noreferrer" className="text-[#8a6f3e] underline dark:text-[#d4b37a]">{a.publisher || "Link"}</a> : "—"}</td>
+                      <td className={`${td} whitespace-nowrap`}>
+                        <button onClick={() => setStatus("acquisitions", a.id, "keep")} className="mr-2 text-xs text-emerald-600 dark:text-emerald-400">Keep</button>
+                        <button onClick={() => setStatus("acquisitions", a.id, "dismissed")} className="text-xs text-slate-400">Dismiss</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {visibleAcq.length === 0 && <tr><td className={td} colSpan={6}>No Arizona acquisitions in the last 7 days.</td></tr>}
               </tbody>
             </table>
           </div>
