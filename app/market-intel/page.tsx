@@ -1461,7 +1461,7 @@ export default function MarketIntelPage() {
                         key={r.slug}
                         onMouseEnter={() => setHoverSlug(r.slug)}
                         onMouseLeave={() => setHoverSlug(null)}
-                        className={`border-b border-slate-100 transition-colors hover:bg-[#b8975a]/10 dark:border-white/5 ${hoverSlug === r.slug ? "bg-[#b8975a]/10" : ""}`}
+                        className={`border-b border-slate-100 transition-colors hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5 ${hoverSlug === r.slug ? "bg-slate-100 dark:bg-white/10" : ""}`}
                       >
                         <td className={td}>{r.name}</td>
                         <td className={`${td} font-medium`}>{r.estab.toLocaleString()}</td>
@@ -2067,7 +2067,7 @@ export default function MarketIntelPage() {
                 {[...warn]
                   .sort((a, b) => (b.noticeDate || "").localeCompare(a.noticeDate || ""))
                   .map((w) => (
-                  <tr key={w.id} className="border-b border-slate-100 transition-colors hover:bg-[#b8975a]/10 dark:border-white/5">
+                  <tr key={w.id} className="border-b border-slate-100 transition-colors hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5">
                     <td className="px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-white/80">{w.employer}</td>
                     <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-[11px] text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
                     <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.location}</td>
