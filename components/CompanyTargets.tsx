@@ -112,12 +112,32 @@ export default function CompanyTargets({ sector }: { sector: string }) {
     }
   }
 
+  function fitOf(c: MiCompany): { fit: boolean; why: string } {
+    try {
+      const d = JSON.parse(c.details || "{}") as Record<string, unknown>;
+      return { fit: d.fit === true, why: typeof d.fitWhy === "string" ? d.fitWhy : "" };
+    } catch {
+      return { fit: false, why: "" };
+    }
+  }
   function profileDetails(c: MiCompany): [string, string][] {
     try {
       const d = JSON.parse(c.details || "{}") as Record<string, unknown>;
       return Object.entries(d)
-        .filter(([k, v]) => k !== "note" && v !== "" && v !== null && v !== undefined)
-        .map(([k, v]) => [k, String(v)]);
+        .filter(([k, v]) => k !== "note" && k !== "fit" && k !== "fitWhy" && v !== "" && v !== null && v !== undefined)
+        .map(([k, v]) => {
+          if (Array.isArray(v)) {
+            const s = v
+              .map((x) =>
+                x && typeof x === "object"
+                  ? Object.values(x as Record<string, unknown>).filter(Boolean).join(" · ")
+                  : String(x)
+              )
+              .join("; ");
+            return [k, s] as [string, string];
+          }
+          return [k, String(v)] as [string, string];
+        });
     } catch {
       return [];
     }
@@ -159,14 +179,21 @@ export default function CompanyTargets({ sector }: { sector: string }) {
             </tr>
           </thead>
           <tbody>
-            {visible.slice(0, 300).map((c) => (
+            {visible.slice(0, 300).map((c) => {
+              const fit = fitOf(c);
+              return (
               <Fragment key={c.id}>
                 <tr
                   onClick={() => setOpenId(openId === c.id ? null : c.id)}
-                  className="cursor-pointer border-t border-slate-100 hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5"
+                  className={
+                    fit.fit
+                      ? "cursor-pointer border-t border-[#b8975a]/40 bg-[#b8975a]/10 hover:bg-[#b8975a]/20 dark:border-[#b8975a]/30"
+                      : "cursor-pointer border-t border-slate-100 hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5"
+                  }
                 >
                   <td className={`${td} font-medium`}>
                     {c.name}
+                    {fit.fit && <span className="ml-2 rounded bg-[#b8975a] px-1.5 py-0.5 text-[10px] font-bold text-white">★ FIT</span>}
                     {c.status === "keep" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">KEPT</span>}
                     {c.status === "added" && <span className="ml-2 rounded bg-[#b8975a]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#8a6f3e] dark:text-[#d4b37a]">IN PIPELINE</span>}
                   </td>
@@ -191,6 +218,11 @@ export default function CompanyTargets({ sector }: { sector: string }) {
                         ))}
                         <p><span className="text-slate-400 dark:text-white/40">Source </span>{c.sourceUrl ? <a className="underline" href={c.sourceUrl} target="_blank" rel="noreferrer">{c.source}</a> : c.source}</p>
                       </div>
+                      {fit.fit && (
+                        <p className="mt-2 rounded-lg bg-[#b8975a]/15 px-2.5 py-1.5 text-xs font-medium text-[#8a6f3e] dark:text-[#d4b37a]">
+                          ★ Acquisition fit — {fit.why || "established, right-sized target in a focus sector"}
+                        </p>
+                      )}
                       {profileNote(c) && <p className="mt-2 text-xs text-slate-500 dark:text-white/50">{profileNote(c)}</p>}
                       <div className="mt-3 flex flex-wrap gap-2">
                         {c.status !== "added" ? (
@@ -207,7 +239,8 @@ export default function CompanyTargets({ sector }: { sector: string }) {
                   </tr>
                 )}
               </Fragment>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

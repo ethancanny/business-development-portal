@@ -207,10 +207,68 @@ export interface CompanyInput {
  * are replaced wholesale (triage status and first_seen are preserved by
  * dedup key); without it, rows upsert by (source, dedup_key). Used by the
  * weekly spine builders (SAM.gov, AZ ROC, NPPES, EPA FRS). */
+/** Acquisition-fit heuristic, computed at import so every spine (and the
+ * weekly refresh) gets it for free. A "fit" is an established, right-sized
+ * target — not a startup, not a whale. The reasoning is stored on the row
+ * (details.fitWhy) and the UI highlights fit rows in gold. */
+function computeFit(r: CompanyInput): { fit: boolean; why: string } {
+  let details: Record<string, unknown> = {};
+  try {
+    details = r.details ? (JSON.parse(r.details) as Record<string, unknown>) : {};
+  } catch {
+    details = {};
+  }
+  if (String(details.excludedFromFederalContracting ?? "") === "YES") return { fit: false, why: "" };
+  const formed = r.formedDate && /^\d{4}-\d{2}-\d{2}/.test(r.formedDate) ? new Date(r.formedDate) : null;
+  const age = formed ? (Date.now() - formed.getTime()) / 31_557_600_000 : null;
+  const yr = formed ? formed.getUTCFullYear() : null;
+  const sig = r.signalValue ?? null;
+  const money = (v: number) =>
+    v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v / 1e3)}K`;
+  if (r.source === "USASpending" || r.source.startsWith("SAM")) {
+    if (sig !== null) {
+      const inBand = sig >= 250_000 && sig <= 100_000_000;
+      return {
+        fit: inBand && (age === null || age >= 3),
+        why: inBand ? `${money(sig)} federal awards FY23–26${yr ? ` · est. ${yr}` : ""}` : "",
+      };
+    }
+    return {
+      fit: age !== null && age >= 5,
+      why: age !== null && age >= 5 ? `Est. ${yr} · SAM-registered ${r.subsector || "supplier"}` : "",
+    };
+  }
+  if (r.source === "NPPES") {
+    return { fit: age !== null && age >= 5, why: age !== null && age >= 5 ? `Operating since ${yr} · ${r.subsector || "healthcare provider"}` : "" };
+  }
+  if (r.source === "AZ ROC") {
+    const n = typeof details.licenseCount === "number" ? details.licenseCount : 1;
+    const fit = age !== null && age >= 7 && (n >= 2 || /General|Engineering/.test(r.subsector));
+    return { fit, why: fit ? `Licensed since ${yr} · ${n} license${n > 1 ? "s" : ""} on file` : "" };
+  }
+  return { fit: false, why: "" };
+}
+
 export async function importCompanies(source: string, rows: CompanyInput[], reset: boolean): Promise<{ received: number; total: number }> {
   await ensureSchema();
   const db = sql();
   const clean = rows.filter((r) => r && r.dedupKey && r.name && r.source === source);
+  for (const r of clean) {
+    const { fit, why } = computeFit(r);
+    try {
+      const d = r.details ? (JSON.parse(r.details) as Record<string, unknown>) : {};
+      if (fit) {
+        d.fit = true;
+        d.fitWhy = why;
+      } else {
+        delete d.fit;
+        delete d.fitWhy;
+      }
+      r.details = JSON.stringify(d);
+    } catch {
+      /* non-JSON details pass through untouched */
+    }
+  }
   if (reset) {
     // Reset is scoped to the (source, sector) pairs present in this payload,
     // so one registry feeding several sector spines never wipes the others.
