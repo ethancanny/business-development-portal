@@ -179,29 +179,19 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section
-      className={`-mx-3 mb-6 rounded-2xl px-3 transition-colors duration-200 ${
-        open ? "bg-[#0d1f3c] pb-4 dark:bg-[#1a3358]" : ""
-      }`}
-    >
+    <section className="mb-6">
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg border-b-2 px-2 pb-2 text-left transition-colors duration-200 ${
           open
-            ? "border-[#b8975a] hover:bg-[#26466e] dark:hover:bg-white/[0.10]"
-            : "border-[#b8975a]/50 hover:bg-[#d7e1f0] dark:hover:bg-white/[0.08]"
+            ? "border-[#b8975a] bg-[#e6edf6] dark:bg-white/[0.07]"
+            : "border-[#b8975a]/50 hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05]"
         }`}
       >
         <span>
-          <span
-            className={`block text-lg font-bold ${
-              open ? "text-[#d4b37a]" : "text-[#0d1f3c] dark:text-white"
-            }`}
-          >
-            {title}
-          </span>
-          {sub && <span className={`block text-xs ${open ? "text-white/60" : "text-slate-500 dark:text-white/40"}`}>{sub}</span>}
+          <span className="block text-lg font-bold text-[#0d1f3c] dark:text-white">{title}</span>
+          {sub && <span className="block text-xs text-slate-500 dark:text-white/40">{sub}</span>}
         </span>
         <span className="text-xl leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
       </button>
@@ -228,25 +218,17 @@ function SubSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div
-      className={`-mx-3 mb-5 rounded-xl border-t-2 border-slate-400 bg-white px-3 pt-4 transition-colors duration-200 dark:border-white/30 dark:bg-[#132847]/50 ${
-        open ? "pb-3" : ""
-      }`}
-    >
+    <div className="mb-5 border-t-2 border-slate-400 pt-4 dark:border-white/30">
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 hover:bg-[#e6edf6] dark:hover:bg-white/[0.08] ${
-          open ? "bg-[#d7e1f0] dark:bg-[#b8975a]/[0.16]" : ""
+        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 ${
+          open
+            ? "bg-[#e6edf6] dark:bg-white/[0.07]"
+            : "hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05]"
         }`}
       >
-        <span
-          className={`text-base font-bold ${
-            open ? "text-[#8a6f3c] dark:text-[#d4b37a]" : "text-[#0d1f3c] dark:text-white"
-          }`}
-        >
-          {title}
-        </span>
+        <span className="text-base font-bold text-[#0d1f3c] dark:text-white">{title}</span>
         <span className="text-lg leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
       </button>
       {open && <div className="pt-3">{children}</div>}
@@ -372,7 +354,7 @@ export default function MarketIntelPage() {
       selRow === key
         ? dark
           ? "rgba(184,151,90,0.28)"
-          : "rgba(13,31,60,0.14)"
+          : "rgba(13,31,60,0.10)"
         : hovRow === key
           ? dark
             ? "rgba(255,255,255,0.08)"
@@ -387,7 +369,7 @@ export default function MarketIntelPage() {
     style: rowStyle(key),
     className: `border-b border-slate-100 dark:border-white/5 cursor-pointer ${
       selRow === key
-        ? "bg-[#0d1f3c]/[0.16] dark:bg-[#b8975a]/[0.22]"
+        ? "bg-[#0d1f3c]/[0.10] dark:bg-[#b8975a]/[0.18]"
         : hovRow === key
           ? "bg-[#e6edf6] dark:bg-white/[0.08]"
           : ""
@@ -1516,7 +1498,7 @@ export default function MarketIntelPage() {
                             selRow === `sector:${r.slug}`
                               ? dark
                                 ? "rgba(184,151,90,0.28)"
-                                : "rgba(13,31,60,0.14)"
+                                : "rgba(13,31,60,0.10)"
                               : hoverSlug === r.slug
                                 ? dark
                                   ? "rgba(255,255,255,0.10)"
@@ -2160,7 +2142,7 @@ export default function MarketIntelPage() {
         <Section alt title="Acquisitions & Filings" sub="AZ acquisitions and SEC filings · last 7 days only">
           <div>
 {/* Tabs */}
-        <div className="mb-4 flex flex-wrap gap-2 rounded-xl bg-white p-1.5 dark:bg-white/5">
+        <div className="mb-4 flex flex-wrap gap-2">
           {(TABS as readonly string[]).map((t) => (
             <button key={t} onClick={() => setTab(t as Tab)} className={tabBtn(tab === t)}>
               {t === "acquisitions" ? "Acquisitions" : t === "filings" ? "Filings" : t}
