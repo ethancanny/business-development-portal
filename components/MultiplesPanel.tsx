@@ -35,9 +35,9 @@ export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples
     style: rowStyle(key),
     className: `border-b border-slate-100 dark:border-white/5 cursor-pointer ${
       selRow === key
-        ? "bg-slate-300 dark:bg-white/20"
+        ? "bg-[#0d1f3c]/[0.16] dark:bg-[#b8975a]/[0.22]"
         : hovRow === key
-          ? "bg-slate-200 dark:bg-white/10"
+          ? "bg-[#0d1f3c]/[0.07] dark:bg-white/[0.08]"
           : ""
     }`,
   });
