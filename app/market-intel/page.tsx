@@ -181,7 +181,7 @@ function Section({
   return (
     <section
       className={`-mx-3 mb-6 rounded-2xl px-3 transition-colors duration-200 ${
-        open ? "bg-[#0d1f3c]/[0.05] pb-4 dark:bg-white/[0.05]" : ""
+        open ? "bg-[#0d1f3c]/[0.07] pb-4 dark:bg-white/[0.04]" : ""
       }`}
     >
       <button
@@ -189,19 +189,19 @@ function Section({
         aria-expanded={open}
         className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg border-b-2 px-2 pb-2 text-left transition-colors duration-200 hover:bg-[#0d1f3c]/[0.05] dark:hover:bg-white/[0.06] ${
           open
-            ? "border-[#b8975a] bg-[#0d1f3c]/[0.06] dark:bg-white/[0.07]"
+            ? "border-[#b8975a] bg-[#0d1f3c] dark:bg-[#b8975a]/25"
             : "border-[#b8975a]/50"
         }`}
       >
         <span>
           <span
             className={`block text-lg font-bold ${
-              open ? "text-[#8a6f3c] dark:text-[#d4b37a]" : "text-[#0d1f3c] dark:text-white"
+              open ? "text-[#d4b37a]" : "text-[#0d1f3c] dark:text-white"
             }`}
           >
             {title}
           </span>
-          {sub && <span className="block text-xs text-slate-500 dark:text-white/40">{sub}</span>}
+          {sub && <span className={`block text-xs ${open ? "text-white/60" : "text-slate-500 dark:text-white/40"}`}>{sub}</span>}
         </span>
         <span className="text-xl leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
       </button>
@@ -237,7 +237,7 @@ function SubSection({
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 hover:bg-[#0d1f3c]/[0.05] dark:hover:bg-white/[0.06] ${
-          open ? "bg-[#0d1f3c]/[0.06] dark:bg-white/[0.07]" : ""
+          open ? "bg-[#0d1f3c]/[0.13] dark:bg-[#b8975a]/[0.16]" : ""
         }`}
       >
         <span
@@ -387,9 +387,9 @@ export default function MarketIntelPage() {
     style: rowStyle(key),
     className: `border-b border-slate-100 dark:border-white/5 cursor-pointer ${
       selRow === key
-        ? "bg-slate-300 dark:bg-white/20"
+        ? "bg-[#0d1f3c]/[0.16] dark:bg-[#b8975a]/[0.22]"
         : hovRow === key
-          ? "bg-slate-200 dark:bg-white/10"
+          ? "bg-[#0d1f3c]/[0.07] dark:bg-white/[0.08]"
           : ""
     }`,
   });
