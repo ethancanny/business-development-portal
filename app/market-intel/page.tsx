@@ -5,9 +5,12 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Legend,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -48,6 +51,25 @@ const PERMIT_COUNTIES = [
 const countySlug = (name: string) => name.replace(/[^A-Za-z]/g, "").toUpperCase();
 const SECTOR_SLUGS = ["11", "21", "22", "23", "3133", "3364", "42", "4445", "4849", "51", "52", "53", "54", "55", "56", "61", "62", "71", "72", "81"];
 const SECTOR_SERIES = SECTOR_SLUGS.map((s) => `CBP_AZ_SEC_${s}_ESTAB,CBP_AZ_SEC_${s}_EMP`).join(",");
+const SECTOR_SHORT: Record<string, string> = {
+  "11": "Agriculture", "21": "Mining & Oil/Gas", "22": "Utilities", "23": "Construction",
+  "3133": "Manufacturing", "3364": "Aerospace & Defense", "42": "Wholesale", "4445": "Retail",
+  "4849": "Transport & Warehousing", "51": "Information", "52": "Finance & Insurance",
+  "53": "Real Estate", "54": "Professional Services", "55": "Management",
+  "56": "Admin & Waste", "61": "Education", "62": "Healthcare",
+  "71": "Arts & Recreation", "72": "Hospitality & Food", "81": "Other Services",
+};
+const CHART_COLORS = ["#b8975a", "#7aa2f7", "#6abf8b", "#e07856", "#9b8cf2", "#4fb8ac", "#d9779e", "#94a3b8"];
+/** Commodity prices Arizona's economy depends on (FRED: IMF metals, EIA energy, PPI lumber). */
+const COMMODITY_SERIES: { id: string; name: string; unit: string; digits: number }[] = [
+  { id: "PCOPPUSDM", name: "Copper", unit: "$/metric ton", digits: 0 },
+  { id: "PGOLDUSDM", name: "Gold", unit: "$/troy oz", digits: 0 },
+  { id: "PSILVUSDM", name: "Silver", unit: "$/troy oz", digits: 2 },
+  { id: "MCOILWTICO", name: "WTI Crude Oil", unit: "$/barrel", digits: 2 },
+  { id: "MHHNGSP", name: "Natural Gas", unit: "$/MMBtu", digits: 2 },
+  { id: "WPU081", name: "Lumber & Wood Products", unit: "PPI index", digits: 1 },
+];
+const COMMODITY_IDS = COMMODITY_SERIES.map((c) => c.id).join(",");
 const COUNTY_PERMIT_SERIES = PERMIT_COUNTIES.flatMap((n) => [
   `AZPERMIT_${countySlug(n)}`,
   `AZPERMIT_SF_${countySlug(n)}`,
@@ -238,6 +260,7 @@ export default function MarketIntelPage() {
   const [filingCat, setFilingCat] = useState("all");
   const [multMetric, setMultMetric] = useState<"ebitda" | "revenue">("revenue");
   const [multBand, setMultBand] = useState("EV $5–25M");
+  const [sectorView, setSectorView] = useState<"trend" | "share">("trend");
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -260,7 +283,9 @@ export default function MarketIntelPage() {
             "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE,AZ_SPEND_WELFARE,AZ_SPEND_EDUCATION,AZ_SPEND_INSURANCE,AZ_SPEND_HIGHWAYS,AZ_SPEND_CORRECTIONS,AZ_SPEND_HEALTH," +
               COUNTY_PERMIT_SERIES +
               "," +
-              SECTOR_SERIES
+              SECTOR_SERIES +
+              "," +
+              COMMODITY_IDS
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
@@ -457,6 +482,67 @@ export default function MarketIntelPage() {
       </p>
     );
   };
+  const sectorTotal = sectorRows.reduce((s, r) => s + r.estab, 0);
+  // Trend: establishments by year for the 8 largest sectors (CBP history).
+  const sectorTrend = useMemo(() => {
+    const bySlug = new Map<string, Map<string, number>>();
+    for (const o of obs) {
+      const m = o.seriesId.match(/^CBP_AZ_SEC_(.+)_ESTAB$/);
+      if (!m || o.value === null) continue;
+      if (!bySlug.has(m[1])) bySlug.set(m[1], new Map());
+      bySlug.get(m[1])!.set(o.obsDate.slice(0, 4), o.value);
+    }
+    const slugs = sectorRows.slice(0, 8).map((r) => r.slug);
+    const yearSet = new Set<string>();
+    for (const mp of Array.from(bySlug.values())) for (const y of Array.from(mp.keys())) yearSet.add(y);
+    const rows = Array.from(yearSet)
+      .sort()
+      .map((y) => {
+        const row: Record<string, number | string> = { year: y };
+        for (const slug of slugs) {
+          const v = bySlug.get(slug)?.get(y);
+          if (v !== undefined) row[slug] = v;
+        }
+        return row;
+      });
+    return { rows, slugs };
+  }, [obs, sectorRows]);
+  // Share: current-year mix, top 7 + everything else.
+  const sectorPieData = useMemo(() => {
+    const data = sectorRows.slice(0, 7).map((r) => ({ name: SECTOR_SHORT[r.slug] ?? r.name, value: r.estab }));
+    const rest = sectorRows.slice(7).reduce((s, r) => s + r.estab, 0);
+    if (rest > 0) data.push({ name: "All other sectors", value: rest });
+    return data;
+  }, [sectorRows]);
+  // Commodity prices: latest values + a 5-year indexed series (base = 100)
+  // so series with unlike units can share one chart.
+  const commodityData = useMemo(() => {
+    const series = COMMODITY_SERIES.map((c) => {
+      const rows = obs
+        .filter((o) => o.seriesId === c.id && o.value !== null)
+        .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+      const recent = rows.filter((o) => o.obsDate >= fiveYearCutoff);
+      return {
+        ...c,
+        rows,
+        recent,
+        base: recent.length ? recent[0].value : null,
+        latest: rows.length ? rows[rows.length - 1] : null,
+        yearAgo: rows.length > 12 ? rows[rows.length - 13] : null,
+      };
+    }).filter((s) => s.latest);
+    const byMonth = new Map<string, Record<string, number | string>>();
+    for (const s of series) {
+      if (!s.base) continue;
+      for (const o of s.recent) {
+        const m = o.obsDate.slice(0, 7);
+        if (!byMonth.has(m)) byMonth.set(m, { month: m });
+        byMonth.get(m)![s.id] = Math.round(((o.value ?? 0) / s.base) * 1000) / 10;
+      }
+    }
+    const chartRows = Array.from(byMonth.values()).sort((a, b) => String(a.month).localeCompare(String(b.month)));
+    return { series, chartRows };
+  }, [obs, fiveYearCutoff]);
 
   const statCards = useMemo(() => {
     // (Top-row cards are tailored to the acquisition search; the macro
@@ -777,11 +863,11 @@ export default function MarketIntelPage() {
       v === null ? "" : v >= 1e9 ? ` · $${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? ` · $${Math.round(v / 1e6)}M` : "";
     for (const a of acquisitions) {
       if (a.eventType === "bankruptcy" && a.status !== "dismissed" && a.announcedDate && a.announcedDate >= cutoff) {
-        if (JUNK.test(a.summary || a.target)) continue;
+        if (JUNK.test(a.headline || a.summary || a.target)) continue;
         items.push({
           id: `news-${a.id}`,
           kind: "Bankruptcy",
-          title: a.summary || a.target || "Unnamed company",
+          title: a.headline || a.target || "Unnamed company",
           key: a.target || a.summary || "",
           detail: `${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}`,
           summary: a.summary || "",
@@ -812,7 +898,7 @@ export default function MarketIntelPage() {
       acquisitions
         .filter((a) => {
           if (a.eventType !== t || a.status === "dismissed" || !a.announcedDate || a.announcedDate < cutoff) return false;
-          const text = `${a.summary || ""} ${a.target || ""} ${a.acquirer || ""}`;
+          const text = `${a.headline || ""} ${a.summary || ""} ${a.target || ""} ${a.acquirer || ""}`;
           if (JUNK.test(text)) return false;
           if (t === "policy" && !MARKET_POLICY.test(text)) return false;
           return true;
@@ -833,7 +919,7 @@ export default function MarketIntelPage() {
         items.push({
           id: `${t}-${a.id}`,
           kind: kindLabel[t],
-          title: a.summary || (t === "acquisition" ? a.target || a.acquirer || "Unnamed deal" : a.target || "Unnamed"),
+          title: a.headline || (t === "acquisition" ? a.target || a.acquirer || "Unnamed deal" : a.target || "Unnamed"),
           key: a.target || a.summary || "",
           detail: `${a.acquirer && a.target && t === "acquisition" ? `${a.acquirer} → ${a.target} · ` : ""}${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}${fmtVal(a.dealValue ?? null)}`,
           summary: a.summary || "",
@@ -907,26 +993,50 @@ export default function MarketIntelPage() {
 
         {/* Stat cards */}
         <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {statCards.map((c) => (
-            <div key={c.label} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60">
-              <p className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-white/50">{c.label}</p>
-              <p className="mt-1 text-2xl font-bold text-[#0d1f3c] dark:text-white">{c.value}</p>
-              <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
-                {c.date}
-                {c.chg !== null && (
-                  <span className={c.invert
-                    ? Math.abs(c.chg) >= 25
-                      ? "text-amber-600 dark:text-amber-400"
-                      : "text-slate-400 dark:text-white/40"
-                    : c.chg >= 0
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-red-500"}>
-                    {" "}{c.chg >= 0 ? "▲" : "▼"} {Math.abs(c.chg).toFixed(1)}{c.chgLabel ?? "pp YoY"}
-                  </span>
-                )}
-              </p>
-            </div>
-          ))}
+          {statCards.map((c) => {
+            const isAnomaly = c.label.includes("Top Anomaly");
+            return (
+              <div
+                key={c.label}
+                className={
+                  isAnomaly
+                    ? "rounded-xl border-2 border-[#b8975a] bg-gradient-to-br from-[#b8975a]/20 via-white to-white p-4 shadow-[0_0_28px_rgba(184,151,90,0.35)] dark:via-[#132847]/70 dark:to-[#132847]/70"
+                    : "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60"
+                }
+              >
+                <p
+                  className={
+                    isAnomaly
+                      ? "flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#8a6d3b] dark:text-[#d9bc7a]"
+                      : "text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-white/50"
+                  }
+                >
+                  {isAnomaly && (
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#b8975a] opacity-60" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-[#b8975a]" />
+                    </span>
+                  )}
+                  {c.label}
+                </p>
+                <p className="mt-1 text-2xl font-bold text-[#0d1f3c] dark:text-white">{c.value}</p>
+                <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
+                  {c.date}
+                  {c.chg !== null && (
+                    <span className={c.invert
+                      ? Math.abs(c.chg) >= 25
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-slate-400 dark:text-white/40"
+                      : c.chg >= 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-red-500"}>
+                      {" "}{c.chg >= 0 ? "▲" : "▼"} {Math.abs(c.chg).toFixed(1)}{c.chgLabel ?? "pp YoY"}
+                    </span>
+                  )}
+                </p>
+              </div>
+            );
+          })}
           {statCards.length === 0 && !error && (
             <div className="col-span-4 rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500 dark:border-white/15 dark:text-white/40">
               No indicator data yet — it loads on the first daily ingest run.
@@ -1413,6 +1523,69 @@ export default function MarketIntelPage() {
               </div>
             </div>
           </SubSection>
+          {commodityData.series.length > 0 && (
+            <SubSection title="Commodity Prices">
+              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+                Arizona supplies roughly 70% of U.S. copper, and mining, construction, and energy input costs drive operator margins across the focus sectors. Latest monthly prices below; the chart indexes each series to 100 five years ago so unlike units can be compared on one axis.
+              </p>
+              <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+                {commodityData.series.map((s, i) => {
+                  const yoy =
+                    s.yearAgo?.value && s.latest?.value
+                      ? ((s.latest.value - s.yearAgo.value) / s.yearAgo.value) * 100
+                      : null;
+                  return (
+                    <div key={s.id} className="rounded-lg border border-slate-200 p-3 dark:border-white/10">
+                      <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-white/50">
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                        {s.name}
+                      </p>
+                      <p className="mt-1 text-lg font-bold text-[#0d1f3c] dark:text-white">
+                        {s.latest?.value?.toLocaleString(undefined, { maximumFractionDigits: s.digits })}
+                        <span className="ml-1 text-[10px] font-normal text-slate-400 dark:text-white/40">{s.unit}</span>
+                      </p>
+                      <p className="text-[11px] text-slate-400 dark:text-white/40">
+                        {s.latest?.obsDate?.slice(0, 7)}
+                        {yoy !== null && (
+                          <span>
+                            {" "}· {yoy >= 0 ? "▲" : "▼"} {Math.abs(yoy).toFixed(1)}% YoY
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className={chartCard}>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={commodityData.chartRows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
+                      <XAxis
+                        dataKey="month"
+                        tick={{ fontSize: 11, fill: tick }}
+                        minTickGap={40}
+                        tickFormatter={(m: string) => {
+                          const [y, mo] = m.split("-");
+                          return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(mo) - 1]} ’${y.slice(2)}`;
+                        }}
+                      />
+                      <YAxis tick={{ fontSize: 11, fill: tick }} width={40} domain={["auto", "auto"]} />
+                      <Tooltip
+                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                        formatter={(v, name) => [Number(v).toFixed(1), name]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      {commodityData.series.map((s, i) => (
+                        <Line key={s.id} type="monotone" dataKey={s.id} name={s.name} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <p className="mt-2 text-xs text-slate-400 dark:text-white/30">Indexed: 100 = price five years ago · Sources: IMF commodity prices, EIA, BLS PPI via FRED · refreshed daily</p>
+              </div>
+            </SubSection>
+          )}
           <SubSection title="Layoffs & WARN Notices">
           <div className="mb-4 grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
@@ -1457,24 +1630,66 @@ export default function MarketIntelPage() {
         <Section title="Industries" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades">
           {sectorRows.length > 0 && (
             <div className={`${chartCard} mb-4`}>
-              <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona Companies by Sector</h3>
-              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-                Employer establishments by NAICS sector · U.S. Census Bureau, County Business Patterns {sectorYear} · refreshed daily (CBP publishes annually)
-              </p>
-              <div className="h-[560px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={sectorRows} layout="vertical" margin={{ top: 0, right: 30, left: 0, bottom: 0 }}>
-                    <CartesianGrid stroke={grid} strokeDasharray="3 3" horizontal={false} />
-                    <XAxis type="number" tick={{ fontSize: 11, fill: tick }} />
-                    <YAxis type="category" dataKey="name" width={195} tick={{ fontSize: 11, fill: tick }} />
-                    <Tooltip
-                      contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
-                      formatter={(v) => [Number(v).toLocaleString(), "Establishments"]}
-                    />
-                    <Bar dataKey="estab" name="Establishments" fill={gold} radius={[0, 3, 3, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona Companies by Sector</h3>
+                <div className="flex gap-1">
+                  {(["trend", "share"] as const).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setSectorView(v)}
+                      className={
+                        sectorView === v
+                          ? "rounded-full bg-[#b8975a] px-3 py-1 text-xs font-semibold text-white"
+                          : "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-500 hover:border-[#b8975a] dark:border-white/15 dark:text-white/50"
+                      }
+                    >
+                      {v === "trend" ? "Trend" : "Share"}
+                    </button>
+                  ))}
+                </div>
               </div>
+              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+                Employer establishments by NAICS sector · U.S. Census Bureau, County Business Patterns · refreshed daily (CBP publishes annually)
+              </p>
+              {sectorView === "trend" ? (
+                <div className="h-[380px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="year" tick={{ fontSize: 11, fill: tick }} />
+                      <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} />
+                      <Tooltip
+                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                        formatter={(v, name) => [Number(v).toLocaleString(), name]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      {sectorTrend.slugs.map((slug, i) => (
+                        <Line key={slug} type="monotone" dataKey={slug} name={SECTOR_SHORT[slug] ?? slug} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="h-[380px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={sectorPieData} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={1}>
+                        {sectorPieData.map((d, i) => (
+                          <Cell key={d.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                        formatter={(v, name) => [`${Number(v).toLocaleString()} (${sectorTotal ? ((Number(v) / sectorTotal) * 100).toFixed(1) : "0"}%)`, name]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
+                {sectorView === "trend" ? "Top 8 sectors by establishments" : `CBP ${sectorYear} mix`} · {sectorTotal.toLocaleString()} establishments statewide (CBP {sectorYear})
+              </p>
             </div>
           )}
           <SubSection title="Aerospace & Defense">
