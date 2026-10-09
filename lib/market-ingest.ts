@@ -49,6 +49,11 @@ const FRED_SERIES: { id: string; title: string }[] = [
   { id: "MCOILWTICO", title: "WTI Crude Oil Price" },
   { id: "MHHNGSP", title: "Natural Gas — Henry Hub Price" },
   { id: "WPU081", title: "Lumber & Wood Products PPI" },
+  { id: "WPU0121", title: "Hay & Forage PPI" },
+  { id: "PCOTTONUSDM", title: "Cotton — Global Price (IMF) [probe]" },
+  { id: "PCOTTUSDM", title: "Cotton — Global Price (IMF) [probe]" },
+  { id: "PWHEATUSDM", title: "Wheat — Global Price (IMF) [probe]" },
+  { id: "WPU01220101", title: "Raw Cotton PPI [probe]" },
 ];
 
 interface FredObsResponse {
