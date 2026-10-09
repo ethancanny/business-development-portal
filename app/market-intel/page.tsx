@@ -2076,7 +2076,7 @@ export default function MarketIntelPage() {
         </Section>
 
 
-        <Section alt title="Deals & Filings" sub="AZ acquisitions and SEC filings · last 7 days only">
+        <Section alt title="Acquisitions & Filings" sub="AZ acquisitions and SEC filings · last 7 days only">
           <div>
 {/* Tabs */}
         <div className="mb-4 flex flex-wrap gap-2">
