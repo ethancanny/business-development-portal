@@ -19,6 +19,7 @@ import {
 import PageHero from "@/components/PageHero";
 import SizeProfileRow, { hasSizeProfile, SUBSECTOR_IDS_CSV } from "@/components/SizeProfileRows";
 import CompanyTargets from "@/components/CompanyTargets";
+import UpdatesStrip from "@/components/UpdatesStrip";
 import ValleyDemographics from "@/components/ValleyDemographics";
 import { useTheme } from "@/components/ThemeProvider";
 import { fmtMoney, fmtDate } from "@/lib/format";
@@ -357,6 +358,7 @@ export default function MarketIntelPage() {
   const [multBand, setMultBand] = useState("EV $5–25M");
   const [sectorView, setSectorView] = useState<"trend" | "share">("share");
   const [hoverSlug, setHoverSlug] = useState<string | null>(null);
+  const [hoverCommodity, setHoverCommodity] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -366,6 +368,7 @@ export default function MarketIntelPage() {
   }, []);
   const [warn, setWarn] = useState<MiWarnNotice[]>([]);
   const [dealFlow, setDealFlow] = useState<{ id: string; kind: string; status: string; createdAt?: string }[]>([]);
+  const [fitTotal, setFitTotal] = useState<number | null>(null);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [syncLog, setSyncLog] = useState<MiSyncLog[]>([]);
   const [error, setError] = useState("");
@@ -407,6 +410,12 @@ export default function MarketIntelPage() {
         setDealFlow(flow);
         setMultiples(mult);
         setSyncLog(log);
+        try {
+          const cf = await getJSON<{ fitTotal?: number }>("/api/market/companies?limit=1");
+          setFitTotal(cf.fitTotal ?? null);
+        } catch {
+          /* fit card falls back to a dash */
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -812,18 +821,13 @@ export default function MarketIntelPage() {
             chg: null,
           }
         : null;
-    const d90iso = new Date(now - d90).toISOString().slice(0, 10);
-    const warnNotices90 = warn.filter((w) => w.noticeDate && w.noticeDate >= d90iso).length;
-    const bk90 = acquisitions.filter(
-      (a) => a.eventType === "bankruptcy" && a.status !== "dismissed" && a.announcedDate >= d90iso
-    ).length;
-    const distressCard = {
-      label: "⚠ Distress Signals — 90 Days",
-      value: (warnNotices90 + bk90).toLocaleString(),
-      date: `${warnNotices90} WARN notices (${layNow.toLocaleString()} workers) · ${bk90} bankruptcies`,
+    const fitCard = {
+      label: "★ Fit Targets — All Industries",
+      value: fitTotal !== null ? fitTotal.toLocaleString() : "—",
+      date: "acquisition fits across A&D · healthcare · manufacturing · trades",
       chg: null,
     };
-    return [saleCard, focusCard, distressCard, anomalyCard].filter(Boolean) as {
+    return [saleCard, focusCard, fitCard, anomalyCard].filter(Boolean) as {
       label: string;
       value: string;
       date: string;
@@ -831,7 +835,7 @@ export default function MarketIntelPage() {
       chgLabel?: string;
       invert?: boolean;
     }[];
-  }, [obs, warn, acquisitions, dealFlow, sectorRows]);
+  }, [obs, warn, acquisitions, dealFlow, sectorRows, fitTotal]);
 
   const setStatus = async (kind: "acquisitions" | "filings", id: string, status: string) => {
     await fetch(`/api/market/${kind}`, {
@@ -1018,6 +1022,10 @@ export default function MarketIntelPage() {
     return order.filter((b) => present.has(b));
   }, [multiples]);
 
+  // Public comps (Damodaran) publish EV/EBITDA only — force that metric
+  // whenever the Public comps band is selected, whatever the toggle says.
+  const effMetric = multBand === "Public comps" ? "ebitda" : multMetric;
+
   const multChartData = useMemo(() => {
     const byInd = new Map<string, MiMultiple>();
     for (const m of multiples) {
@@ -1035,7 +1043,7 @@ export default function MarketIntelPage() {
           industry: sub ? `${top}: ${prettySub}` : m.industry,
           short: prettySub,
           full: m.industry,
-          value: multMetric === "ebitda" ? m.evEbitdaMedian : m.evRevenueMedian,
+          value: effMetric === "ebitda" ? m.evEbitdaMedian : m.evRevenueMedian,
           notes: m.notes,
         };
       })
@@ -1253,6 +1261,7 @@ export default function MarketIntelPage() {
           )}
         </div>
 
+        <UpdatesStrip />
 
         {/* Major-event headlines */}
         {headlines.length > 0 && (
@@ -1345,8 +1354,9 @@ export default function MarketIntelPage() {
             </div>
           </div>
           <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-            Median {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} multiples, {multBand} deal size. Sources: ExitValue.ai private-deal data, Damodaran (NYU Stern) public comps, manual entries.
-            {multMetric === "ebitda" && <span className="ml-1 italic">EBITDA data is sparse for smaller deals — try EV/Revenue or a larger band.</span>}
+            Median {effMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} multiples, {multBand} deal size. Sources: ExitValue.ai private-deal data, Damodaran (NYU Stern) public comps, manual entries.
+            {effMetric === "ebitda" && multBand !== "Public comps" && <span className="ml-1 italic">EBITDA data is sparse for smaller deals — try EV/Revenue or a larger band.</span>}
+            {multBand === "Public comps" && <span className="ml-1 italic">Public comps publish EV/EBITDA only.</span>}
           </p>
           <div className="h-96">
             <ResponsiveContainer width="100%" height="100%">
@@ -1368,7 +1378,7 @@ export default function MarketIntelPage() {
             </ResponsiveContainer>
           </div>
           {multChartData.length === 0 && (
-            <p className="py-4 text-center text-sm text-slate-400">No {multMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} data for this size band yet.</p>
+            <p className="py-4 text-center text-sm text-slate-400">No {effMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} data for this size band yet.</p>
           )}
         </div>
           <div className="mt-4">
@@ -1973,7 +1983,12 @@ export default function MarketIntelPage() {
                       ? ((s.latest.value - s.yearAgo.value) / s.yearAgo.value) * 100
                       : null;
                   return (
-                    <div key={s.id} className="rounded-lg border border-slate-200 p-3 dark:border-white/10">
+                    <div
+                      key={s.id}
+                      onMouseEnter={() => setHoverCommodity(s.id)}
+                      onMouseLeave={() => setHoverCommodity(null)}
+                      className={`rounded-lg border p-3 transition-colors ${hoverCommodity === s.id ? "border-[#b8975a] bg-[#b8975a]/[0.07] dark:border-[#b8975a]" : "border-slate-200 dark:border-white/10"}`}
+                    >
                       <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-white/50">
                         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
                         {s.name}
@@ -2034,7 +2049,7 @@ export default function MarketIntelPage() {
                       />
                       <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
                       {commodityData.series.map((s, i) => (
-                        <Line key={s.id} type="monotone" dataKey={s.id} name={s.name} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} />
+                        <Line key={s.id} type="monotone" dataKey={s.id} name={s.name} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={hoverCommodity === s.id ? 3.5 : 2} strokeOpacity={hoverCommodity && hoverCommodity !== s.id ? 0.12 : 1} dot={false} />
                       ))}
                     </LineChart>
                   </ResponsiveContainer>
