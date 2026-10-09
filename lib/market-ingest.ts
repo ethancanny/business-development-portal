@@ -309,6 +309,11 @@ function isArizonaStory(title: string, source: string): boolean {
   return AZ_TERMS.test(title) || AZ_OUTLETS.test(source);
 }
 
+/** Strict Arizona relevance: the headline itself names an Arizona place. */
+function hasPlace(title: string): boolean {
+  return AZ_TERMS.test(title);
+}
+
 /** Headline text minus the " - Publisher" suffix: a one-line brief of the event. */
 function headlineSummary(title: string): string {
   return title.replace(/\s+-\s+[^-]+$/, "").trim().slice(0, 300);
@@ -348,7 +353,7 @@ function buildEventBrief(opts: {
 
 /** Non-event noise: commentary, advice, stock-price moves, legal/political drama. */
 const JUNK_HEADLINE =
-  /\b(how to|what to know|opinion|editorial|podcast|webinar|sponsored|price target|dividend|earnings call|top \d+|best stocks?|stocks? to (buy|watch)|shares? (rise|risen|fall|fell|jump|drop|surge|plunge|slide|soar|climb|dip)|lawsuit|indicted|arrested|coupon|giveaway|campaign|endorses?|endorsement|poll (shows|says|finds)|slams|blasts|feud|scandal)\b/i;
+  /\b(how to|what to know|opinion|editorial|podcast|webinar|sponsored|price target|dividend|earnings call|top \d+|best stocks?|stocks? to (buy|watch)|shares? (rise|risen|fall|fell|jump|drop|surge|plunge|slide|soar|climb|dip)|stock is trending|trending stocks?|lawsuit|indicted|arrested|coupon|giveaway|campaign|endorses?|endorsement|poll (shows|says|finds)|slams|blasts|feud|scandal)\b/i;
 function isJunkHeadline(title: string): boolean {
   return JUNK_HEADLINE.test(title);
 }
@@ -383,7 +388,11 @@ export async function ingestNews(): Promise<number> {
       if (!item.link || seen.has(item.link)) continue;
       seen.add(item.link);
       if (!DEAL_VERBS.test(item.title)) continue;
-      if (!isArizonaStory(item.title, item.source)) continue;
+      // Acquisitions must be Arizona deals: the headline itself must name an
+      // Arizona place. An AZ outlet covering a national deal (Paramount–Warner
+      // Bros. via AZ papers) does NOT qualify — that fallback lives on in the
+      // econ-events and bankruptcy ingests, not here.
+      if (!hasPlace(item.title)) continue;
       if (isJunkHeadline(item.title)) continue;
       const { acquirer, target } = parseDealHeadline(item.title);
       const announced = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
