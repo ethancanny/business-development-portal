@@ -1,0 +1,42 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth";
+import { getCompanies } from "@/lib/market-db";
+
+/**
+ * TEMPORARY diagnostic (Oct 9, 2026 rebuild): list company rows in a
+ * sector whose stored details claim to be a JSON object but fail to
+ * parse (such rows break details::jsonb casts in countFits/getUpdates).
+ * Read-only; remove after the rebuild verification completes.
+ */
+export async function POST(req: NextRequest) {
+  const authed =
+    !!getSessionUser() ||
+    (() => {
+      const secret = process.env.CRON_SECRET;
+      return !secret || req.headers.get("authorization") === `Bearer ${secret}`;
+    })();
+  if (!authed) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const body = await req.json().catch(() => ({}));
+  const sector = String(body.sector ?? "");
+  const bad: { source: string; dedupKey: string; name: string; len: number; tail: string }[] = [];
+  let total = 0;
+  for (let off = 0; ; off += 5000) {
+    const rows = await getCompanies(sector || undefined, 5000, off);
+    if (!rows.length) break;
+    total += rows.length;
+    for (const r of rows) {
+      const d = r.details ?? "";
+      if (d.trim().startsWith("{")) {
+        try {
+          JSON.parse(d);
+        } catch {
+          bad.push({ source: r.source, dedupKey: r.dedupKey, name: r.name, len: d.length, tail: d.slice(-60) });
+        }
+      }
+    }
+    if (rows.length < 5000) break;
+  }
+  return NextResponse.json({ ok: true, sector, total, bad });
+}
