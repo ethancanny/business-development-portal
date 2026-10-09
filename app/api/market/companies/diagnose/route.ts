@@ -19,6 +19,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const body = await req.json().catch(() => ({}));
+  const wantKey = String(body.dedupKey ?? "");
+  if (wantKey) {
+    for (const sec of ["Aerospace & Defense", "Healthcare", "Advanced Manufacturing", "Specialty Trades & Construction"]) {
+      for (let off = 0; ; off += 5000) {
+        const rows = await getCompanies(sec, 5000, off);
+        if (!rows.length) break;
+        for (const r of rows) {
+          if (r.dedupKey === wantKey) return NextResponse.json({ ok: true, row: r });
+        }
+        if (rows.length < 5000) break;
+      }
+    }
+    return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
+  }
   const sector = String(body.sector ?? "");
   const bad: { source: string; dedupKey: string; name: string; len: number; tail: string }[] = [];
   let total = 0;
