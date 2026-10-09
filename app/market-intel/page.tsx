@@ -46,6 +46,8 @@ const PERMIT_COUNTIES = [
   "Maricopa", "Mohave", "Navajo", "Pima", "Pinal", "Santa Cruz", "Yavapai", "Yuma",
 ] as const;
 const countySlug = (name: string) => name.replace(/[^A-Za-z]/g, "").toUpperCase();
+const SECTOR_SLUGS = ["11", "21", "22", "23", "3133", "3364", "42", "4445", "4849", "51", "52", "53", "54", "55", "56", "61", "62", "71", "72", "81"];
+const SECTOR_SERIES = SECTOR_SLUGS.map((s) => `CBP_AZ_SEC_${s}_ESTAB,CBP_AZ_SEC_${s}_EMP`).join(",");
 const COUNTY_PERMIT_SERIES = PERMIT_COUNTIES.flatMap((n) => [
   `AZPERMIT_${countySlug(n)}`,
   `AZPERMIT_SF_${countySlug(n)}`,
@@ -244,6 +246,7 @@ export default function MarketIntelPage() {
     return () => window.removeEventListener("resize", check);
   }, []);
   const [warn, setWarn] = useState<MiWarnNotice[]>([]);
+  const [dealFlow, setDealFlow] = useState<{ id: string; kind: string; status: string; createdAt?: string }[]>([]);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [syncLog, setSyncLog] = useState<MiSyncLog[]>([]);
   const [error, setError] = useState("");
@@ -251,17 +254,20 @@ export default function MarketIntelPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [latestData, obsData, acq, fil, warnData, mult, log] = await Promise.all([
+        const [latestData, obsData, acq, fil, warnData, mult, log, flow] = await Promise.all([
           getJSON<LatestMap>("/api/market/latest"),
           getJSON<MiIndicatorObs[]>(
             "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE,AZ_SPEND_WELFARE,AZ_SPEND_EDUCATION,AZ_SPEND_INSURANCE,AZ_SPEND_HIGHWAYS,AZ_SPEND_CORRECTIONS,AZ_SPEND_HEALTH," +
-              COUNTY_PERMIT_SERIES
+              COUNTY_PERMIT_SERIES +
+              "," +
+              SECTOR_SERIES
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
           getJSON<MiWarnNotice[]>("/api/market/warn?limit=500"),
           getJSON<MiMultiple[]>("/api/market/multiples"),
           getJSON<MiSyncLog[]>("/api/market/sync-log"),
+          getJSON<{ id: string; kind: string; status: string; createdAt?: string }[]>("/api/deal-flow"),
         ]);
         const lm: LatestMap = {};
         for (const l of latestData as unknown as { seriesId: string; title: string; units: string; obsDate: string; value: number | null }[])
@@ -271,6 +277,7 @@ export default function MarketIntelPage() {
         setAcquisitions(acq);
         setFilings(fil);
         setWarn(warnData);
+        setDealFlow(flow);
         setMultiples(mult);
         setSyncLog(log);
       } catch (e) {
@@ -410,36 +417,51 @@ export default function MarketIntelPage() {
     });
   }, [obs]);
 
+  // Arizona companies by sector (Census CBP): latest establishment and
+  // employment counts per NAICS sector, with year-over-year change.
+  const sectorRows = useMemo(() => {
+    type Pt = { date: string; value: number; title: string };
+    const est = new Map<string, Pt[]>();
+    const emp = new Map<string, Pt[]>();
+    for (const o of obs) {
+      const m = o.seriesId.match(/^CBP_AZ_SEC_(.+)_(ESTAB|EMP)$/);
+      if (!m || o.value === null) continue;
+      const map = m[2] === "ESTAB" ? est : emp;
+      if (!map.has(m[1])) map.set(m[1], []);
+      map.get(m[1])!.push({ date: o.obsDate, value: o.value, title: o.title });
+    }
+    const rows = Array.from(est.entries()).map(([slug, vals]) => {
+      vals.sort((a, b) => a.date.localeCompare(b.date));
+      const last = vals[vals.length - 1];
+      const prev = vals[vals.length - 2];
+      const empVals = (emp.get(slug) || []).sort((a, b) => a.date.localeCompare(b.date));
+      return {
+        slug,
+        name: last.title.replace(/ — AZ Establishments$/, ""),
+        estab: last.value,
+        emp: empVals.length ? empVals[empVals.length - 1].value : null,
+        year: last.date.slice(0, 4),
+        yoy: prev && prev.value ? ((last.value - prev.value) / prev.value) * 100 : null,
+      };
+    });
+    return rows.sort((a, b) => b.estab - a.estab);
+  }, [obs]);
+  const sectorYear = sectorRows.length ? sectorRows[0].year : "";
+  const sectorLine = (slug: string) => {
+    const r = sectorRows.find((x) => x.slug === slug);
+    if (!r) return null;
+    return (
+      <p className="mt-2 text-xs text-slate-500 dark:text-white/40">
+        🎯 {r.estab.toLocaleString()} AZ establishments
+        {r.emp ? ` · ${r.emp.toLocaleString()} employees` : ""} (Census CBP {r.year})
+      </p>
+    );
+  };
+
   const statCards = useMemo(() => {
-    // Combined unemployment bubble: AZ and US side by side in one card.
-    const azUr = latest["AZUR"];
-    const usUr = latest["UNRATE"];
-    const unempCard =
-      azUr && azUr.value !== null
-        ? {
-            label: "Unemployment — AZ / US",
-            value: `${azUr.value.toFixed(1)}% / ${usUr && usUr.value !== null ? `${usUr.value.toFixed(1)}%` : "—"}`,
-            date: azUr.obsDate,
-            chg: yoyChange(obs, "AZUR"),
-          }
-        : null;
-    // Manufacturing jobs with their share of all Arizona jobs (AZNA).
-    const mfgL = latest["AZMFG"];
-    const totL = latest["AZNA"];
-    const mfgCard =
-      mfgL && mfgL.value !== null
-        ? {
-            label: "AZ Manufacturing Jobs",
-            value: `${Math.round(mfgL.value)}k`,
-            date:
-              totL && totL.value
-                ? `${mfgL.obsDate} · ${((mfgL.value / totL.value) * 100).toFixed(1)}% of all AZ jobs`
-                : mfgL.obsDate,
-            chg: yoyChange(obs, "AZMFG"),
-            chgLabel: "% YoY",
-            invert: false,
-          }
-        : null;
+    // (Top-row cards are tailored to the acquisition search; the macro
+    // series — unemployment, manufacturing, permits — live in the
+    // Economic Indicators subsection below.)
     // Permits vs their trailing 12-month average (also feeds the anomaly scan).
     const permitObs = obs
       .filter((o) => o.seriesId === "AZBPPRIV" && o.value !== null)
@@ -452,17 +474,6 @@ export default function MarketIntelPage() {
         : null;
     const permitChg =
       pLast && avg12 ? (((pLast.value || 0) - avg12) / avg12) * 100 : null;
-    const permitCard =
-      pLast && avg12 && permitChg !== null
-        ? {
-            label: "AZ Building Permits",
-            value: Math.round(pLast.value || 0).toLocaleString(),
-            date: pLast.obsDate,
-            chg: permitChg,
-            chgLabel: "% vs 1-yr avg",
-            invert: false,
-          }
-        : null;
     // 🔎 Top Anomaly — scan every source for the reading that "usually
     // doesn't happen" and surface the single biggest deviation.
     type Cand = { score: number; headline: string; detail: string };
@@ -564,7 +575,43 @@ export default function MarketIntelPage() {
           invert: false,
         }
       : null;
-    return [unempCard, mfgCard, permitCard, anomalyCard].filter(Boolean) as {
+    // Acquisition-search cards: live deal flow awaiting triage, the size
+    // of the focus-sector target universe, and distress signals.
+    const forSale = dealFlow.filter((i) => i.kind === "business_for_sale" && i.status === "new");
+    const weekAgo = now - 7 * 864e5;
+    const newThisWeek = forSale.filter(
+      (i) => i.createdAt && new Date(i.createdAt).getTime() >= weekAgo
+    ).length;
+    const saleCard = {
+      label: "🏷 Businesses For Sale",
+      value: forSale.length.toLocaleString(),
+      date: `awaiting triage in Activity${newThisWeek ? ` · ${newThisWeek} new this week` : ""}`,
+      chg: null,
+    };
+    const focusSlugs = ["3364", "62", "3133", "23"];
+    const focusRows = sectorRows.filter((r) => focusSlugs.includes(r.slug));
+    const focusTotal = focusRows.reduce((s, r) => s + r.estab, 0);
+    const focusCard =
+      focusTotal > 0
+        ? {
+            label: "🎯 AZ Companies — Focus Sectors",
+            value: focusTotal.toLocaleString(),
+            date: `establishments · CBP ${focusRows[0]?.year ?? ""} · A&D, healthcare, manufacturing, construction`,
+            chg: null,
+          }
+        : null;
+    const d90iso = new Date(now - d90).toISOString().slice(0, 10);
+    const warnNotices90 = warn.filter((w) => w.noticeDate && w.noticeDate >= d90iso).length;
+    const bk90 = acquisitions.filter(
+      (a) => a.eventType === "bankruptcy" && a.status !== "dismissed" && a.announcedDate >= d90iso
+    ).length;
+    const distressCard = {
+      label: "⚠ Distress Signals — 90 Days",
+      value: (warnNotices90 + bk90).toLocaleString(),
+      date: `${warnNotices90} WARN notices (${layNow.toLocaleString()} workers) · ${bk90} bankruptcies`,
+      chg: null,
+    };
+    return [saleCard, focusCard, distressCard, anomalyCard].filter(Boolean) as {
       label: string;
       value: string;
       date: string;
@@ -572,7 +619,7 @@ export default function MarketIntelPage() {
       chgLabel?: string;
       invert?: boolean;
     }[];
-  }, [latest, obs, warn, acquisitions]);
+  }, [obs, warn, acquisitions, dealFlow, sectorRows]);
 
   const setStatus = async (kind: "acquisitions" | "filings", id: string, status: string) => {
     await fetch(`/api/market/${kind}`, {
@@ -1408,8 +1455,31 @@ export default function MarketIntelPage() {
         </Section>
 
         <Section title="Industries" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades">
+          {sectorRows.length > 0 && (
+            <div className={`${chartCard} mb-4`}>
+              <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona Companies by Sector</h3>
+              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+                Employer establishments by NAICS sector · U.S. Census Bureau, County Business Patterns {sectorYear} · refreshed daily (CBP publishes annually)
+              </p>
+              <div className="h-[560px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={sectorRows} layout="vertical" margin={{ top: 0, right: 30, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke={grid} strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" tick={{ fontSize: 11, fill: tick }} />
+                    <YAxis type="category" dataKey="name" width={195} tick={{ fontSize: 11, fill: tick }} />
+                    <Tooltip
+                      contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                      formatter={(v) => [Number(v).toLocaleString(), "Establishments"]}
+                    />
+                    <Bar dataKey="estab" name="Establishments" fill={gold} radius={[0, 3, 3, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
           <SubSection title="Aerospace & Defense">
             <EventStrip items={industryEvents("Aerospace & Defense")} onDismiss={dismissEvent} />
+            {sectorLine("3364")}
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
@@ -1454,6 +1524,7 @@ export default function MarketIntelPage() {
 
           <SubSection title="Healthcare">
             <EventStrip items={industryEvents("Healthcare")} onDismiss={dismissEvent} />
+            {sectorLine("62")}
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Healthcare Employment — AZ</h3>
@@ -1475,6 +1546,7 @@ export default function MarketIntelPage() {
 
           <SubSection title="Advanced Manufacturing">
             <EventStrip items={industryEvents("Advanced Manufacturing")} onDismiss={dismissEvent} />
+            {sectorLine("3133")}
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Manufacturing Employment — AZ</h3>
@@ -1496,6 +1568,7 @@ export default function MarketIntelPage() {
 
           <SubSection title="Specialty Trades & Construction">
             <EventStrip items={industryEvents("Specialty Trades & Construction")} onDismiss={dismissEvent} />
+            {sectorLine("23")}
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Construction Employment — AZ</h3>
