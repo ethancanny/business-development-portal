@@ -14,6 +14,7 @@ import {
   upsertWarn,
   backfillWarnIndustries,
   clearNewBankruptcyNews,
+  purgeNonAzFilings,
   addMultiple,
   deleteMultiples,
   logSync,
@@ -157,6 +158,37 @@ interface EdgarHit {
   };
 }
 
+const ITEM_LABELS: Record<string, string> = {
+  "1.01": "Entry into a material definitive agreement",
+  "1.02": "Termination of a material agreement",
+  "1.03": "Bankruptcy or receivership",
+  "1.05": "Material impairments",
+  "2.01": "Completion of acquisition / disposition of assets",
+  "2.03": "New direct financial obligation",
+  "2.04": "Obligation accelerated / increased",
+  "3.02": "Unregistered sale of equity securities",
+  "5.01": "Change in control",
+  "5.02": "Director / executive officer change",
+  "5.03": "Amendments to charter or bylaws",
+  "7.01": "Regulation FD disclosure",
+  "8.01": "Other events",
+  "9.01": "Financial statements and exhibits",
+};
+
+/** Human summary for a filing from its 8-K items / form — EDGAR's raw
+ * file_description is exhibit noise ("EX-10.2"), never show that. */
+function filingSummary(s: EdgarHit["_source"]): string {
+  const items = (s?.items ?? []).filter((i) => ITEM_LABELS[i]);
+  if (items.length)
+    return items.map((i) => `Item ${i} — ${ITEM_LABELS[i]}`).join(" · ").slice(0, 300);
+  const form = (s?.form ?? "").toUpperCase();
+  if (form.startsWith("D")) return "Form D — notice of exempt securities offering";
+  if (form.includes("10-K")) return "Annual report (Form 10-K)";
+  if (form.includes("10-Q")) return "Quarterly report (Form 10-Q)";
+  const d = s?.file_description ?? "";
+  return /^EX[\s-]|EXHIBIT/i.test(d) ? "" : d;
+}
+
 export async function ingestFilings(): Promise<number> {
   const end = new Date().toISOString().slice(0, 10);
   const start = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
@@ -189,15 +221,14 @@ export async function ingestFilings(): Promise<number> {
       // design verified each filer with a separate submissions-API call —
       // up to ~100 per query — and that loop is what timed this ingest out.)
       const azCompany = (s.biz_states ?? []).some((st) => st.toUpperCase() === "AZ");
+      // Arizona-based filers ONLY, every category — no national exception
+      // (Ethan, Oct 2026): material events at big non-AZ companies reach the
+      // portal as news / Major Events articles, not as raw filings.
+      if (!azCompany) continue;
       if (q.category === "bankruptcy") {
-        // National exception: only exchange-listed filers actually
-        // reporting a bankruptcy (8-K Item 1.03). The raw text query
-        // matches 1,500+ boilerplate mentions a month.
-        if (!isListed(name)) continue;
+        // Must be an actual bankruptcy report (8-K Item 1.03), not a
+        // boilerplate text match.
         if (!(s.items ?? []).includes("1.03")) continue;
-      } else if (!azCompany) {
-        // Arizona-based companies only (Ethan, Oct 2026).
-        continue;
       }
       rows.push({
         form: s.form ?? "",
@@ -206,7 +237,7 @@ export async function ingestFilings(): Promise<number> {
         filingDate: s.file_date ?? "",
         accession: s.adsh ?? "",
         category: q.category,
-        summary: s.file_description ?? "",
+        summary: filingSummary(s),
         url: cik && adsh ? `https://www.sec.gov/Archives/edgar/data/${cik}/${adsh}/` : "",
         azCompany,
         majorEvent: q.category === "bankruptcy",
@@ -214,7 +245,13 @@ export async function ingestFilings(): Promise<number> {
     }
     total += await upsertFilings(rows);
   }
-  await logSync("filings", "ok", total, `EDGAR: ${EDGAR_QUERIES.length} queries, 30d window, AZ-based filers via biz_states`);
+  const purged = await purgeNonAzFilings().catch(() => 0);
+  await logSync(
+    "filings",
+    "ok",
+    total,
+    `EDGAR: ${EDGAR_QUERIES.length} queries, 30d window, AZ-based filers via biz_states${purged ? ` · purged ${purged} non-AZ rows` : ""}`
+  );
   return total;
 }
 

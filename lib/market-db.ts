@@ -367,11 +367,21 @@ export async function upsertFilings(rows: FilingInput[]): Promise<number> {
               ${r.azCompany ?? false}, ${r.majorEvent ?? false})
       ON CONFLICT (accession) DO UPDATE SET
         az_company = CASE WHEN NOT mi_filings.az_company THEN EXCLUDED.az_company ELSE mi_filings.az_company END,
-        major_event = CASE WHEN NOT mi_filings.major_event THEN EXCLUDED.major_event ELSE mi_filings.major_event END
+        major_event = CASE WHEN NOT mi_filings.major_event THEN EXCLUDED.major_event ELSE mi_filings.major_event END,
+        summary = CASE WHEN EXCLUDED.summary <> '' THEN EXCLUDED.summary ELSE mi_filings.summary END
       RETURNING (xmax = 0) AS inserted`;
     if (res[0]?.inserted) added++;
   }
   return added;
+}
+
+/** Filings are Arizona-based companies only (Ethan, Oct 2026): rows whose
+ * filer isn't AZ-based are removed so the table can never drift back to
+ * national filers. Big non-AZ companies surface via news / Major Events. */
+export async function purgeNonAzFilings(): Promise<number> {
+  await ensureSchema();
+  const res = (await sql()`DELETE FROM mi_filings WHERE az_company IS NOT TRUE`) as unknown as { count?: number };
+  return res.count ?? 0;
 }
 
 export async function getFilings(category?: string, status?: string): Promise<MiFiling[]> {
