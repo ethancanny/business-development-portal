@@ -190,7 +190,11 @@ function Section({
         </span>
         <span className="text-xl leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
       </button>
-      {open && <div className="pt-4">{children}</div>}
+      {open && (
+        <div className="pt-4 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0">
+          {children}
+        </div>
+      )}
     </section>
   );
 }
