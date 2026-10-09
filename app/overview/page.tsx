@@ -283,64 +283,6 @@ export default function Overview() {
             </span>
           ))}
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-              New targets
-            </p>
-            {weekly.newDeals.length === 0 ? (
-              <p className="text-sm text-slate-400 dark:text-white/40">None added this period.</p>
-            ) : (
-              <ul className="space-y-1">
-                {weekly.newDeals.slice(0, 5).map((d) => (
-                  <li key={d.id} className="flex items-baseline justify-between gap-2 text-sm">
-                    <Link
-                      href={`/pipeline/${d.id}`}
-                      className="truncate font-medium text-[#0d1f3c] hover:underline dark:text-white"
-                    >
-                      {d.companyName}
-                    </Link>
-                    <span className="shrink-0 text-xs text-slate-400 dark:text-white/40">
-                      {d.stage}
-                      {d.dealValue ? ` · ${fmtMoney(d.dealValue)}` : ""}
-                    </span>
-                  </li>
-                ))}
-                {weekly.newDeals.length > 5 && (
-                  <li className="text-xs text-slate-400 dark:text-white/40">
-                    +{weekly.newDeals.length - 5} more
-                  </li>
-                )}
-              </ul>
-            )}
-          </div>
-          <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-              New operators
-            </p>
-            {weekly.newExecs.length === 0 ? (
-              <p className="text-sm text-slate-400 dark:text-white/40">None added this period.</p>
-            ) : (
-              <ul className="space-y-1">
-                {weekly.newExecs.slice(0, 5).map((e) => (
-                  <li key={e.id} className="flex items-baseline justify-between gap-2 text-sm">
-                    <span className="truncate font-medium text-[#0d1f3c] dark:text-white">
-                      {e.name}
-                    </span>
-                    <span className="shrink-0 text-xs text-slate-400 dark:text-white/40">
-                      {e.currentTitle || e.targetRole || ""}
-                    </span>
-                  </li>
-                ))}
-                {weekly.newExecs.length > 5 && (
-                  <li className="text-xs text-slate-400 dark:text-white/40">
-                    +{weekly.newExecs.length - 5} more
-                  </li>
-                )}
-              </ul>
-            )}
-          </div>
-        </div>
       </div>
 
       {staleDeals.length > 0 && (
