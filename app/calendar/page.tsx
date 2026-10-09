@@ -7,12 +7,15 @@ import type { CalendarEvent } from "@/lib/calendar-db";
 
 /**
  * Calendar (Ethan, Oct 9, 2026): Ethan's Outlook calendar mirrored into the
- * portal, editable in place. The portal holds no Microsoft credentials —
- * edits queue in the calendar outbox and the 15-minute sync applies them to
- * Outlook (and pulls Outlook's changes back). Titles open the real Outlook
- * event; locations open Maps (meeting URLs render as short Zoom/Teams/Online
- * labels). Dismiss (×) only hides an event from the Weekly summary; Delete
- * removes it from Outlook itself on the next sync.
+ * portal, editable in place. Dual mode: once Ethan connects his Microsoft
+ * account (Graph integration), writes go straight to Outlook and Outlook
+ * changes arrive via webhook in seconds, attendees included; otherwise
+ * edits queue in the calendar outbox and the 15-minute sync applies them.
+ * Titles open the real Outlook event; locations open Maps (meeting URLs
+ * render as short Zoom/Teams/Online labels). Dismiss (×) only hides an
+ * event from the Weekly summary; Delete removes it from Outlook itself.
+ * The page live-refreshes (45s poll + on focus) so webhook changes show
+ * without a manual reload.
  */
 
 interface OutboxItem {
@@ -35,9 +38,23 @@ interface Draft {
   start: string;
   end: string;
   location: string;
+  attendees: string; // create: invite list · edit: emails to ADD (comma-separated)
 }
 
-const emptyDraft: Draft = { title: "", date: "", start: "09:00", end: "09:30", location: "" };
+const emptyDraft: Draft = {
+  title: "",
+  date: "",
+  start: "09:00",
+  end: "09:30",
+  location: "",
+  attendees: "",
+};
+
+const parseEmails = (text: string): string[] =>
+  text
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter((s) => s.includes("@"));
 
 const locText = (loc: string): string => {
   if (!loc) return "";
@@ -84,6 +101,7 @@ const draftOf = (e: CalendarEvent): Draft => ({
   start: e.allDay ? "09:00" : e.startsAt.slice(11, 16) || "09:00",
   end: e.endsAt ? e.endsAt.slice(11, 16) || "09:30" : "09:30",
   location: /^https?:\/\//i.test(e.location) ? "" : e.location,
+  attendees: "",
 });
 
 const payloadOf = (d: Draft) => ({
@@ -102,6 +120,7 @@ export default function CalendarPage() {
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [editingId, setEditingId] = useState<string>("");
   const [editDraft, setEditDraft] = useState<Draft>(emptyDraft);
+  const [editRemoved, setEditRemoved] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [ms, setMs] = useState<MsStatus | null>(null);
 
@@ -163,6 +182,26 @@ export default function CalendarPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
+  // Live refresh: webhook-driven changes appear without a manual reload.
+  useEffect(() => {
+    const tick = () => {
+      loadEvents().catch(() => null);
+      loadPending().catch(() => null);
+    };
+    const id = window.setInterval(tick, 45000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    window.addEventListener("focus", tick);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", tick);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const queueIntent = async (
     action: "create" | "update" | "delete",
     eventId: string,
@@ -217,7 +256,10 @@ export default function CalendarPage() {
       setNotice("Give the event a title and a date first.");
       return;
     }
-    await queueIntent("create", "", payloadOf(draft));
+    await queueIntent("create", "", {
+      ...payloadOf(draft),
+      attendees: parseEmails(draft.attendees),
+    });
     setShowNew(false);
     setDraft(emptyDraft);
   };
@@ -227,12 +269,20 @@ export default function CalendarPage() {
       setNotice("Give the event a title and a date first.");
       return;
     }
-    await queueIntent("update", e.eventId, payloadOf(editDraft));
+    await queueIntent("update", e.eventId, {
+      ...payloadOf(editDraft),
+      addAttendees: parseEmails(editDraft.attendees),
+      removeAttendees: editRemoved,
+    });
     setEditingId("");
+    setEditRemoved([]);
   };
 
   const submitDelete = async (e: CalendarEvent) => {
-    if (!window.confirm(`Delete "${e.title}" from Outlook on the next sync?`)) return;
+    const prompt = ms?.connected
+      ? `Delete "${e.title}" from Outlook?`
+      : `Delete "${e.title}" from Outlook on the next sync?`;
+    if (!window.confirm(prompt)) return;
     await queueIntent("delete", e.eventId, { title: e.title });
     setEditingId("");
   };
@@ -321,6 +371,12 @@ export default function CalendarPage() {
         placeholder="Location (optional)"
         className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-[#0d1f3c] outline-none placeholder:text-slate-300 focus:border-[#b8975a] dark:border-white/10 dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/30 sm:col-span-2"
       />
+      <input
+        value={d.attendees}
+        onChange={(e) => set({ ...d, attendees: e.target.value })}
+        placeholder="Attendee emails, comma-separated (optional)"
+        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-[#0d1f3c] outline-none placeholder:text-slate-300 focus:border-[#b8975a] dark:border-white/10 dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/30 sm:col-span-2"
+      />
     </div>
   );
 
@@ -397,6 +453,7 @@ export default function CalendarPage() {
             onClick={() => {
               setEditingId(editing ? "" : e.eventId);
               setEditDraft(draftOf(e));
+              setEditRemoved([]);
             }}
             className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500 transition hover:border-[#b8975a]/60 hover:text-[#8a6f3e] dark:border-white/10 dark:text-white/60"
           >
@@ -427,6 +484,41 @@ export default function CalendarPage() {
         </div>
         {editing && (
           <div className="mt-3 border-t border-slate-200/70 pt-3 dark:border-white/10">
+            {e.attendees.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-white/35">
+                  Attending
+                </span>
+                {e.attendees.map((a) => {
+                  const removed = editRemoved.includes(a);
+                  return (
+                    <span
+                      key={a}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${
+                        removed
+                          ? "border-red-200 bg-red-50 text-red-400 line-through dark:border-red-500/30 dark:bg-red-500/10"
+                          : "border-slate-200 bg-white text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70"
+                      }`}
+                    >
+                      {a}
+                      {ms?.connected && (
+                        <button
+                          onClick={() =>
+                            setEditRemoved((prev) =>
+                              removed ? prev.filter((x) => x !== a) : [...prev, a]
+                            )
+                          }
+                          title={removed ? "Undo removal" : "Remove attendee"}
+                          className="font-bold leading-none text-slate-400 transition hover:text-red-500"
+                        >
+                          {removed ? "↩" : "×"}
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             {formFields(editDraft, setEditDraft)}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <button
@@ -450,7 +542,7 @@ export default function CalendarPage() {
             </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
               {ms?.connected
-                ? "Changes save straight to Outlook. Attendees can't be changed here — edit those in Outlook."
+                ? "Changes save straight to Outlook, attendees included — remove someone with the × on their chip, or add people by email in the Attendees field."
                 : "Changes apply to Outlook on the next sync (~15 min). Attendees can't be changed here — edit those in Outlook."}
             </p>
           </div>
@@ -483,7 +575,11 @@ export default function CalendarPage() {
       <PageHero
         eyebrow="Canny Capital Partners"
         title="Calendar"
-        subtitle="Your Outlook calendar, mirrored into the portal — syncs every few minutes"
+        subtitle={
+          ms?.connected
+            ? "Your Outlook calendar, live in the portal — edits sync both ways in seconds"
+            : "Your Outlook calendar, mirrored into the portal — syncs every few minutes"
+        }
       />
       <div className="mx-auto max-w-[1100px] px-4 py-6 sm:px-6">
         {ms && !ms.connected && ms.configured && (
@@ -558,7 +654,7 @@ export default function CalendarPage() {
             </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
               {ms?.connected
-                ? "New events are created in Outlook instantly. If the title names an operator or business in the pipeline, a note is logged on their profile automatically."
+                ? "New events are created in Outlook instantly, and anyone listed in Attendees gets the invite. If the title names an operator or business in the pipeline, a note is logged on their profile automatically."
                 : "New events are created in Outlook on the next sync (~15 min). If the title names an operator or business in the pipeline, a note is logged on their profile automatically."}
             </p>
           </div>

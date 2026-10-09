@@ -22,6 +22,12 @@ export async function POST(req: NextRequest) {
     endsAt: String(p.endsAt ?? ""),
     location: String(p.location ?? ""),
   };
+  const addAttendees = Array.isArray(p.addAttendees)
+    ? p.addAttendees.map((a) => String(a))
+    : [];
+  const removeAttendees = Array.isArray(p.removeAttendees)
+    ? p.removeAttendees.map((a) => String(a))
+    : [];
   if (!eventId || !draft.title || !draft.startsAt) {
     return NextResponse.json(
       { error: "eventId, title and startsAt required" },
@@ -29,7 +35,7 @@ export async function POST(req: NextRequest) {
     );
   }
   try {
-    await updateGraphEvent(eventId, draft);
+    await updateGraphEvent(eventId, draft, { addAttendees, removeAttendees });
     return NextResponse.json({ ok: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

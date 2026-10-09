@@ -4,11 +4,18 @@ import { createGraphEvent, msConnected, type EventDraft } from "@/lib/microsoft"
 
 function draftOf(body: Record<string, unknown>): EventDraft {
   const p = (body.payload ?? body) as Record<string, unknown>;
+  const rawAtt = p.attendees;
+  const attendeeEmails = Array.isArray(rawAtt)
+    ? rawAtt.map((a) => String(a))
+    : typeof rawAtt === "string"
+      ? rawAtt.split(/[,;]/)
+      : [];
   return {
     title: String(p.title ?? "").trim(),
     startsAt: String(p.startsAt ?? ""),
     endsAt: String(p.endsAt ?? ""),
     location: String(p.location ?? ""),
+    attendeeEmails,
   };
 }
 

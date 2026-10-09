@@ -351,22 +351,40 @@ export interface EventDraft {
   startsAt: string; // ISO with -07:00 offset
   endsAt: string;
   location: string;
+  attendeeEmails?: string[]; // create: full attendee list (emails)
 }
 
-function graphBody(d: EventDraft): Record<string, unknown> {
+interface GraphAttendee {
+  emailAddress: { address: string; name?: string };
+  type: string;
+}
+
+function toGraphAttendees(emails: string[]): GraphAttendee[] {
+  return emails
+    .map((e) => e.trim())
+    .filter((e) => e.includes("@"))
+    .map((address) => ({ emailAddress: { address }, type: "required" }));
+}
+
+function graphBody(
+  d: EventDraft,
+  attendees?: GraphAttendee[]
+): Record<string, unknown> {
   const strip = (iso: string) => iso.replace(/-07:00$/, "").replace(/Z$/, "");
-  return {
+  const body: Record<string, unknown> = {
     subject: d.title,
     start: { dateTime: strip(d.startsAt), timeZone: TZ },
     end: { dateTime: strip(d.endsAt || d.startsAt), timeZone: TZ },
     location: { displayName: d.location ?? "" },
   };
+  if (attendees !== undefined) body.attendees = attendees;
+  return body;
 }
 
 export async function createGraphEvent(d: EventDraft): Promise<CalendarEvent | null> {
   const g = (await graph("/me/events", undefined, {
     method: "POST",
-    body: JSON.stringify(graphBody(d)),
+    body: JSON.stringify(graphBody(d, toGraphAttendees(d.attendeeEmails ?? []))),
   })) as GraphEvent;
   const ev = toCalendarEvent(g);
   if (ev) {
@@ -376,10 +394,41 @@ export async function createGraphEvent(d: EventDraft): Promise<CalendarEvent | n
   return ev;
 }
 
-export async function updateGraphEvent(eventId: string, d: EventDraft): Promise<void> {
+export async function updateGraphEvent(
+  eventId: string,
+  d: EventDraft,
+  opts?: { addAttendees?: string[]; removeAttendees?: string[] }
+): Promise<void> {
+  let attendees: GraphAttendee[] | undefined;
+  const adds = opts?.addAttendees ?? [];
+  const removes = (opts?.removeAttendees ?? []).map((s) => s.toLowerCase());
+  if (adds.length > 0 || removes.length > 0) {
+    // PATCH replaces the attendee list, so merge against the live event.
+    const current = (await graph(
+      `/me/events/${encodeURIComponent(eventId)}?$select=attendees`
+    )) as GraphEvent;
+    const kept: GraphAttendee[] = (current.attendees ?? [])
+      .filter((a) => {
+        const addr = (a.emailAddress?.address ?? "").toLowerCase();
+        const name = (a.emailAddress?.name ?? "").toLowerCase();
+        return !removes.includes(addr) && !removes.includes(name);
+      })
+      .map((a) => ({
+        emailAddress: {
+          address: a.emailAddress?.address ?? "",
+          name: a.emailAddress?.name,
+        },
+        type: "required",
+      }));
+    const seen = new Set(kept.map((a) => a.emailAddress.address.toLowerCase()));
+    for (const extra of toGraphAttendees(adds)) {
+      if (!seen.has(extra.emailAddress.address.toLowerCase())) kept.push(extra);
+    }
+    attendees = kept;
+  }
   await graph(`/me/events/${encodeURIComponent(eventId)}`, undefined, {
     method: "PATCH",
-    body: JSON.stringify(graphBody(d)),
+    body: JSON.stringify(graphBody(d, attendees)),
   });
   const g = (await graph(`/me/events/${encodeURIComponent(eventId)}?$select=subject,start,end,location,attendees,webLink,isAllDay`)) as GraphEvent;
   const ev = toCalendarEvent(g);
