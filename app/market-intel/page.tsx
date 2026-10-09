@@ -179,14 +179,28 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className="mb-6">
+    <section
+      className={`-mx-3 mb-6 rounded-2xl px-3 transition-colors duration-200 ${
+        open ? "bg-[#0d1f3c]/[0.05] pb-4 dark:bg-white/[0.05]" : ""
+      }`}
+    >
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 border-b-2 border-[#b8975a]/50 pb-2 text-left"
+        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg border-b-2 px-2 pb-2 text-left transition-colors duration-200 hover:bg-[#0d1f3c]/[0.05] dark:hover:bg-white/[0.06] ${
+          open
+            ? "border-[#b8975a] bg-[#0d1f3c]/[0.06] dark:bg-white/[0.07]"
+            : "border-[#b8975a]/50"
+        }`}
       >
         <span>
-          <span className="block text-lg font-bold text-[#0d1f3c] dark:text-white">{title}</span>
+          <span
+            className={`block text-lg font-bold ${
+              open ? "text-[#8a6f3c] dark:text-[#d4b37a]" : "text-[#0d1f3c] dark:text-white"
+            }`}
+          >
+            {title}
+          </span>
           {sub && <span className="block text-xs text-slate-500 dark:text-white/40">{sub}</span>}
         </span>
         <span className="text-xl leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
@@ -214,13 +228,25 @@ function SubSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="mb-5 border-t-2 border-slate-400 pt-4 dark:border-white/30">
+    <div
+      className={`-mx-3 mb-5 rounded-xl border-t-2 border-slate-400 px-3 pt-4 transition-colors duration-200 dark:border-white/30 ${
+        open ? "bg-[#0d1f3c]/[0.04] pb-3 dark:bg-white/[0.04]" : ""
+      }`}
+    >
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 pb-1.5 text-left"
+        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 hover:bg-[#0d1f3c]/[0.05] dark:hover:bg-white/[0.06] ${
+          open ? "bg-[#0d1f3c]/[0.06] dark:bg-white/[0.07]" : ""
+        }`}
       >
-        <span className="text-base font-bold text-[#0d1f3c] dark:text-white">{title}</span>
+        <span
+          className={`text-base font-bold ${
+            open ? "text-[#8a6f3c] dark:text-[#d4b37a]" : "text-[#0d1f3c] dark:text-white"
+          }`}
+        >
+          {title}
+        </span>
         <span className="text-lg leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
       </button>
       {open && <div className="pt-3">{children}</div>}
@@ -2226,14 +2252,6 @@ export default function MarketIntelPage() {
 
           </div>
         </Section>
-
-        {/* TEMP diagnostic readout (Oct 9, 2026): shows the row key the page
-            registers as hovered/selected. Remove after diagnosis. */}
-        {(hovRow || selRow) && (
-          <div className="fixed bottom-3 left-3 z-50 rounded-lg bg-black/85 px-3 py-1.5 text-xs font-medium text-white shadow-lg">
-            hover: {hovRow || "—"} · selected: {selRow || "—"}
-          </div>
-        )}
 
         {/* Sync status */}
         {syncLog.length > 0 && (
