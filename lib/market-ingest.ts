@@ -1697,6 +1697,56 @@ const SUSB_SECTORS: { naics: string; slug: string; name: string }[] = [
   { naics: "62", slug: "62", name: "Health Care & Social Assistance" },
 ];
 
+/** Curated sub-sectors for the per-industry profile breakouts (Ethan,
+ * Oct 2026). AZ bases come from CBP at these exact NAICS levels; the
+ * revenue mix comes from the SUSB US receipts-size file (6-digit rows,
+ * prefix-aggregated for the 4-digit codes). Mirrored on the client in
+ * components/SizeProfileRows.tsx (SUBSECTORS_BY_PARENT). */
+const SUSB_SUBSECTORS: { parent: string; naics: string; name: string }[] = [
+  { parent: "3364", naics: "336411", name: "Aircraft Manufacturing" },
+  { parent: "3364", naics: "336412", name: "Aircraft Engines & Engine Parts" },
+  { parent: "3364", naics: "336413", name: "Other Aircraft Parts & Equipment" },
+  { parent: "3364", naics: "336414", name: "Guided Missiles & Space Vehicles" },
+  { parent: "3364", naics: "336415", name: "Missile & Space Propulsion Units/Parts" },
+  { parent: "3364", naics: "336419", name: "Other Missile & Space Vehicle Parts" },
+  { parent: "62", naics: "6211", name: "Offices of Physicians" },
+  { parent: "62", naics: "6212", name: "Offices of Dentists" },
+  { parent: "62", naics: "6213", name: "Other Health Practitioners" },
+  { parent: "62", naics: "6214", name: "Outpatient Care Centers" },
+  { parent: "62", naics: "6215", name: "Medical Laboratories & Imaging" },
+  { parent: "62", naics: "6216", name: "Home Health Care Services" },
+  { parent: "62", naics: "6221", name: "General Medical & Surgical Hospitals" },
+  { parent: "62", naics: "6222", name: "Psychiatric & Substance Abuse Hospitals" },
+  { parent: "62", naics: "6223", name: "Specialty Hospitals" },
+  { parent: "62", naics: "6231", name: "Nursing Care Facilities" },
+  { parent: "62", naics: "6233", name: "Continuing Care & Assisted Living" },
+  { parent: "62", naics: "6244", name: "Child Care Services" },
+  { parent: "3133", naics: "334413", name: "Semiconductor & Circuit Manufacturing" },
+  { parent: "3133", naics: "334418", name: "Printed Circuit Assembly" },
+  { parent: "3133", naics: "334511", name: "Navigation & Guidance Instruments" },
+  { parent: "3133", naics: "333242", name: "Semiconductor Machinery Manufacturing" },
+  { parent: "3133", naics: "332710", name: "Machine Shops" },
+  { parent: "3133", naics: "332999", name: "Misc. Fabricated Metal Products" },
+  { parent: "3133", naics: "339112", name: "Surgical & Medical Instruments" },
+  { parent: "3133", naics: "333511", name: "Industrial Mold Manufacturing" },
+  { parent: "3133", naics: "335929", name: "Other Communication & Energy Wire/Cable" },
+  { parent: "3133", naics: "326199", name: "Other Plastics Products" },
+  { parent: "23", naics: "236115", name: "New Single-Family Housing Construction" },
+  { parent: "23", naics: "236220", name: "Commercial & Institutional Building Construction" },
+  { parent: "23", naics: "237110", name: "Water, Sewer & Pipeline Construction" },
+  { parent: "23", naics: "237310", name: "Highway, Street & Bridge Construction" },
+  { parent: "23", naics: "237990", name: "Other Heavy & Civil Engineering Construction" },
+  { parent: "23", naics: "238110", name: "Poured Concrete Contractors" },
+  { parent: "23", naics: "238210", name: "Electrical Contractors" },
+  { parent: "23", naics: "238220", name: "Plumbing & HVAC Contractors" },
+  { parent: "23", naics: "238310", name: "Drywall & Insulation Contractors" },
+  { parent: "23", naics: "238320", name: "Painting & Wall Covering Contractors" },
+  { parent: "23", naics: "238910", name: "Site Preparation Contractors" },
+];
+const SUSB_SUB_NAICS = new Set(SUSB_SUBSECTORS.map((s) => s.naics));
+/** Receipts-class edges in $K; class i (SUSB class i+2) spans [edges[i], edges[i+1]). */
+const SUSB_CLASS_EDGES_K = [0, 100, 500, 1000, 2500, 5000, 7500, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 50000, 75000, 100000];
+
 async function fetchSusbWorkbook(year: number, file: string): Promise<XLSX.WorkBook | null> {
   try {
     const res = await fetch(`https://www2.census.gov/programs-surveys/susb/tables/${year}/${file}_${year}.xlsx`);
@@ -1821,6 +1871,100 @@ export async function ingestSusbSizes(): Promise<number> {
     }
   }
 
+  // --- Sub-sector breakouts: CBP AZ bases × SUSB US receipts mix ---
+  const subCbp = new Map<string, { parent: string; estab: number; emp: number | null }>();
+  const qcewSub = new Map<string, { estab: number; emp: number; year: number }>();
+  const censusKey = process.env.CENSUS_KEY;
+  if (censusKey && rHdr >= 0) {
+    // US receipts-class distribution per sub-sector code.
+    const subDist = new Map<string, Map<number, number>>();
+    for (const r of rcptRows.slice(rHdr + 1)) {
+      const naics = String(r[0]);
+      if (!/^\d{6}$/.test(naics)) continue;
+      const sub = SUSB_SUBSECTORS.find((s) => naics === s.naics || (s.naics.length < 6 && naics.startsWith(s.naics)));
+      if (!sub) continue;
+      const clsNum = Number(String(r[2]).slice(0, 2));
+      if (!Number.isFinite(clsNum) || clsNum < 2 || clsNum > 18) continue;
+      if (!subDist.has(sub.naics)) subDist.set(sub.naics, new Map());
+      const m = subDist.get(sub.naics)!;
+      m.set(clsNum, (m.get(clsNum) ?? 0) + (Number(r[3]) || 0));
+    }
+    // Sector EBITDA margins (stored by the Damodaran ingest, which runs
+    // earlier in the daily job list) for the sub-sector EBITDA-band counts.
+    const marginObs = await getIndicatorSeries(["3364", "62", "3133", "23"].map((s) => `DAMO_EBITDA_MARGIN_${s}`)).catch(() => []);
+    const marginOf = (parent: string): number | null => {
+      const s = marginObs.filter((o) => o.seriesId === `DAMO_EBITDA_MARGIN_${parent}` && o.value !== null).sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+      const v = s.length ? s[s.length - 1].value : null;
+      return v !== null && v > 1 && v < 60 ? v / 100 : null;
+    };
+    // Latest published CBP year (probe with Construction, as sector_counts).
+    const fetchCbp = async (yr: number, code: string) => {
+      const res = await fetch(
+        `https://api.census.gov/data/${yr}/cbp?get=NAME,ESTAB,EMP&for=state:04&NAICS2017=${encodeURIComponent(code)}&key=${censusKey}`
+      );
+      if (!res.ok) return null;
+      const data = (await res.json()) as string[][];
+      if (!Array.isArray(data) || data.length < 2) return null;
+      const get = (c: string) => {
+        const i = data[0].indexOf(c);
+        return i >= 0 && data[1][i] ? Number(data[1][i]) : null;
+      };
+      return { estab: get("ESTAB"), emp: get("EMP") };
+    };
+    let cbpYear = 0;
+    for (const y of [thisYear - 2, thisYear - 3, thisYear - 4]) {
+      try {
+        if (await fetchCbp(y, "23")) {
+          cbpYear = y;
+          break;
+        }
+      } catch {
+        continue;
+      }
+    }
+    if (cbpYear) {
+      for (let i = 0; i < SUSB_SUBSECTORS.length; i += 8) {
+        const batch = SUSB_SUBSECTORS.slice(i, i + 8);
+        await Promise.all(
+          batch.map(async (sub) => {
+            try {
+              const v = await fetchCbp(cbpYear, sub.naics);
+              if (!v || !v.estab) return;
+              const estabN: number = v.estab;
+              subCbp.set(sub.naics, { parent: sub.parent, estab: estabN, emp: v.emp });
+              rows.push({ source: "census", seriesId: `CBP_AZ_SUB_${sub.naics}_ESTAB`, title: `${sub.name} — AZ Establishments (CBP)`, units: "Establishments", frequency: "Annual", obsDate: `${cbpYear}-01-01`, value: v.estab });
+              if (v.emp !== null)
+                rows.push({ source: "census", seriesId: `CBP_AZ_SUB_${sub.naics}_EMP`, title: `${sub.name} — AZ Employment (CBP)`, units: "Employees", frequency: "Annual", obsDate: `${cbpYear}-01-01`, value: v.emp });
+              push(`SUSB_AZ_SUB_${sub.naics}_FIRMS`, `${sub.name} — AZ firms (CBP base)`, "Firms", v.estab);
+              const dist = subDist.get(sub.naics);
+              if (!dist) return;
+              const dTot = Array.from(dist.values()).reduce((a, b) => a + b, 0);
+              if (!dTot) return;
+              const counts = SUSB_CLASS_EDGES_K.map((_, ci) => ((dist.get(ci + 2) ?? 0) / dTot) * estabN);
+              const bandCount = counts.slice(5, 9).reduce((a, b) => a + b, 0);
+              push(`SUSB_AZ_SUB_${sub.naics}_BAND`, `${sub.name} — AZ firms in $5–20M revenue band (modeled)`, "Firms (modeled)", bandCount);
+              const mg = marginOf(sub.parent);
+              if (mg) {
+                const revLoK = 500 / mg;
+                const revHiK = 2000 / mg;
+                let est = 0;
+                for (let ci = 0; ci < 17; ci++) {
+                  const lo = SUSB_CLASS_EDGES_K[ci];
+                  const hi = ci < 16 ? SUSB_CLASS_EDGES_K[ci + 1] : lo * 10;
+                  if (revHiK <= lo || revLoK >= hi) continue;
+                  est += counts[ci] * Math.max(0, Math.log(Math.min(hi, revHiK) / Math.max(lo, revLoK)) / Math.log(hi / lo));
+                }
+                push(`SUSB_AZ_SUB_${sub.naics}_EBD`, `${sub.name} — AZ firms in $500K–$2M EBITDA band (modeled)`, "Firms (modeled)", est);
+              }
+            } catch {
+              return;
+            }
+          })
+        );
+      }
+    }
+  }
+
   // --- BLS QCEW cross-reference (independent source) ---
   const qcew = new Map<string, { estab: number; emp: number; year: number }>();
   for (const y of [thisYear - 1, thisYear - 2]) {
@@ -1842,13 +1986,23 @@ export async function ingestSusbSizes(): Promise<number> {
       for (const line of lines.slice(1)) {
         const c = parseCsvLine(line);
         if (c[ix("own_code")] !== "5") continue;
-        const w = want[c[ix("industry_code")]];
-        if (!w || c[ix("agglvl_code")] !== w.agg) continue;
-        qcew.set(w.slug, {
-          estab: Number(c[ix("annual_avg_estabs")]) || 0,
-          emp: Number(c[ix("annual_avg_emplvl")]) || 0,
-          year: y,
-        });
+        const code = c[ix("industry_code")];
+        const w = want[code];
+        if (w && c[ix("agglvl_code")] === w.agg) {
+          qcew.set(w.slug, {
+            estab: Number(c[ix("annual_avg_estabs")]) || 0,
+            emp: Number(c[ix("annual_avg_emplvl")]) || 0,
+            year: y,
+          });
+          continue;
+        }
+        if (SUSB_SUB_NAICS.has(code) && !qcewSub.has(code)) {
+          qcewSub.set(code, {
+            estab: Number(c[ix("annual_avg_estabs")]) || 0,
+            emp: Number(c[ix("annual_avg_emplvl")]) || 0,
+            year: y,
+          });
+        }
       }
       if (qcew.size) break;
     } catch {
@@ -1859,6 +2013,10 @@ export async function ingestSusbSizes(): Promise<number> {
     const name = slug === "TOTAL" ? "All sectors" : slug === "3364" ? "Aerospace & Defense" : (SUSB_SECTORS.find((s) => s.slug === slug)?.name ?? slug);
     rows.push({ source: "bls", seriesId: `QCEW_AZ_${slug}_ESTAB`, title: `QCEW — AZ ${name} establishments`, units: "Establishments", frequency: "Annual", obsDate: `${q.year}-01-01`, value: q.estab });
     rows.push({ source: "bls", seriesId: `QCEW_AZ_${slug}_EMP`, title: `QCEW — AZ ${name} employment`, units: "Employees", frequency: "Annual", obsDate: `${q.year}-01-01`, value: q.emp });
+  }
+  for (const [naics, q] of Array.from(qcewSub.entries())) {
+    const sub = SUSB_SUBSECTORS.find((s) => s.naics === naics);
+    rows.push({ source: "bls", seriesId: `QCEW_AZ_SUB_${naics}_ESTAB`, title: `QCEW — AZ ${sub?.name ?? naics} establishments`, units: "Establishments", frequency: "Annual", obsDate: `${q.year}-01-01`, value: q.estab });
   }
 
   const total = await upsertIndicatorObs(rows);
@@ -1886,9 +2044,33 @@ export async function ingestSusbSizes(): Promise<number> {
       `${slug}: CBP ${cbp.v.toLocaleString()} (${cbp.y}) · SUSB ${susb ? susb.toLocaleString() : "n/a"} (${year}) · QCEW ${q.estab.toLocaleString()} (${q.year}, ${dq >= 0 ? "+" : ""}${dq.toFixed(0)}% vs CBP)`
     );
   }
+  // Sub-sector reconciliation: summed CBP sub-sector establishments vs the
+  // same codes summed from QCEW (like-for-like), plus parent coverage.
+  const coverage: string[] = [];
+  for (const slug of ["23", "3133", "62", "3364"]) {
+    let cbpSum = 0;
+    let qSum = 0;
+    for (const [naics, v] of Array.from(subCbp.entries())) {
+      if (v.parent !== slug) continue;
+      cbpSum += v.estab;
+      qSum += qcewSub.get(naics)?.estab ?? 0;
+    }
+    if (!cbpSum) continue;
+    const parent = cbpLatest(slug);
+    if (parent) coverage.push(`${slug} ${Math.round((cbpSum / parent.v) * 100)}%`);
+    if (qSum) {
+      const d = ((qSum - cbpSum) / cbpSum) * 100;
+      parts.push(`subs ${slug}: CBP Σ ${cbpSum.toLocaleString()} vs QCEW Σ ${qSum.toLocaleString()} (${d >= 0 ? "+" : ""}${d.toFixed(0)}%)`);
+    }
+  }
   parts.push("QCEW counts UI reporting units (multi-establishment employers split) — gaps vs CBP are definitional and tracked here");
   await logSync("sector-xcheck", xbad ? "error" : "ok", 0, parts.join(" · "));
-  await logSync("susb_sizes", "ok", total, `SUSB ${year} AZ size profiles + QCEW ${qcew.size ? "cross-reference" : "UNAVAILABLE"}`);
+  await logSync(
+    "susb_sizes",
+    "ok",
+    total,
+    `SUSB ${year} AZ size profiles + QCEW ${qcew.size ? "cross-reference" : "UNAVAILABLE"} · sub-sectors: ${subCbp.size}/${SUSB_SUBSECTORS.length} with AZ establishments${coverage.length ? ` (CBP coverage of parent: ${coverage.join(" · ")})` : ""}`
+  );
   return total;
 }
 
