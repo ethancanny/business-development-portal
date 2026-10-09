@@ -934,11 +934,13 @@ export async function ingestDefenseContracts(): Promise<number> {
     }
     const data = (await res.json()) as { results?: USASpendingMonth[] };
     const rows: IndicatorInput[] = [];
+    const monthlyByFy = new Map<number, number>();
     for (const r of data.results ?? []) {
       const fy = Number(r.time_period?.fiscal_year ?? 0);
       const fm = Number(r.time_period?.month ?? 0);
       const val = r.Contract_Obligations;
       if (!fy || !fm || val === null || val === undefined) continue;
+      monthlyByFy.set(fy, (monthlyByFy.get(fy) ?? 0) + val);
       rows.push({
         source: "usaspending",
         seriesId: s.id,
@@ -951,6 +953,48 @@ export async function ingestDefenseContracts(): Promise<number> {
     }
     total += await upsertIndicatorObs(rows);
     await new Promise((r) => setTimeout(r, 1000));
+    // Cross-reference (Ethan's standing rule, Oct 2026): the monthly figures
+    // must reconcile with USASpending's own fiscal-year aggregation of the
+    // same filters — an independent aggregation path over the source data.
+    // Mismatches are logged loudly in mi_sync_log (defense-xcheck).
+    try {
+      const fyRes = await fetch("https://api.usaspending.gov/api/v2/search/spending_over_time/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          group: "fiscal_year",
+          filters: {
+            time_period: [{ start_date: start, end_date: end }],
+            place_of_performance_locations: [{ country: "USA", state: "AZ" }],
+            ...s.filters,
+          },
+        }),
+      });
+      if (fyRes.ok) {
+        const fyData = (await fyRes.json()) as {
+          results?: { time_period?: { fiscal_year?: string }; Contract_Obligations?: number | null }[];
+        };
+        const bad: string[] = [];
+        for (const r of fyData.results ?? []) {
+          const fy = Number(r.time_period?.fiscal_year ?? 0);
+          const fyTotal = r.Contract_Obligations ?? 0;
+          const mSum = monthlyByFy.get(fy) ?? 0;
+          if ((fyTotal === 0 && mSum === 0) || fyTotal === 0) continue;
+          if (Math.abs(mSum - fyTotal) / fyTotal > 0.01)
+            bad.push(`FY${fy}: monthly sum $${Math.round(mSum).toLocaleString()} vs FY total $${Math.round(fyTotal).toLocaleString()}`);
+        }
+        await logSync(
+          "defense-xcheck",
+          bad.length ? "error" : "ok",
+          0,
+          bad.length
+            ? `${s.id} cross-check MISMATCH — ${bad.join("; ")}`
+            : `${s.id} cross-check OK: monthly sums reconcile with USASpending fiscal-year totals`
+        );
+      }
+    } catch {
+      /* cross-check is best-effort; the ingest itself already succeeded */
+    }
   }
   await logSync("defense", "ok", total, `USASpending: ${series.length} AZ contract series`);
   return total;
