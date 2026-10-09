@@ -17,6 +17,7 @@ import {
   YAxis,
 } from "recharts";
 import PageHero from "@/components/PageHero";
+import SizeProfileRows, { hasSizeProfiles } from "@/components/SizeProfileRows";
 import ValleyDemographics from "@/components/ValleyDemographics";
 import { useTheme } from "@/components/ThemeProvider";
 import { fmtMoney, fmtDate } from "@/lib/format";
@@ -81,6 +82,17 @@ const SPOT_BY_FRED: Record<string, { id: string; venue: string; unit: string; di
   WPU01220101: { id: "SPOT_COTTON", venue: "ICE", unit: "¢/lb", digits: 1 },
 };
 const SPOT_IDS = Object.values(SPOT_BY_FRED).map((s) => s.id).join(",");
+/** SUSB business-size profiles (rendered by components/SizeProfileRows). */
+const SUSB_SLUGS = ["TOTAL", "23", "3133", "62", "3364"];
+const SUSB_IDS = SUSB_SLUGS.flatMap((s) => [
+  `SUSB_AZ_${s}_FIRMS`,
+  `SUSB_AZ_${s}_ESTAB`,
+  `SUSB_AZ_${s}_EMP`,
+  `SUSB_AZ_${s}_RCPT`,
+  `QCEW_AZ_${s}_ESTAB`,
+  ...Array.from({ length: 17 }, (_, i) => `SUSB_AZ_${s}_CLS${String(i + 2).padStart(2, "0")}`),
+]).join(",");
+
 const COUNTY_PERMIT_SERIES = PERMIT_COUNTIES.flatMap((n) => [
   `AZPERMIT_${countySlug(n)}`,
   `AZPERMIT_SF_${countySlug(n)}`,
@@ -336,7 +348,9 @@ export default function MarketIntelPage() {
               "," +
               COMMODITY_IDS +
               "," +
-              SPOT_IDS
+              SPOT_IDS +
+              "," +
+              SUSB_IDS
           ),
           getJSON<MiAcquisition[]>("/api/market/acquisitions?status=all"),
           getJSON<MiFiling[]>("/api/market/filings"),
@@ -618,6 +632,7 @@ export default function MarketIntelPage() {
     const chartRows = Array.from(byMonth.values()).sort((a, b) => String(a.month).localeCompare(String(b.month)));
     return { series, chartRows };
   }, [obs, fiveYearCutoff]);
+
 
   const statCards = useMemo(() => {
     // (Top-row cards are tailored to the acquisition search; the macro
@@ -1889,6 +1904,14 @@ export default function MarketIntelPage() {
                 </table>
               </div>
             </div>
+          )}
+          {hasSizeProfiles(obs) && (
+            <SubSection title="Company Size — Target Bands">
+              <p className="mb-4 text-xs text-slate-500 dark:text-white/40">
+                How many Arizona companies in each focus industry sit in the target bands — <b>$5–20M revenue</b> and an estimated <b>$500K–$2M EBITDA</b> — versus smaller and larger firms. Firm counts are Census SUSB actuals for Arizona; the revenue split applies each industry&apos;s U.S. receipts-size distribution (SUSB doesn&apos;t publish receipts size by state). The EBITDA band converts at each industry&apos;s public-company EBITDA margin (Damodaran) and is an estimate.
+              </p>
+              <SizeProfileRows obs={obs} multiples={multiples} />
+            </SubSection>
           )}
           <SubSection title="Aerospace & Defense">
             <EventStrip items={industryEvents("Aerospace & Defense")} onDismiss={dismissEvent} />
