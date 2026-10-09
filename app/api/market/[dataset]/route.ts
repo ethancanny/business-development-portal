@@ -13,6 +13,7 @@ import {
   setAcquisitionStatus,
   updateAcquisitionSummary,
   updateAcquisitionHeadline,
+  updateAcquisitionIndustry,
   setFilingStatus,
   setWarnStatus,
   setListingStatus,
@@ -105,6 +106,10 @@ export async function POST(
         }
         if (body.id && typeof body.headline === "string" && body.headline.trim()) {
           await updateAcquisitionHeadline(String(body.id), body.headline.trim().slice(0, 300));
+          return NextResponse.json({ ok: true });
+        }
+        if (body.id && typeof body.industry === "string") {
+          await updateAcquisitionIndustry(String(body.id), body.industry.trim().slice(0, 80));
           return NextResponse.json({ ok: true });
         }
         if (body.id && body.status) {

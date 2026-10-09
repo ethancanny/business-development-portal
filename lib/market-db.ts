@@ -326,6 +326,11 @@ export async function updateAcquisitionHeadline(id: string, headline: string): P
   await sql()`UPDATE mi_acquisitions SET headline = ${headline} WHERE id = ${id}`;
 }
 
+export async function updateAcquisitionIndustry(id: string, industry: string): Promise<void> {
+  await ensureSchema();
+  await sql()`UPDATE mi_acquisitions SET industry = ${industry} WHERE id = ${id}`;
+}
+
 /** Remove un-triaged bankruptcy news rows (used to re-ingest with a tighter filter). */
 export async function clearNewBankruptcyNews(): Promise<number> {
   await ensureSchema();
