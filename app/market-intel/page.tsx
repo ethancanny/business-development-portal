@@ -90,6 +90,7 @@ const SUSB_IDS = SUSB_SLUGS.flatMap((s) => [
   `SUSB_AZ_${s}_EMP`,
   `SUSB_AZ_${s}_RCPT`,
   `QCEW_AZ_${s}_ESTAB`,
+  `DAMO_EBITDA_MARGIN_${s}`,
   ...Array.from({ length: 17 }, (_, i) => `SUSB_AZ_${s}_CLS${String(i + 2).padStart(2, "0")}`),
 ]).join(",");
 
@@ -1910,7 +1911,7 @@ export default function MarketIntelPage() {
               <p className="mb-4 text-xs text-slate-500 dark:text-white/40">
                 How many Arizona companies in each focus industry sit in the target bands — <b>$5–20M revenue</b> and an estimated <b>$500K–$2M EBITDA</b> — versus smaller and larger firms. Firm counts are Census SUSB actuals for Arizona; the revenue split applies each industry&apos;s U.S. receipts-size distribution (SUSB doesn&apos;t publish receipts size by state). The EBITDA band converts at each industry&apos;s public-company EBITDA margin (Damodaran) and is an estimate.
               </p>
-              <SizeProfileRows obs={obs} multiples={multiples} />
+              <SizeProfileRows obs={obs} />
             </SubSection>
           )}
           <SubSection title="Aerospace & Defense">
