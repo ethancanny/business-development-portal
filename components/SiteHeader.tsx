@@ -13,6 +13,7 @@ const NAV = [
   { href: "/market-intel", label: "Market Intel" },
 ];
 
+const CALENDAR = { href: "/calendar", label: "Calendar" };
 const AUDIT = { href: "/audit-trail", label: "Audit Trail" };
 
 export default function SiteHeader() {
@@ -82,6 +83,7 @@ export default function SiteHeader() {
           </nav>
         </div>
         <div className="hidden items-center gap-3 md:flex">
+          {navLink(CALENDAR.href, CALENDAR.label)}
           {navLink(AUDIT.href, AUDIT.label)}
           <span className="hidden h-5 w-px bg-[#b8975a]/40 sm:block" />
           {userName && (
@@ -149,6 +151,7 @@ export default function SiteHeader() {
         <nav className="border-t border-[#b8975a]/30 px-4 pb-4 pt-2 md:hidden">
           <div className="flex flex-col gap-1">
             {NAV.map((item) => navLink(item.href, item.label, true))}
+            {navLink(CALENDAR.href, CALENDAR.label, true)}
             {navLink(AUDIT.href, AUDIT.label, true)}
           </div>
           <div className="mt-3 flex items-center gap-2 border-t border-[#b8975a]/30 pt-3">
