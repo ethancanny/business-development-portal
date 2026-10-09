@@ -178,7 +178,7 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className={`mb-6 rounded-2xl px-4 py-4 sm:px-5 ${alt ? "bg-[#b8975a]/[0.08] dark:bg-[#b8975a]/[0.07]" : "bg-slate-900/[0.03] dark:bg-white/[0.02]"}`}>
+    <section className={`mb-6 rounded-2xl px-4 py-4 sm:px-5 ${alt ? "bg-[#b8975a]/[0.08] dark:bg-[#b8975a]/[0.07]" : ""}`}>
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -209,7 +209,7 @@ function SubSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className={`mb-5 rounded-xl px-3 py-3 ${alt ? "bg-[#b8975a]/[0.06] dark:bg-[#b8975a]/[0.05]" : "bg-white/50 dark:bg-white/[0.02]"}`}>
+    <div className={`mb-5 rounded-xl px-3 py-3 ${alt ? "bg-[#b8975a]/[0.06] dark:bg-[#b8975a]/[0.05]" : ""}`}>
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
