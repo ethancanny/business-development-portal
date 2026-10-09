@@ -122,30 +122,10 @@ const EDGAR_QUERIES: { category: "acquisition" | "form_d" | "expansion" | "bankr
   { category: "bankruptcy", q: '"bankruptcy" OR "chapter 11"', forms: "8-K", national: true },
 ];
 
-/** CIK -> { business state, exchange-listed? } via EDGAR submissions API, cached per run. */
-const cikInfoCache = new Map<string, { state: string; listed: boolean }>();
-async function getCikInfo(cik: string): Promise<{ state: string; listed: boolean }> {
-  const cached = cikInfoCache.get(cik);
-  if (cached) return cached;
-  const fallback = { state: "", listed: false };
-  if (!cik) return fallback;
-  try {
-    const padded = cik.replace(/^0+/, "").padStart(10, "0");
-    const res = await fetch(`https://data.sec.gov/submissions/CIK${padded}.json`, { headers: EDGAR_UA });
-    if (!res.ok) return fallback;
-    const data = (await res.json()) as {
-      addresses?: { business?: { stateOrCountry?: string } };
-      exchanges?: string[];
-    };
-    const info = {
-      state: (data.addresses?.business?.stateOrCountry ?? "").toUpperCase(),
-      listed: (data.exchanges ?? []).some((e) => /NYSE|Nasdaq/i.test(e)),
-    };
-    cikInfoCache.set(cik, info);
-    return info;
-  } catch {
-    return fallback;
-  }
+/** Exchange-listed? EDGAR puts the ticker in display_names for listed
+ * filers: "Leslie's, Inc. (LESL) (CIK 0001821806)". */
+function isListed(displayName: string): boolean {
+  return /\([A-Z][A-Z0-9.\-]{0,5}\)\s*\(CIK/.test(displayName);
 }
 
 interface EdgarHit {
@@ -156,6 +136,8 @@ interface EdgarHit {
     form?: string;
     file_date?: string;
     file_description?: string;
+    biz_states?: string[];
+    items?: string[];
   };
 }
 
@@ -167,53 +149,57 @@ export async function ingestFilings(): Promise<number> {
     const url =
       `https://efts.sec.gov/LATEST/search-index?q=${encodeURIComponent(q.q)}` +
       `&forms=${encodeURIComponent(q.forms)}&startdt=${start}&enddt=${end}`;
-    const res = await fetch(url, { headers: EDGAR_UA });
-    if (!res.ok) {
-      await logSync("filings", "error", total, `EDGAR ${q.category}: HTTP ${res.status}`);
+    let hits: EdgarHit[] = [];
+    try {
+      const res = await fetch(url, { headers: EDGAR_UA, signal: AbortSignal.timeout(25000) });
+      if (!res.ok) {
+        await logSync("filings", "error", total, `EDGAR ${q.category}: HTTP ${res.status}`);
+        continue;
+      }
+      const data = (await res.json()) as { hits?: { hits?: EdgarHit[] } };
+      hits = data.hits?.hits ?? [];
+    } catch (e) {
+      await logSync("filings", "error", total, `EDGAR ${q.category}: ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
-    const data = (await res.json()) as { hits?: { hits?: EdgarHit[] } };
-    const hits = data.hits?.hits ?? [];
-    // Resolve CIK info concurrently (EDGAR allows ~10 req/sec)
-    const ciks = Array.from(new Set(hits.map((h) => (h._source?.ciks ?? [])[0]?.replace(/^0+/, "") ?? "").filter(Boolean)));
-    await mapLimit(ciks, 5, getCikInfo);
     const rows: FilingInput[] = [];
     for (const h of hits) {
       const s = h._source ?? {};
       const cik = (s.ciks ?? [])[0]?.replace(/^0+/, "") ?? "";
       const adsh = (s.adsh ?? "").replace(/-/g, "");
-      const info = cikInfoCache.get(cik) ?? { state: "", listed: false };
-      // Bankruptcy exception: only exchange-listed filers (sizable public companies).
-      if (q.category === "bankruptcy" && !info.listed) continue;
+      const name = (s.display_names ?? [])[0] ?? "";
+      // Arizona-based? EDGAR tags every search hit with the filer's
+      // business state(s), so no per-company lookup is needed. (The old
+      // design verified each filer with a separate submissions-API call —
+      // up to ~100 per query — and that loop is what timed this ingest out.)
+      const azCompany = (s.biz_states ?? []).some((st) => st.toUpperCase() === "AZ");
+      if (q.category === "bankruptcy") {
+        // National exception: only exchange-listed filers actually
+        // reporting a bankruptcy (8-K Item 1.03). The raw text query
+        // matches 1,500+ boilerplate mentions a month.
+        if (!isListed(name)) continue;
+        if (!(s.items ?? []).includes("1.03")) continue;
+      } else if (!azCompany) {
+        // Arizona-based companies only (Ethan, Oct 2026).
+        continue;
+      }
       rows.push({
         form: s.form ?? "",
-        company: (s.display_names ?? [])[0] ?? "",
+        company: name,
         cik,
         filingDate: s.file_date ?? "",
         accession: s.adsh ?? "",
         category: q.category,
         summary: s.file_description ?? "",
         url: cik && adsh ? `https://www.sec.gov/Archives/edgar/data/${cik}/${adsh}/` : "",
-        azCompany: info.state === "AZ",
+        azCompany,
         majorEvent: q.category === "bankruptcy",
       });
     }
     total += await upsertFilings(rows);
   }
-  await logSync("filings", "ok", total, `EDGAR: ${EDGAR_QUERIES.length} queries, 30d window`);
+  await logSync("filings", "ok", total, `EDGAR: ${EDGAR_QUERIES.length} queries, 30d window, AZ-based filers via biz_states`);
   return total;
-}
-
-/** Run async fn over items with a concurrency limit. */
-async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<unknown>): Promise<void> {
-  const queue = [...items];
-  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
-    while (queue.length) {
-      const item = queue.shift()!;
-      await fn(item);
-    }
-  });
-  await Promise.all(workers);
 }
 
 /* ---------------- Google News RSS (AZ acquisitions) ---------------- */
