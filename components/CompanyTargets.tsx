@@ -18,7 +18,7 @@ export default function CompanyTargets({ sector }: { sector: string }) {
   const rowBg = (c: MiCompany, isFit: boolean) => {
     const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
     if (openId === c.id) return isFit ? "rgba(184,151,90,0.30)" : isDark ? "rgba(184,151,90,0.25)" : "rgba(13,31,60,0.14)";
-    if (hovId === c.id) return isFit ? "rgba(184,151,90,0.22)" : isDark ? "rgba(255,255,255,0.08)" : "rgba(13,31,60,0.055)";
+    if (hovId === c.id) return isFit ? "rgba(184,151,90,0.22)" : isDark ? "rgba(255,255,255,0.08)" : "rgb(230,237,246)";
     return isFit ? "rgba(184,151,90,0.12)" : undefined;
   };
   const [query, setQuery] = useState("");

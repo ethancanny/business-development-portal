@@ -24,7 +24,7 @@ export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples
         : hovRow === key
           ? dark
             ? "rgba(255,255,255,0.08)"
-            : "rgba(13,31,60,0.055)"
+            : "rgb(230,237,246)"
           : undefined,
     transition: "background-color 200ms ease",
   });
@@ -37,7 +37,7 @@ export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples
       selRow === key
         ? "bg-[#0d1f3c]/[0.16] dark:bg-[#b8975a]/[0.22]"
         : hovRow === key
-          ? "bg-[#0d1f3c]/[0.07] dark:bg-white/[0.08]"
+          ? "bg-[#e6edf6] dark:bg-white/[0.08]"
           : ""
     }`,
   });
