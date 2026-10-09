@@ -1,6 +1,6 @@
 "use client";
 
-import type { MiIndicatorObs, MiMultiple } from "@/lib/types";
+import type { MiIndicatorObs } from "@/lib/types";
 
 /** Business-size profiles (Census SUSB): AZ firm counts split into revenue
  * bands, plus a modeled EBITDA-band estimate. Receipts-class edges in $K —
@@ -17,7 +17,7 @@ export function hasSizeProfiles(obs: MiIndicatorObs[]): boolean {
   return obs.some((o) => o.seriesId === "SUSB_AZ_23_FIRMS" && o.value !== null);
 }
 
-export default function SizeProfileRows({ obs, multiples }: { obs: MiIndicatorObs[]; multiples: MiMultiple[] }) {
+export default function SizeProfileRows({ obs }: { obs: MiIndicatorObs[] }) {
   const latestObs = (id: string) => {
     const s = obs
       .filter((o) => o.seriesId === id && o.value !== null)
@@ -25,11 +25,6 @@ export default function SizeProfileRows({ obs, multiples }: { obs: MiIndicatorOb
     return s.length ? s[s.length - 1] : null;
   };
   const latestVal = (id: string): number | null => latestObs(id)?.value ?? null;
-  const median = (xs: number[]): number | null => {
-    if (!xs.length) return null;
-    const s = xs.slice().sort((a, b) => a - b);
-    return s[Math.floor(s.length / 2)];
-  };
   const susbYear = latestObs("SUSB_AZ_23_FIRMS")?.obsDate.slice(0, 4) ?? "";
 
   const profiles = SIZE_INDUSTRIES.map((ind) => {
@@ -54,15 +49,15 @@ export default function SizeProfileRows({ obs, multiples }: { obs: MiIndicatorOb
       revHiM: null as number | null,
     };
     if (!firms || classTotal === 0) return base;
-    const below = classes.slice(0, 6).reduce((a, b) => a + b, 0);
-    const band = classes.slice(6, 10).reduce((a, b) => a + b, 0);
-    const above = classes.slice(10).reduce((a, b) => a + b, 0);
-    // EBITDA margin per industry from Damodaran public comps: EV/Rev ÷ EV/EBITDA.
-    const margins = multiples
-      .filter((m) => m.sizeBand === "Public comps" && m.industry === ind.group && m.evEbitdaMedian && m.evRevenueMedian)
-      .map((m) => (m.evRevenueMedian as number) / (m.evEbitdaMedian as number))
-      .filter((x) => x > 0.01 && x < 0.6);
-    const margin = median(margins);
+    // classes[i] = SUSB receipts class i+2: 02–06 are under $5M, 07–10 are
+    // $5–20M (5–7.5 / 7.5–10 / 10–15 / 15–20), 11–18 are over $20M.
+    const below = classes.slice(0, 5).reduce((a, b) => a + b, 0);
+    const band = classes.slice(5, 9).reduce((a, b) => a + b, 0);
+    const above = classes.slice(9).reduce((a, b) => a + b, 0);
+    // EBITDA margin per sector from Damodaran's margin dataset (EBITDA/Sales,
+    // median across the sector's public industries), stored as % of sales.
+    const marginPct = latestVal(`DAMO_EBITDA_MARGIN_${ind.slug}`);
+    const margin = marginPct !== null && marginPct > 1 && marginPct < 60 ? marginPct / 100 : null;
     let ebitdaCount: number | null = null;
     let revLoM: number | null = null;
     let revHiM: number | null = null;
