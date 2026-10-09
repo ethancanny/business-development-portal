@@ -351,7 +351,8 @@ export default function MarketIntelPage() {
   const [filingCat, setFilingCat] = useState("all");
   const [multMetric, setMultMetric] = useState<"ebitda" | "revenue">("revenue");
   const [multBand, setMultBand] = useState("EV $5–25M");
-  const [sectorView, setSectorView] = useState<"trend" | "share">("trend");
+  const [sectorView, setSectorView] = useState<"trend" | "share">("share");
+  const [hoverSlug, setHoverSlug] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -596,7 +597,7 @@ export default function MarketIntelPage() {
       if (!bySlug.has(m[1])) bySlug.set(m[1], new Map());
       bySlug.get(m[1])!.set(o.obsDate.slice(0, 4), o.value);
     }
-    const slugs = sectorRows.slice(0, 8).map((r) => r.slug);
+    const slugs = sectorRows.filter((r) => r.slug !== "81").slice(0, 8).map((r) => r.slug);
     const yearSet = new Set<string>();
     for (const mp of Array.from(bySlug.values())) for (const y of Array.from(mp.keys())) yearSet.add(y);
     const rows = Array.from(yearSet)
@@ -611,11 +612,17 @@ export default function MarketIntelPage() {
       });
     return { rows, slugs };
   }, [obs, sectorRows]);
-  // Share: current-year mix, top 7 + everything else.
+  // Share: current-year mix, top 7 named sectors + everything else.
+  // "Other Services" (81) folds into All other sectors — both are
+  // catch-alls (Ethan's call). Each slice carries its slugs so hovering a
+  // table row can light up the matching slice.
   const sectorPieData = useMemo(() => {
-    const data = sectorRows.slice(0, 7).map((r) => ({ name: SECTOR_SHORT[r.slug] ?? r.name, value: r.estab }));
-    const rest = sectorRows.slice(7).reduce((s, r) => s + r.estab, 0);
-    if (rest > 0) data.push({ name: "All other sectors", value: rest });
+    const named = sectorRows.filter((r) => r.slug !== "81").slice(0, 7);
+    const namedSlugs = new Set(named.map((r) => r.slug));
+    const data = named.map((r) => ({ name: SECTOR_SHORT[r.slug] ?? r.name, value: r.estab, slugs: [r.slug] }));
+    const restRows = sectorRows.filter((r) => !namedSlugs.has(r.slug));
+    const rest = restRows.reduce((s, r) => s + r.estab, 0);
+    if (rest > 0) data.push({ name: "All other sectors", value: rest, slugs: restRows.map((r) => r.slug) });
     return data;
   }, [sectorRows]);
   // Commodity prices: latest values + a 5-year indexed series (base = 100)
@@ -1409,7 +1416,8 @@ export default function MarketIntelPage() {
                           dataKey={slug}
                           name={SECTOR_SHORT[slug] ?? slug}
                           stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                          strokeWidth={2}
+                          strokeWidth={hoverSlug === slug ? 3.5 : 2}
+                          strokeOpacity={hoverSlug && hoverSlug !== slug ? 0.12 : 1}
                           dot={false}
                           activeDot={{ r: 3.5 }}
                         />
@@ -1423,7 +1431,11 @@ export default function MarketIntelPage() {
                     <PieChart>
                       <Pie data={sectorPieData} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={1} stroke={dark ? "#132847" : "#ffffff"} strokeWidth={1}>
                         {sectorPieData.map((d, i) => (
-                          <Cell key={d.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                          <Cell
+                            key={d.name}
+                            fill={CHART_COLORS[i % CHART_COLORS.length]}
+                            fillOpacity={hoverSlug ? (d.slugs.includes(hoverSlug) ? 1 : 0.22) : 1}
+                          />
                         ))}
                       </Pie>
                       <Tooltip
@@ -1445,7 +1457,12 @@ export default function MarketIntelPage() {
                   </tr></thead>
                   <tbody>
                     {sectorRows.map((r) => (
-                      <tr key={r.slug} className="border-b border-slate-100 dark:border-white/5">
+                      <tr
+                        key={r.slug}
+                        onMouseEnter={() => setHoverSlug(r.slug)}
+                        onMouseLeave={() => setHoverSlug(null)}
+                        className={`border-b border-slate-100 transition-colors hover:bg-[#b8975a]/10 dark:border-white/5 ${hoverSlug === r.slug ? "bg-[#b8975a]/10" : ""}`}
+                      >
                         <td className={td}>{r.name}</td>
                         <td className={`${td} font-medium`}>{r.estab.toLocaleString()}</td>
                         <td className={td}>{r.emp ? r.emp.toLocaleString() : "—"}</td>
@@ -2050,7 +2067,7 @@ export default function MarketIntelPage() {
                 {[...warn]
                   .sort((a, b) => (b.noticeDate || "").localeCompare(a.noticeDate || ""))
                   .map((w) => (
-                  <tr key={w.id} className="border-b border-slate-100 dark:border-white/5">
+                  <tr key={w.id} className="border-b border-slate-100 transition-colors hover:bg-[#b8975a]/10 dark:border-white/5">
                     <td className="px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-white/80">{w.employer}</td>
                     <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-[11px] text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
                     <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.location}</td>
