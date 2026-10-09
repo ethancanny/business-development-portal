@@ -359,7 +359,13 @@ export default function MarketIntelPage() {
     onMouseLeave: () => setHovRow((h: string) => (h === key ? "" : h)),
     onClick: () => toggleRow(key),
     style: rowStyle(key),
-    className: "border-b border-slate-100 dark:border-white/5 cursor-pointer",
+    className: `border-b border-slate-100 dark:border-white/5 cursor-pointer ${
+      selRow === key
+        ? "bg-slate-300 dark:bg-white/20"
+        : hovRow === key
+          ? "bg-slate-200 dark:bg-white/10"
+          : ""
+    }`,
   });
   const [hoverCommodity, setHoverCommodity] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -2220,6 +2226,14 @@ export default function MarketIntelPage() {
 
           </div>
         </Section>
+
+        {/* TEMP diagnostic readout (Oct 9, 2026): shows the row key the page
+            registers as hovered/selected. Remove after diagnosis. */}
+        {(hovRow || selRow) && (
+          <div className="fixed bottom-3 left-3 z-50 rounded-lg bg-black/85 px-3 py-1.5 text-xs font-medium text-white shadow-lg">
+            hover: {hovRow || "—"} · selected: {selRow || "—"}
+          </div>
+        )}
 
         {/* Sync status */}
         {syncLog.length > 0 && (
