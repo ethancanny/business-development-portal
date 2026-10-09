@@ -20,7 +20,7 @@ export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples
       selRow === key
         ? dark
           ? "rgba(184,151,90,0.28)"
-          : "rgba(13,31,60,0.14)"
+          : "rgba(13,31,60,0.10)"
         : hovRow === key
           ? dark
             ? "rgba(255,255,255,0.08)"
@@ -35,7 +35,7 @@ export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples
     style: rowStyle(key),
     className: `border-b border-slate-100 dark:border-white/5 cursor-pointer ${
       selRow === key
-        ? "bg-[#0d1f3c]/[0.16] dark:bg-[#b8975a]/[0.22]"
+        ? "bg-[#0d1f3c]/[0.10] dark:bg-[#b8975a]/[0.18]"
         : hovRow === key
           ? "bg-[#e6edf6] dark:bg-white/[0.08]"
           : ""
