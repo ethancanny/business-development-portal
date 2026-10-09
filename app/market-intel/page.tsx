@@ -63,7 +63,7 @@ const SECTOR_SHORT: Record<string, string> = {
   "56": "Admin & Waste", "61": "Education", "62": "Healthcare",
   "71": "Arts & Recreation", "72": "Hospitality & Food", "81": "Other Services",
 };
-const CHART_COLORS = ["#b8975a", "#54708f", "#7d9b76", "#b4713f", "#7a5c7e", "#4e7d78", "#a9716b", "#8a8f98"];
+const CHART_COLORS = ["#b8975a", "#0d1f3c", "#54708f", "#8a6f3c", "#7d94b5", "#d4b37a", "#33507c", "#a9b8cc"];
 /** Commodity prices Arizona's economy depends on (FRED: IMF metals, EIA energy, PPI lumber). */
 const COMMODITY_SERIES: { id: string; name: string; unit: string; digits: number }[] = [
   { id: "PCOPPUSDM", name: "Copper", unit: "$/metric ton", digits: 0 },
@@ -460,9 +460,9 @@ export default function MarketIntelPage() {
   const grid = dark ? "rgba(255,255,255,0.08)" : "#e2e8f0";
   const tick = dark ? "rgba(255,255,255,0.55)" : "#64748b";
   const gold = "#b8975a";
-  const blue = dark ? "#7aa2f7" : "#3b82f6";
-  const green = "#6abf8b";
-  const orange = "#e07856";
+  const blue = dark ? "#7aa2f7" : "#54708f";
+  const green = "#5e9c7f";
+  const orange = "#c47b4a";
 
   const fiveYearCutoff = useMemo(() => {
     const d = new Date();
@@ -1821,8 +1821,8 @@ export default function MarketIntelPage() {
                 <Bar dataKey="Education" stackId="spend" fill={gold} />
                 <Bar dataKey="Insurance trust" stackId="spend" fill={green} />
                 <Bar dataKey="Highways" stackId="spend" fill={orange} />
-                <Bar dataKey="Corrections" stackId="spend" fill="#a855f7" />
-                <Bar dataKey="Health" stackId="spend" fill="#14b8a6" />
+                <Bar dataKey="Corrections" stackId="spend" fill="#7d94b5" />
+                <Bar dataKey="Health" stackId="spend" fill="#33507c" />
                 <Bar dataKey="Other" stackId="spend" fill="#94a3b8" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -1984,7 +1984,7 @@ export default function MarketIntelPage() {
                           type="monotone"
                           dataKey={`AZPERMIT_${countySlug(c.name)}`}
                           name={c.name}
-                          stroke={[gold, blue, green, orange, "#a78bfa"][i % 5]}
+                          stroke={["#b4713f", "#54708f", "#7d94b5", "#8a6f3c", "#b8c4d4"][i % 5]}
                           strokeWidth={2}
                           dot={false}
                         />
@@ -2141,7 +2141,7 @@ export default function MarketIntelPage() {
                   .map((w) => (
                   <tr key={w.id} {...rowProps(`warn:${w.id}`)}>
                     <td className="px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-white/80">{w.employer}</td>
-                    <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-[11px] text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
+                    <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-[11px] text-[#8a6f3c] dark:text-[#d4b37a]">{w.industry}</span>}</td>
                     <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.location}</td>
                     <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.headcount ?? "—"}</td>
                     <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.noticeDate ? fmtDate(w.noticeDate) : "—"}</td>
@@ -2195,10 +2195,10 @@ export default function MarketIntelPage() {
                           </span>
                         )}
                       </td>
-                      <td className={td}>{a.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3e] dark:text-[#d4b37a]">{a.industry}</span>}</td>
+                      <td className={td}>{a.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3c] dark:text-[#d4b37a]">{a.industry}</span>}</td>
                       <td className={`${td} whitespace-nowrap`}>{a.dealValue ? fmtMoney(a.dealValue) : "—"}</td>
                       <td className={`${td} whitespace-nowrap`}>{a.announcedDate ? fmtDate(a.announcedDate) : "—"}</td>
-                      <td className={td}>{a.sourceUrl ? <a href={a.sourceUrl} target="_blank" rel="noreferrer" className="text-[#8a6f3e] underline dark:text-[#d4b37a]">{a.publisher || "Link"}</a> : "—"}</td>
+                      <td className={td}>{a.sourceUrl ? <a href={a.sourceUrl} target="_blank" rel="noreferrer" className="text-[#8a6f3c] underline dark:text-[#d4b37a]">{a.publisher || "Link"}</a> : "—"}</td>
                       <td className={`${td} whitespace-nowrap`}>
                         <button onClick={() => setStatus("acquisitions", a.id, "keep")} className="mr-2 text-xs text-emerald-600 dark:text-emerald-400">Keep</button>
                         <button onClick={() => setStatus("acquisitions", a.id, "dismissed")} className="text-xs text-slate-400">Dismiss</button>
@@ -2228,7 +2228,7 @@ export default function MarketIntelPage() {
                   {filteredFilings.filter((f) => f.status !== "dismissed").map((f) => (
                     <tr key={f.id} {...rowProps(`filing:${f.id}`)}>
                       <td className={td}>
-                        {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="font-medium text-[#8a6f3e] underline dark:text-[#d4b37a]">{f.company}</a> : <span className="font-medium">{f.company}</span>}
+                        {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="font-medium text-[#8a6f3c] underline dark:text-[#d4b37a]">{f.company}</a> : <span className="font-medium">{f.company}</span>}
                         <span className="block text-xs">
                           {f.azCompany && <span className="mr-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-emerald-700 dark:text-emerald-400">AZ company</span>}
                           {f.majorEvent && <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-red-700 dark:text-red-400">Major event</span>}
