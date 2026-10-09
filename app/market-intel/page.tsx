@@ -18,6 +18,7 @@ import {
 } from "recharts";
 import PageHero from "@/components/PageHero";
 import SizeProfileRow, { hasSizeProfile, SUBSECTOR_IDS_CSV } from "@/components/SizeProfileRows";
+import CompanyTargets from "@/components/CompanyTargets";
 import ValleyDemographics from "@/components/ValleyDemographics";
 import { useTheme } from "@/components/ThemeProvider";
 import { fmtMoney, fmtDate } from "@/lib/format";
@@ -1460,6 +1461,7 @@ export default function MarketIntelPage() {
             <EventStrip items={industryEvents("Aerospace & Defense")} onDismiss={dismissEvent} />
             {sectorLine("3364")}
             {hasSizeProfile(obs, "3364") && <SizeProfileRow obs={obs} slug="3364" />}
+            <CompanyTargets sector="Aerospace & Defense" />
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
@@ -1516,6 +1518,7 @@ export default function MarketIntelPage() {
             <EventStrip items={industryEvents("Healthcare")} onDismiss={dismissEvent} />
             {sectorLine("62")}
             {hasSizeProfile(obs, "62") && <SizeProfileRow obs={obs} slug="62" />}
+            <CompanyTargets sector="Healthcare" />
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Healthcare Employment — AZ</h3>
@@ -1539,6 +1542,7 @@ export default function MarketIntelPage() {
             <EventStrip items={industryEvents("Advanced Manufacturing")} onDismiss={dismissEvent} />
             {sectorLine("3133")}
             {hasSizeProfile(obs, "3133") && <SizeProfileRow obs={obs} slug="3133" />}
+            <CompanyTargets sector="Advanced Manufacturing" />
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Manufacturing Employment — AZ</h3>
@@ -1562,6 +1566,7 @@ export default function MarketIntelPage() {
             <EventStrip items={industryEvents("Specialty Trades & Construction")} onDismiss={dismissEvent} />
             {sectorLine("23")}
             {hasSizeProfile(obs, "23") && <SizeProfileRow obs={obs} slug="23" />}
+            <CompanyTargets sector="Specialty Trades & Construction" />
             <div className="grid gap-4 lg:grid-cols-2">
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Construction Employment — AZ</h3>
