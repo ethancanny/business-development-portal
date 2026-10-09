@@ -59,7 +59,7 @@ const SECTOR_SHORT: Record<string, string> = {
   "56": "Admin & Waste", "61": "Education", "62": "Healthcare",
   "71": "Arts & Recreation", "72": "Hospitality & Food", "81": "Other Services",
 };
-const CHART_COLORS = ["#b8975a", "#7aa2f7", "#6abf8b", "#e07856", "#9b8cf2", "#4fb8ac", "#d9779e", "#94a3b8"];
+const CHART_COLORS = ["#b8975a", "#54708f", "#7d9b76", "#b4713f", "#7a5c7e", "#4e7d78", "#a9716b", "#8a8f98"];
 /** Commodity prices Arizona's economy depends on (FRED: IMF metals, EIA energy, PPI lumber). */
 const COMMODITY_SERIES: { id: string; name: string; unit: string; digits: number }[] = [
   { id: "PCOPPUSDM", name: "Copper", unit: "$/metric ton", digits: 0 },
@@ -770,10 +770,11 @@ export default function MarketIntelPage() {
   };
 
   /** Section event strips — single allocation (Ethan: each event is used
-   * exactly once on the page). Specialty sections claim their events
-   * first, in priority order; the Major Events feed below is then built
-   * from what remains (plus bankruptcies via filings and large WARN
-   * layoffs, which have no strip home). */
+   * exactly once on the page). Marquee stories are claimed for Major
+   * Events first (big deals, big money, big scale — e.g. the Fairmont
+   * Scottsdale Princess sale); specialty sections then claim what
+   * remains in priority order, and Major Events fills from the rest
+   * (plus filing bankruptcies and large WARN layoffs). */
   const dismissEvent = (a: MiAcquisition) => setStatus("acquisitions", a.id, "dismissed");
   const stripCutoff = new Date(Date.now() - 1 * 864e5).toISOString().slice(0, 10);
   const normCo = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
@@ -782,6 +783,7 @@ export default function MarketIntelPage() {
     .filter(
       (a) =>
         a.status !== "dismissed" &&
+        a.eventType !== "bankruptcy" &&
         a.announcedDate &&
         a.announcedDate >= stripCutoff &&
         !JUNK.test(a.headline || a.summary || a.target)
@@ -793,7 +795,24 @@ export default function MarketIntelPage() {
       seenCo.add(k);
       return true;
     });
-  const claimedIds = new Set<string>();
+  /** How "marquee" is a story? Big money dominates; scale and focus fit add. */
+  const marqueeScore = (a: MiAcquisition): number => {
+    let s = 0;
+    const dv = a.dealValue ?? null;
+    if (dv) s += dv >= 1e8 ? 100 : dv >= 2.5e7 ? 60 : dv >= 5e6 ? 30 : 15;
+    const text = `${a.headline || ""} ${a.summary || ""}`;
+    if (!dv && /\$\s?\d/.test(text)) s += 10;
+    if (/\d[\d,]*\s*(jobs|employees|square|sq\.?\s?ft|acres)/i.test(text)) s += 15;
+    if (a.eventType === "acquisition" || a.eventType === "ipo") s += 10;
+    if (["Aerospace & Defense", "Healthcare", "Advanced Manufacturing", "Specialty Trades & Construction"].includes(a.industry)) s += 10;
+    return s;
+  };
+  const marqueeEvents = stripPool
+    .filter((a) => marqueeScore(a) >= 40)
+    .sort((x, y) => marqueeScore(y) - marqueeScore(x) || (y.announcedDate || "").localeCompare(x.announcedDate || ""))
+    .slice(0, 4);
+  const marqueeIds = new Set(marqueeEvents.map((a) => a.id));
+  const claimedIds = new Set<string>(marqueeIds);
   const claim = (pred: (a: MiAcquisition) => boolean, n = 3) => {
     const picked = stripPool.filter((a) => !claimedIds.has(a.id) && pred(a)).slice(0, n);
     for (const a of picked) claimedIds.add(a.id);
@@ -813,6 +832,9 @@ export default function MarketIntelPage() {
   const acqEvents = claim((a) => a.eventType === "acquisition");
   const allEvents = claim(() => true);
   const industryEvents = (industry: string) => industryClaims[industry] ?? [];
+  /** Ids claimed by section strips (Major Events must skip these;
+   * marquee ids are the opposite — they belong to Major Events). */
+  const sectionIds = new Set(Array.from(claimedIds).filter((id) => !marqueeIds.has(id)));
 
   const healthRows = useMemo(
     () =>
@@ -923,7 +945,7 @@ export default function MarketIntelPage() {
     const fmtVal = (v: number | null) =>
       v === null ? "" : v >= 1e9 ? ` · $${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? ` · $${Math.round(v / 1e6)}M` : "";
     for (const a of acquisitions) {
-      if (a.eventType === "bankruptcy" && a.status !== "dismissed" && !claimedIds.has(a.id) && a.announcedDate && a.announcedDate >= cutoff) {
+      if (a.eventType === "bankruptcy" && a.status !== "dismissed" && !sectionIds.has(a.id) && a.announcedDate && a.announcedDate >= cutoff) {
         if (JUNK.test(a.headline || a.summary || a.target)) continue;
         items.push({
           id: `news-${a.id}`,
@@ -958,7 +980,7 @@ export default function MarketIntelPage() {
     const byType = (t: string, n: number) =>
       acquisitions
         .filter((a) => {
-          if (a.eventType !== t || a.status === "dismissed" || claimedIds.has(a.id) || !a.announcedDate || a.announcedDate < cutoff) return false;
+          if (a.eventType !== t || a.status === "dismissed" || sectionIds.has(a.id) || marqueeIds.has(a.id) || !a.announcedDate || a.announcedDate < cutoff) return false;
           const text = `${a.headline || ""} ${a.summary || ""} ${a.target || ""} ${a.acquirer || ""}`;
           if (JUNK.test(text)) return false;
           if (t === "policy" && !MARKET_POLICY.test(text)) return false;
@@ -975,6 +997,22 @@ export default function MarketIntelPage() {
       ipo: "IPO",
       policy: "Market Policy",
     };
+    // Marquee stories (claimed ahead of the section strips): they lead
+    // the main feed even when a section would also have fit them.
+    for (const a of marqueeEvents) {
+      items.push({
+        id: `marquee-${a.id}`,
+        kind: kindLabel[a.eventType] ?? a.eventType,
+        title: a.headline || a.target || "Unnamed",
+        key: a.target || a.summary || "",
+        detail: `${a.acquirer && a.target && a.eventType === "acquisition" ? `${a.acquirer} → ${a.target} · ` : ""}${a.publisher || "News"}${a.industry ? ` · ${a.industry}` : ""}${fmtVal(a.dealValue ?? null)}`,
+        summary: a.summary || "",
+        date: a.announcedDate,
+        url: a.sourceUrl,
+        source: "acquisitions",
+        rawId: a.id,
+      });
+    }
     for (const t of ["acquisition", "expansion", "investment", "contract", "relocation", "ipo", "policy"] as const) {
       for (const a of byType(t, 2)) {
         items.push({
@@ -1636,7 +1674,7 @@ export default function MarketIntelPage() {
                         contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
                         formatter={(v, name) => [Number(v).toFixed(1), name]}
                       />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
                       {commodityData.series.map((s, i) => (
                         <Line key={s.id} type="monotone" dataKey={s.id} name={s.name} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} />
                       ))}
@@ -1719,17 +1757,28 @@ export default function MarketIntelPage() {
               {sectorView === "trend" ? (
                 <div className="h-[380px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
+                    <BarChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }} barCategoryGap="28%">
                       <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="year" tick={{ fontSize: 11, fill: tick }} />
-                      <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} />
+                      <XAxis dataKey="year" tick={{ fontSize: 11, fill: tick }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} axisLine={false} tickLine={false} />
                       <Tooltip
-                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12, borderRadius: 8 }}
+                        cursor={{ fill: dark ? "rgba(255,255,255,0.05)" : "rgba(13,31,60,0.05)" }}
                         formatter={(v, name) => [Number(v).toLocaleString(), name]}
                       />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
                       {sectorTrend.slugs.map((slug, i) => (
-                        <Bar key={slug} dataKey={slug} name={SECTOR_SHORT[slug] ?? slug} stackId="estab" fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        <Bar
+                          key={slug}
+                          dataKey={slug}
+                          name={SECTOR_SHORT[slug] ?? slug}
+                          stackId="estab"
+                          fill={CHART_COLORS[i % CHART_COLORS.length]}
+                          stroke={dark ? "#132847" : "#ffffff"}
+                          strokeWidth={1}
+                          maxBarSize={56}
+                          radius={i === sectorTrend.slugs.length - 1 ? [5, 5, 0, 0] : [0, 0, 0, 0]}
+                        />
                       ))}
                     </BarChart>
                   </ResponsiveContainer>
@@ -1738,7 +1787,7 @@ export default function MarketIntelPage() {
                 <div className="h-[380px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={sectorPieData} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={1}>
+                      <Pie data={sectorPieData} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={1} stroke={dark ? "#132847" : "#ffffff"} strokeWidth={1}>
                         {sectorPieData.map((d, i) => (
                           <Cell key={d.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
@@ -1747,7 +1796,7 @@ export default function MarketIntelPage() {
                         contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
                         formatter={(v, name) => [`${Number(v).toLocaleString()} (${sectorTotal ? ((Number(v) / sectorTotal) * 100).toFixed(1) : "0"}%)`, name]}
                       />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
