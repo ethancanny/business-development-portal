@@ -48,3 +48,5 @@ Pushes to `main` auto-deploy via Vercel (project `business-development-portal`) 
 > `https://cannycapitalpartners.com/...` (the main Canny Capital website)
 > rather than committed here, so this repo stays 100% text and clones cleanly.
 > Download them from those URLs if you ever need local copies.
+
+Company data: registry spines (USASpending, SAM.gov, NPPES, AZ ROC) are consolidated weekly into one row per company; fit is judged on consolidated numbers with revenue/employee evidence.
