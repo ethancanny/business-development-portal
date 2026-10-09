@@ -209,7 +209,7 @@ function SubSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="mb-5 border-t-[3px] border-slate-400 pt-4 dark:border-white/30">
+    <div className="mb-5 border-t-2 border-slate-400 pt-4 dark:border-white/30">
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -336,8 +336,8 @@ export default function MarketIntelPage() {
   const rowCls = (key: string) =>
     `border-b border-slate-100 dark:border-white/5 cursor-pointer transition-colors duration-200 ${
       selRow === key
-        ? "bg-[#0d1f3c]/[0.09] dark:bg-[#b8975a]/[0.18]"
-        : "hover:bg-slate-50 dark:hover:bg-white/5"
+        ? "bg-[#0d1f3c]/[0.14] dark:bg-[#b8975a]/[0.25]"
+        : "hover:bg-slate-100 dark:hover:bg-white/[0.08]"
     }`;
   const [hoverCommodity, setHoverCommodity] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -1459,8 +1459,8 @@ export default function MarketIntelPage() {
                         onClick={() => toggleRow(`sector:${r.slug}`)}
                         className={`border-b border-slate-100 transition-colors duration-200 dark:border-white/5 ${
                           selRow === `sector:${r.slug}`
-                            ? "cursor-pointer bg-[#0d1f3c]/[0.09] dark:bg-[#b8975a]/[0.18]"
-                            : `cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5 ${hoverSlug === r.slug ? "bg-slate-100 dark:bg-white/10" : ""}`
+                            ? "cursor-pointer bg-[#0d1f3c]/[0.14] dark:bg-[#b8975a]/[0.25]"
+                            : `cursor-pointer hover:bg-slate-100 dark:hover:bg-white/[0.08] ${hoverSlug === r.slug ? "bg-slate-100 dark:bg-white/10" : ""}`
                         }`}
                       >
                         <td className={td}>{r.name}</td>
@@ -2215,8 +2215,8 @@ function MultiplesPanel({ multiples, onAdded }: { multiples: MiMultiple[]; onAdd
   const rowCls = (key: string) =>
     `border-b border-slate-100 dark:border-white/5 cursor-pointer transition-colors duration-200 ${
       selRow === key
-        ? "bg-[#0d1f3c]/[0.09] dark:bg-[#b8975a]/[0.18]"
-        : "hover:bg-slate-50 dark:hover:bg-white/5"
+        ? "bg-[#0d1f3c]/[0.14] dark:bg-[#b8975a]/[0.25]"
+        : "hover:bg-slate-100 dark:hover:bg-white/[0.08]"
     }`;
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const input = "rounded-lg border border-slate-300 px-2 py-1.5 text-sm dark:border-white/15 dark:bg-white/5 dark:text-white";
