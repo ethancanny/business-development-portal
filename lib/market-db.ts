@@ -501,19 +501,20 @@ export async function countFits(sector?: string): Promise<number> {
 }
 
 export interface UpdateItem {
-  kind: "business" | "license" | "listing" | "operator" | "multiple";
+  kind: "business" | "license" | "listing" | "operator" | "multiple" | "acquisition";
   title: string;
   detail: string;
   ts: string;
 }
 
 /**
- * "Updates" cards for Market Intel: everything newly issued in the last 7
- * days — new companies and licenses (registry first_seen; consolidated
- * merge rows excluded so a consolidation run doesn't flood the strip),
- * new business listings, operators newly added to the pipeline, and
- * multiple moves between stored vintages. Registry floods collapse into
- * one summary card per source.
+ * "Updates" cards for Market Intel (Ethan, Oct 9, 2026): aggregate DELTA
+ * cards only — never individual items. "+N new companies / licensed
+ * contractors" per registry source (first_seen in the last 7 days;
+ * consolidated merge rows excluded), "+N new businesses for sale",
+ * "+N local acquisitions", "+N new operators", and multiple moves
+ * between stored vintages (shown as from → to so the move is
+ * self-verifying; fires only when two distinct vintages exist).
  */
 export async function getUpdates(
   execs: { name: string; stage?: string; createdAt?: string }[]
@@ -522,8 +523,6 @@ export async function getUpdates(
   const db = sql();
   const items: UpdateItem[] = [];
   const cutoff = new Date(Date.now() - 7 * 864e5).toISOString();
-  const money = (v: number) =>
-    v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v / 1e3)}K`;
   const compRows = (await db`SELECT name, sector, city, source, signal_value, first_seen FROM mi_companies WHERE first_seen >= ${cutoff} AND details LIKE '{%' AND (details::jsonb ->> 'consolidated') IS DISTINCT FROM 'true' ORDER BY first_seen DESC LIMIT 400`) as unknown as Record<string, unknown>[];
   const groupKeys: string[] = [];
   const groups = new Map<string, Record<string, unknown>[]>();
@@ -539,35 +538,36 @@ export async function getUpdates(
     const list = groups.get(key) ?? [];
     const kind = key.split("|")[0] as UpdateItem["kind"];
     const source = key.split("|")[1];
-    if (list.length > 8) {
-      const top = list[0];
-      items.push({
-        kind,
-        title: `${list.length} new ${kind === "license" ? "licensed contractors" : "companies"} — ${source}`,
-        detail: `Latest: ${String(top.name)}${top.city ? ` · ${String(top.city)}` : ""} · ${String(top.sector)}`,
-        ts: String(top.first_seen),
-      });
-    } else {
-      for (const r of list) {
-        const sig = typeof r.signal_value === "number" ? r.signal_value : null;
-        items.push({
-          kind,
-          title: String(r.name),
-          detail: `${String(r.sector)}${r.city ? ` · ${String(r.city)}` : ""}${sig ? ` · ${money(sig)} federal awards` : ""}`,
-          ts: String(r.first_seen),
-        });
-      }
-    }
+    const top = list[0];
+    items.push({
+      kind,
+      title: `+${list.length} new ${kind === "license" ? "licensed contractors" : "companies"}`,
+      detail: `${source} · latest: ${String(top.name)}${top.city ? ` · ${String(top.city)}` : ""} · ${String(top.sector)}`,
+      ts: String(top.first_seen),
+    });
   }
-  const listRows = (await db`SELECT title, price, cash_flow, industry, location, first_seen FROM mi_listings WHERE first_seen >= ${cutoff} ORDER BY first_seen DESC LIMIT 20`) as unknown as Record<string, unknown>[];
-  for (const r of listRows) {
-    const bits = [
-      typeof r.price === "number" ? `Asking ${money(r.price)}` : "",
-      typeof r.cash_flow === "number" ? `${money(r.cash_flow)} cash flow` : "",
-      String(r.industry ?? ""),
-      String(r.location ?? ""),
-    ].filter(Boolean);
-    items.push({ kind: "listing", title: String(r.title), detail: bits.join(" · "), ts: String(r.first_seen) });
+  const listAgg = (await db`SELECT COUNT(*)::int AS n, MAX(first_seen) AS latest FROM mi_listings WHERE first_seen >= ${cutoff}`) as unknown as Record<string, unknown>[];
+  const listCount = Number(listAgg[0]?.n ?? 0);
+  if (listCount > 0) {
+    const listLatest = (await db`SELECT title FROM mi_listings WHERE first_seen >= ${cutoff} ORDER BY first_seen DESC LIMIT 1`) as unknown as Record<string, unknown>[];
+    items.push({
+      kind: "listing",
+      title: `+${listCount} new businesses for sale`,
+      detail: listLatest[0]?.title ? `Latest: ${String(listLatest[0].title)}` : "Added in the last 7 days",
+      ts: String(listAgg[0]?.latest ?? cutoff),
+    });
+  }
+  const acqAgg = (await db`SELECT COUNT(*)::int AS n, MAX(created_at) AS latest FROM mi_acquisitions WHERE event_type = 'acquisition' AND created_at >= ${cutoff}`) as unknown as Record<string, unknown>[];
+  const acqCount = Number(acqAgg[0]?.n ?? 0);
+  if (acqCount > 0) {
+    const acqLatest = (await db`SELECT headline, target FROM mi_acquisitions WHERE event_type = 'acquisition' AND created_at >= ${cutoff} ORDER BY created_at DESC LIMIT 1`) as unknown as Record<string, unknown>[];
+    const latestLabel = String(acqLatest[0]?.headline || acqLatest[0]?.target || "");
+    items.push({
+      kind: "acquisition",
+      title: `+${acqCount} local acquisitions`,
+      detail: latestLabel ? `Latest: ${latestLabel}` : "Announced in the last 7 days",
+      ts: String(acqAgg[0]?.latest ?? cutoff),
+    });
   }
   const multRows = (await db`SELECT industry, size_band, period, ev_ebitda_median, ev_revenue_median, created_at FROM mi_multiples ORDER BY industry ASC, size_band ASC, period ASC`) as unknown as Record<string, unknown>[];
   const multKeys: string[] = [];
@@ -599,15 +599,15 @@ export async function getUpdates(
       }
     }
   }
-  for (const e of execs) {
-    if (e.createdAt && e.createdAt >= cutoff) {
-      items.push({
-        kind: "operator",
-        title: e.name,
-        detail: `Added to the pipeline${e.stage ? ` · ${e.stage}` : ""}`,
-        ts: e.createdAt,
-      });
-    }
+  const newExecs = execs.filter((e) => e.createdAt && e.createdAt >= cutoff);
+  if (newExecs.length > 0) {
+    const latestTs = newExecs.map((e) => e.createdAt as string).sort().reverse()[0];
+    items.push({
+      kind: "operator",
+      title: `+${newExecs.length} new operators`,
+      detail: "Added to the pipeline in the last 7 days",
+      ts: latestTs,
+    });
   }
   items.sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
   return items.slice(0, 14);
