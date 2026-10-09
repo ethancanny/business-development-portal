@@ -182,62 +182,12 @@ export default function Overview() {
     };
   }, [weekWindow, deals, execs, flow, interactions, tasks]);
 
-  // Calendar-driven activity highlights + upcoming important dates for the
-  // weekly summary (Ethan, Oct 9, 2026): Outlook events matched to pipeline
-  // operators by name in the event title.
+  // Upcoming important dates for the weekly summary (Ethan, Oct 9, 2026):
+  // the next 14 days of Outlook events mirrored into the portal. (The
+  // earlier "Activity highlights" lines were removed at Ethan's request —
+  // the summary is counts + important dates, with Tasks & follow-ups
+  // directly below.)
   const calSummary = useMemo(() => {
-    const { start, end } = weekWindow;
-    const startMs = start.getTime();
-    const endMs = end.getTime();
-    const personOf = (title: string): string => {
-      const t = title.toLowerCase();
-      for (let i = 0; i < execs.length; i++) {
-        const nm = execs[i].name;
-        const parts = nm.toLowerCase().split(" ");
-        const first = parts[0];
-        const last = parts[parts.length - 1];
-        if (
-          t.indexOf(nm.toLowerCase()) >= 0 ||
-          (last.length > 2 && t.indexOf(last) >= 0) ||
-          (first.length > 2 && t.indexOf(first) >= 0)
-        ) {
-          return nm;
-        }
-      }
-      return "";
-    };
-    const held: CalendarEvent[] = [];
-    const after: CalendarEvent[] = [];
-    calEvents.forEach((e) => {
-      const t = new Date(e.startsAt).getTime();
-      if (t >= startMs && t < endMs) held.push(e);
-      else if (t >= endMs && t < endMs + 21 * 86400000) after.push(e);
-    });
-    const lines: { id: string; text: string; person: string }[] = [];
-    const usedNext: string[] = [];
-    held.forEach((e) => {
-      const person = personOf(e.title);
-      if (!person) return;
-      let next: CalendarEvent | null = null;
-      for (let i = 0; i < after.length; i++) {
-        if (personOf(after[i].title) === person && usedNext.indexOf(after[i].eventId) < 0) {
-          next = after[i];
-          break;
-        }
-      }
-      if (next) {
-        usedNext.push(next.eventId);
-        const a = e.title.charAt(0).toLowerCase() + e.title.slice(1);
-        const b = next.title.charAt(0).toLowerCase() + next.title.slice(1);
-        lines.push({
-          id: e.eventId,
-          person,
-          text: `Moved from ${a} to ${b} — ${fmtWhen(next.startsAt, next.allDay)}${next.location ? ` · ${locText(next.location)}` : ""}`,
-        });
-      } else {
-        lines.push({ id: e.eventId, person, text: `${e.title} — ${fmtWhen(e.startsAt, e.allDay)}` });
-      }
-    });
     const nowMs = Date.now();
     const upcoming = calEvents
       .filter((e) => {
@@ -245,8 +195,8 @@ export default function Overview() {
         return t >= nowMs - 3600000 && t < nowMs + 14 * 86400000;
       })
       .slice(0, 6);
-    return { lines: lines.slice(0, 5), upcoming };
-  }, [calEvents, execs, weekWindow]);
+    return { upcoming };
+  }, [calEvents]);
 
   const dismissEvent = async (eventId: string) => {
     setCalEvents((prev) => prev.filter((e) => e.eventId !== eventId));
@@ -280,30 +230,6 @@ export default function Overview() {
       >
         {loc}
       </a>
-    );
-  };
-
-  const renderLine = (line: { text: string; person: string }) => {
-    if (!line.person) return line.text;
-    let idx = line.text.indexOf(line.person);
-    let matched = line.person;
-    if (idx < 0) {
-      const first = line.person.split(" ")[0];
-      idx = line.text.indexOf(first);
-      matched = first;
-    }
-    if (idx < 0) return line.text;
-    return (
-      <>
-        {line.text.slice(0, idx)}
-        <Link
-          href={`/directory?q=${encodeURIComponent(line.person)}`}
-          className="font-semibold text-[#0d1f3c] underline decoration-[#b8975a] decoration-2 underline-offset-2 dark:text-white"
-        >
-          {matched}
-        </Link>
-        {line.text.slice(idx + matched.length)}
-      </>
     );
   };
 
@@ -447,32 +373,6 @@ export default function Overview() {
             </span>
           ))}
         </div>
-        {calSummary.lines.length > 0 && (
-          <div className="mt-4">
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-              Activity highlights
-            </p>
-            <ul className="divide-y divide-slate-100 dark:divide-white/5">
-              {calSummary.lines.map((line) => (
-                <li
-                  key={line.id}
-                  className="group flex items-baseline gap-2 py-1.5 text-sm text-slate-600 dark:text-white/75"
-                >
-                  <span className="shrink-0 text-[#b8975a]">▸</span>
-                  <span className="flex-1">{renderLine(line)}</span>
-                  <button
-                    onClick={() => dismissEvent(line.id)}
-                    title="Dismiss"
-                    aria-label="Dismiss highlight"
-                    className="shrink-0 rounded px-1 text-base leading-none text-slate-300 opacity-0 transition hover:text-red-400 group-hover:opacity-100 dark:text-white/25"
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
         {weekTab === "this" && calSummary.upcoming.length > 0 && (
           <div className="mt-4">
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
@@ -527,6 +427,20 @@ export default function Overview() {
           </div>
         )}
       </div>
+
+      {/* Tasks & follow-ups — directly below the Weekly summary's
+          Important dates (Ethan, Oct 9, 2026) */}
+      <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
+        <h2 className="mb-4 text-base font-bold text-[#0d1f3c] dark:text-white">
+          Tasks &amp; follow-ups
+        </h2>
+        <TaskList
+          tasks={tasks}
+          deals={deals}
+          execs={execs}
+          onChanged={load}
+        />
+      </section>
 
       {staleDeals.length > 0 && (
         <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
@@ -611,19 +525,6 @@ export default function Overview() {
           <TargetMap deals={deals} />
         </section>
       </div>
-
-      {/* Tasks & follow-ups */}
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
-        <h2 className="mb-4 text-base font-bold text-[#0d1f3c] dark:text-white">
-          Tasks &amp; follow-ups
-        </h2>
-        <TaskList
-          tasks={tasks}
-          deals={deals}
-          execs={execs}
-          onChanged={load}
-        />
-      </section>
 
       {/* Pipeline analytics */}
       <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">

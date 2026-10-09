@@ -41,6 +41,7 @@ export default function Directory() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [execs, setExecs] = useState<Executive[]>([]);
   const [q, setQ] = useState("");
+  const [tab, setTab] = useState<"operator" | "business">("operator");
   const [sel, setSel] = useState<{ kind: string; id: string } | null>(null);
 
   useEffect(() => {
@@ -97,13 +98,26 @@ export default function Directory() {
     return entries.filter((e) => e.searchText.includes(needle));
   }, [entries, q]);
 
+  const visible = useMemo(
+    () => filtered.filter((e) => e.kind === tab),
+    [filtered, tab]
+  );
+
   const selected = useMemo(() => {
-    if (sel) {
-      const hit = entries.find((e) => e.kind === sel.kind && e.id === sel.id);
+    if (sel && sel.kind === tab) {
+      const hit = visible.find((e) => e.id === sel.id);
       if (hit) return hit;
     }
-    return filtered[0] ?? entries[0] ?? null;
-  }, [entries, filtered, sel]);
+    return visible[0] ?? null;
+  }, [visible, sel, tab]);
+
+  // If a search (e.g. a /directory?q= deep link) only matches the other tab,
+  // switch to it automatically.
+  useEffect(() => {
+    if (!q.trim() || visible.length > 0) return;
+    const other = tab === "operator" ? "business" : "operator";
+    if (filtered.some((e) => e.kind === other)) setTab(other);
+  }, [q, visible, filtered, tab]);
 
   const selExec =
     selected?.kind === "operator" ? execs.find((e) => e.id === selected.id) : undefined;
@@ -116,14 +130,11 @@ export default function Directory() {
     ? deals.filter((d) => (d.operatorIds ?? []).indexOf(selExec.id) >= 0)
     : [];
 
-  const group = (kind: Entry["kind"], label: string) => {
+  const group = (kind: Entry["kind"]) => {
     const rows = filtered.filter((e) => e.kind === kind);
     if (rows.length === 0) return null;
     return (
       <div className="mb-6">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-white/40">
-          {label} · {rows.length}
-        </p>
         <ul className="space-y-1.5">
           {rows.map((e) => {
             const active = selected?.kind === e.kind && selected?.id === e.id;
@@ -177,11 +188,30 @@ export default function Directory() {
                 placeholder="Search people, companies, industries…"
                 className="mb-4 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-[#0d1f3c] outline-none placeholder:text-slate-300 focus:border-[#b8975a] dark:border-white/10 dark:bg-[#132847]/60 dark:text-white dark:placeholder:text-white/30"
               />
-              {group("operator", "Operators")}
-              {group("business", "Businesses")}
-              {filtered.length === 0 && (
+              <div className="mb-4 flex gap-2">
+                {(
+                  [
+                    ["operator", "Operators"],
+                    ["business", "Businesses"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => setTab(k)}
+                    className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold transition ${
+                      tab === k
+                        ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                        : "border border-slate-200 text-slate-500 hover:border-[#b8975a]/60 dark:border-white/10 dark:text-white/60"
+                    }`}
+                  >
+                    {label} · {entries.filter((e) => e.kind === k).length}
+                  </button>
+                ))}
+              </div>
+              {group(tab)}
+              {visible.length === 0 && (
                 <p className="text-sm text-slate-400 dark:text-white/40">
-                  Nobody matches that search yet.
+                  Nothing here matches that search.
                 </p>
               )}
             </div>
