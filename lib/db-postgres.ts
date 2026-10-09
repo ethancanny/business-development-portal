@@ -269,6 +269,39 @@ export function ensureSchema(): Promise<void> {
           added INTEGER NOT NULL DEFAULT 0,
           message TEXT NOT NULL DEFAULT ''
         )`;
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_companies (
+          id TEXT PRIMARY KEY,
+          dedup_key TEXT NOT NULL DEFAULT '',
+          name TEXT NOT NULL DEFAULT '',
+          sector TEXT NOT NULL DEFAULT '',
+          subsector TEXT NOT NULL DEFAULT '',
+          naics TEXT NOT NULL DEFAULT '',
+          city TEXT NOT NULL DEFAULT '',
+          state TEXT NOT NULL DEFAULT 'AZ',
+          address TEXT NOT NULL DEFAULT '',
+          zip TEXT NOT NULL DEFAULT '',
+          contact_name TEXT NOT NULL DEFAULT '',
+          contact_title TEXT NOT NULL DEFAULT '',
+          phone TEXT NOT NULL DEFAULT '',
+          website TEXT NOT NULL DEFAULT '',
+          formed_date TEXT NOT NULL DEFAULT '',
+          employees INTEGER,
+          signal_value DOUBLE PRECISION,
+          signal_label TEXT NOT NULL DEFAULT '',
+          source TEXT NOT NULL DEFAULT '',
+          source_url TEXT NOT NULL DEFAULT '',
+          details TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'new',
+          first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (source, dedup_key)
+        )`;
+      await db`
+        CREATE INDEX IF NOT EXISTS mi_companies_sector_idx
+        ON mi_companies (sector, signal_value DESC)`;
     })().catch((err) => {
       schemaReady = null;
       throw err;

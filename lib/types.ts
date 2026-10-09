@@ -233,6 +233,37 @@ export interface MiListing {
   updatedAt: string;
 }
 
+/** A named company profile built from a public registry spine (SAM.gov,
+ * AZ ROC, NPPES, EPA FRS, USASpending recipients). signalValue is the
+ * headline size signal in dollars where the source carries one (e.g.
+ * federal award totals); signalLabel says what it means. */
+export interface MiCompany {
+  id: string;
+  dedupKey: string;
+  name: string;
+  sector: string;
+  subsector: string;
+  naics: string;
+  city: string;
+  state: string;
+  address: string;
+  zip: string;
+  contactName: string;
+  contactTitle: string;
+  phone: string;
+  website: string;
+  formedDate: string;
+  employees: number | null;
+  signalValue: number | null;
+  signalLabel: string;
+  source: string;
+  sourceUrl: string;
+  details: string;
+  status: "new" | "keep" | "dismissed" | "added";
+  firstSeen: string;
+  lastSeen: string;
+}
+
 export interface MiMultiple {
   id: string;
   sourceReport: string;

@@ -8,6 +8,7 @@ import type {
   MiIndicatorObs,
   MiIndicatorSource,
   MiListing,
+  MiCompany,
   MiMultiple,
   MiSyncLog,
   MiWarnNotice,
@@ -175,6 +176,113 @@ export async function getListings(status?: string): Promise<MiListing[]> {
 export async function setListingStatus(id: string, status: MiListing["status"]): Promise<void> {
   await ensureSchema();
   await sql()`UPDATE mi_listings SET status = ${status}, updated_at = NOW() WHERE id = ${id}`;
+}
+
+/* ---------------- Companies (registry-spine profiles) ---------------- */
+
+export interface CompanyInput {
+  dedupKey: string;
+  name: string;
+  sector: string;
+  subsector?: string;
+  naics?: string;
+  city?: string;
+  state?: string;
+  address?: string;
+  zip?: string;
+  contactName?: string;
+  contactTitle?: string;
+  phone?: string;
+  website?: string;
+  formedDate?: string;
+  employees?: number | null;
+  signalValue?: number | null;
+  signalLabel?: string;
+  source: string;
+  sourceUrl?: string;
+  details?: string;
+}
+
+/** Import a registry snapshot. With reset=true the source's existing rows
+ * are replaced wholesale (triage status and first_seen are preserved by
+ * dedup key); without it, rows upsert by (source, dedup_key). Used by the
+ * weekly spine builders (SAM.gov, AZ ROC, NPPES, EPA FRS). */
+export async function importCompanies(source: string, rows: CompanyInput[], reset: boolean): Promise<number> {
+  await ensureSchema();
+  const db = sql();
+  const clean = rows.filter((r) => r && r.dedupKey && r.name && r.source === source);
+  if (reset) {
+    const existing = await db`SELECT dedup_key, status, first_seen FROM mi_companies WHERE source = ${source}`;
+    const statusByKey = new Map(existing.map((r) => [str(r.dedup_key), str(r.status)]));
+    const firstSeenByKey = new Map(existing.map((r) => [str(r.dedup_key), r.first_seen]));
+    await db`DELETE FROM mi_companies WHERE source = ${source}`;
+    for (const r of clean) {
+      (r as CompanyInput & { _status?: string })._status = statusByKey.get(r.dedupKey);
+      (r as CompanyInput & { _firstSeen?: unknown })._firstSeen = firstSeenByKey.get(r.dedupKey);
+    }
+  }
+  const CHUNK = 300;
+  let added = 0;
+  for (let i = 0; i < clean.length; i += CHUNK) {
+    const chunk = clean.slice(i, i + CHUNK);
+    const values: string[] = [];
+    const params: unknown[] = [];
+    chunk.forEach((r, j) => {
+      const b = j * 23;
+      values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}, $${b + 11}, $${b + 12}, $${b + 13}, $${b + 14}, $${b + 15}, $${b + 16}, $${b + 17}, $${b + 18}, $${b + 19}, $${b + 20}, $${b + 21}, $${b + 22}, $${b + 23})`);
+      params.push(
+        newId(), r.dedupKey, r.name, r.sector, r.subsector ?? "", r.naics ?? "",
+        r.city ?? "", r.state ?? "AZ", r.address ?? "", r.zip ?? "",
+        r.contactName ?? "", r.contactTitle ?? "", r.phone ?? "", r.website ?? "",
+        r.formedDate ?? "", r.employees ?? null, r.signalValue ?? null, r.signalLabel ?? "",
+        r.source, r.sourceUrl ?? "", r.details ?? "",
+        (r as CompanyInput & { _status?: string })._status ?? "new",
+        (r as CompanyInput & { _firstSeen?: unknown })._firstSeen ?? new Date().toISOString()
+      );
+    });
+    const res = await db.query(
+      `INSERT INTO mi_companies (id, dedup_key, name, sector, subsector, naics, city, state, address, zip,
+         contact_name, contact_title, phone, website, formed_date, employees, signal_value, signal_label,
+         source, source_url, details, status, first_seen)
+       VALUES ${values.join(", ")}
+       ON CONFLICT (source, dedup_key) DO UPDATE SET
+         name = EXCLUDED.name, sector = EXCLUDED.sector, subsector = EXCLUDED.subsector, naics = EXCLUDED.naics,
+         city = EXCLUDED.city, address = EXCLUDED.address, zip = EXCLUDED.zip, contact_name = EXCLUDED.contact_name,
+         contact_title = EXCLUDED.contact_title, phone = EXCLUDED.phone, website = EXCLUDED.website,
+         formed_date = EXCLUDED.formed_date, employees = EXCLUDED.employees, signal_value = EXCLUDED.signal_value,
+         signal_label = EXCLUDED.signal_label, source_url = EXCLUDED.source_url, details = EXCLUDED.details,
+         last_seen = NOW(), updated_at = NOW()
+       RETURNING (xmax = 0) AS inserted`,
+      params
+    );
+    added += (res as unknown[]).filter((x) => (x as { inserted?: boolean }).inserted).length;
+  }
+  return added;
+}
+
+export async function getCompanies(sector?: string, limit = 600): Promise<MiCompany[]> {
+  await ensureSchema();
+  const db = sql();
+  const lim = Math.min(Math.max(limit, 1), 5000);
+  const rows = sector
+    ? await db`SELECT * FROM mi_companies WHERE sector = ${sector} ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim}`
+    : await db`SELECT * FROM mi_companies ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim}`;
+  return rows.map((r) => ({
+    id: str(r.id), dedupKey: str(r.dedup_key), name: str(r.name), sector: str(r.sector),
+    subsector: str(r.subsector), naics: str(r.naics), city: str(r.city), state: str(r.state),
+    address: str(r.address), zip: str(r.zip), contactName: str(r.contact_name),
+    contactTitle: str(r.contact_title), phone: str(r.phone), website: str(r.website),
+    formedDate: str(r.formed_date), employees: numOrNull(r.employees),
+    signalValue: numOrNull(r.signal_value), signalLabel: str(r.signal_label),
+    source: str(r.source), sourceUrl: str(r.source_url), details: str(r.details),
+    status: str(r.status) as MiCompany["status"],
+    firstSeen: String(r.first_seen), lastSeen: String(r.last_seen),
+  }));
+}
+
+export async function setCompanyStatus(id: string, status: MiCompany["status"]): Promise<void> {
+  await ensureSchema();
+  await sql()`UPDATE mi_companies SET status = ${status}, updated_at = NOW() WHERE id = ${id}`;
 }
 
 /* ---------------- Multiples ---------------- */

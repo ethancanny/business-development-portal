@@ -7,6 +7,8 @@ import {
   getIndicatorSeries,
   getLatestIndicators,
   getListings,
+  getCompanies,
+  setCompanyStatus,
   getMultiples,
   getSyncLog,
   getWarn,
@@ -24,6 +26,7 @@ const DATASETS = [
   "indicators",
   "latest",
   "listings",
+  "companies",
   "multiples",
   "acquisitions",
   "filings",
@@ -54,6 +57,10 @@ export async function GET(
         return NextResponse.json(await getLatestIndicators());
       case "listings":
         return NextResponse.json(await getListings(sp.get("status") ?? undefined));
+      case "companies":
+        return NextResponse.json(
+          await getCompanies(sp.get("sector") ?? undefined, Number(sp.get("limit") ?? 600))
+        );
       case "multiples":
         return NextResponse.json(await getMultiples());
       case "acquisitions":
@@ -91,6 +98,12 @@ export async function POST(
       case "listings":
         if (body.id && body.status) {
           await setListingStatus(String(body.id), body.status);
+          return NextResponse.json({ ok: true });
+        }
+        break;
+      case "companies":
+        if (body.id && body.status) {
+          await setCompanyStatus(String(body.id), body.status);
           return NextResponse.json({ ok: true });
         }
         break;
