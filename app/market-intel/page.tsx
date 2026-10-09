@@ -248,6 +248,20 @@ function EventStrip({
   );
 }
 
+/** Color the change figure inside an anomaly headline (▲ green, ▼ red). */
+function renderAnomalyValue(value: string) {
+  const m = value.match(/^(.*?)([▲▼][\d.]+(?:%|pp))(.*)$/);
+  if (!m) return value;
+  const up = m[2].startsWith("▲");
+  return (
+    <>
+      {m[1]}
+      <span className={up ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>{m[2]}</span>
+      {m[3]}
+    </>
+  );
+}
+
 export default function MarketIntelPage() {
   const { theme } = useTheme();
   const dark = theme === "dark";
@@ -1019,7 +1033,7 @@ export default function MarketIntelPage() {
                   )}
                   {c.label}
                 </p>
-                <p className="mt-1 text-2xl font-bold text-[#0d1f3c] dark:text-white">{c.value}</p>
+                <p className="mt-1 text-2xl font-bold text-[#0d1f3c] dark:text-white">{isAnomaly ? renderAnomalyValue(c.value) : c.value}</p>
                 <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
                   {c.date}
                   {c.chg !== null && (
