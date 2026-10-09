@@ -32,7 +32,7 @@ export default function ActivityPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<DealFlowItem[]>([]);
-  const [filter, setFilter] = useState<"all" | DealFlowStatus>("all");
+  const [filter, setFilter] = useState<"all" | DealFlowStatus>("new");
   const [kindTab, setKindTab] = useState<DealFlowKind>("business_for_sale");
   const [showAdd, setShowAdd] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
