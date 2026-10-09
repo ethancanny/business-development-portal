@@ -66,6 +66,8 @@ const COMMODITY_SERIES: { id: string; name: string; unit: string; digits: number
   { id: "MCOILWTICO", name: "WTI Crude Oil", unit: "$/barrel", digits: 2 },
   { id: "MHHNGSP", name: "Natural Gas", unit: "$/MMBtu", digits: 2 },
   { id: "WPU081", name: "Lumber & Wood Products", unit: "PPI index", digits: 1 },
+  { id: "WPU01220101", name: "Cotton (raw)", unit: "PPI index", digits: 1 },
+  { id: "WPU0121", name: "Hay & Forage (alfalfa)", unit: "PPI index", digits: 1 },
 ];
 const COMMODITY_IDS = COMMODITY_SERIES.map((c) => c.id).join(",");
 const COUNTY_PERMIT_SERIES = PERMIT_COUNTIES.flatMap((n) => [
@@ -1524,7 +1526,7 @@ export default function MarketIntelPage() {
           {commodityData.series.length > 0 && (
             <SubSection title="Commodity Prices">
               <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-                Arizona supplies roughly 70% of U.S. copper, and mining, construction, and energy input costs drive operator margins across the focus sectors. Latest monthly prices below; the chart indexes each series to 100 five years ago so unlike units can be compared on one axis.
+                Arizona supplies roughly 70% of U.S. copper, and alfalfa and cotton are among its top cash crops — mining, construction, energy, and farm input costs drive operator margins across the focus sectors. Latest monthly prices below; hay and cotton have no exchange-traded price, so they are tracked as producer price indexes (BLS PPI). The chart indexes each series to 100 five years ago so unlike units can be compared on one axis.
               </p>
               <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
                 {commodityData.series.map((s, i) => {
