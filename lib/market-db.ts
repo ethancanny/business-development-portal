@@ -212,10 +212,19 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
   const db = sql();
   const clean = rows.filter((r) => r && r.dedupKey && r.name && r.source === source);
   if (reset) {
-    const existing = await db`SELECT dedup_key, status, first_seen FROM mi_companies WHERE source = ${source}`;
+    // Reset is scoped to the (source, sector) pairs present in this payload,
+    // so one registry feeding several sector spines never wipes the others.
+    const sectors = [...new Set(clean.map((r) => r.sector).filter(Boolean))];
+    const existing = sectors.length
+      ? await db`SELECT dedup_key, status, first_seen FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
+      : await db`SELECT dedup_key, status, first_seen FROM mi_companies WHERE source = ${source}`;
     const statusByKey = new Map(existing.map((r) => [str(r.dedup_key), str(r.status)]));
     const firstSeenByKey = new Map(existing.map((r) => [str(r.dedup_key), r.first_seen]));
-    await db`DELETE FROM mi_companies WHERE source = ${source}`;
+    if (sectors.length) {
+      await db`DELETE FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`;
+    } else {
+      await db`DELETE FROM mi_companies WHERE source = ${source}`;
+    }
     for (const r of clean) {
       (r as CompanyInput & { _status?: string })._status = statusByKey.get(r.dedupKey);
       (r as CompanyInput & { _firstSeen?: unknown })._firstSeen = firstSeenByKey.get(r.dedupKey);
