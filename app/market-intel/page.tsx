@@ -514,10 +514,17 @@ export default function MarketIntelPage() {
     const r = sectorRows.find((x) => x.slug === slug);
     if (!r) return null;
     return (
-      <p className="mt-2 text-xs text-slate-500 dark:text-white/40">
-        🎯 {r.estab.toLocaleString()} AZ establishments
-        {r.emp ? ` · ${r.emp.toLocaleString()} employees` : ""} (Census CBP {r.year})
-      </p>
+      <div className="mb-3 mt-2 flex flex-wrap items-center gap-2">
+        <span className="rounded-lg border border-[#b8975a]/40 bg-[#b8975a]/10 px-3 py-1.5 text-sm text-[#0d1f3c] dark:text-white">
+          🏢 <b>{r.estab.toLocaleString()}</b> Arizona companies
+        </span>
+        {r.emp ? (
+          <span className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-white/70">
+            👥 <b>{r.emp.toLocaleString()}</b> employees
+          </span>
+        ) : null}
+        <span className="text-xs text-slate-400 dark:text-white/30">business establishments · Census CBP {r.year}</span>
+      </div>
     );
   };
   const sectorTotal = sectorRows.reduce((s, r) => s + r.estab, 0);
@@ -1813,8 +1820,25 @@ export default function MarketIntelPage() {
                 </div>
               )}
               <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
-                {sectorView === "trend" ? "Establishments per year — top 8 sectors, stacked" : `CBP ${sectorYear} mix`} · {sectorTotal.toLocaleString()} establishments statewide (CBP {sectorYear})
+                {sectorView === "trend" ? "Establishments per year — top 8 sectors" : `CBP ${sectorYear} mix`} · {sectorTotal.toLocaleString()} establishments statewide (CBP {sectorYear})
               </p>
+              <div className={`${tableWrap} mt-3 max-h-[320px] overflow-y-auto`}>
+                <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                  <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                    <th className={th}>Sector</th><th className={th}>Companies</th><th className={th}>Employees</th><th className={th}>Share</th>
+                  </tr></thead>
+                  <tbody>
+                    {sectorRows.map((r) => (
+                      <tr key={r.slug} className="border-b border-slate-100 dark:border-white/5">
+                        <td className={td}>{r.name}</td>
+                        <td className={`${td} font-medium`}>{r.estab.toLocaleString()}</td>
+                        <td className={td}>{r.emp ? r.emp.toLocaleString() : "—"}</td>
+                        <td className={td}>{sectorTotal ? `${((r.estab / sectorTotal) * 100).toFixed(1)}%` : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
           <SubSection title="Aerospace & Defense">
@@ -1837,6 +1861,16 @@ export default function MarketIntelPage() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            {(() => {
+              const fy25 = obs
+                .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.obsDate >= "2024-10-01" && o.obsDate <= "2025-09-01")
+                .reduce((s, o) => s + (o.value || 0), 0);
+              return fy25 > 0 ? (
+                <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
+                  Cross-reference: this series computes to ${(fy25 / 1e9).toFixed(1)}B for federal FY2025 · DoD&apos;s published Defense Spending by State report: $14.5B (FY2023) / $14.7B (FY2024) AZ contract spending — different methodology, shown for comparison. The daily ingest re-verifies these monthly figures against USASpending&apos;s fiscal-year totals every run (see Data freshness below).
+                </p>
+              ) : null;
+            })()}
           </div>
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Contracts — Recent Months</h3>
