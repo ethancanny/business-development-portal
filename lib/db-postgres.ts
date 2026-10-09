@@ -214,6 +214,7 @@ export function ensureSchema(): Promise<void> {
         )`;
       await db`ALTER TABLE mi_acquisitions ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'acquisition'`;
       await db`ALTER TABLE mi_acquisitions ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''`;
+      await db`ALTER TABLE mi_acquisitions ADD COLUMN IF NOT EXISTS headline TEXT NOT NULL DEFAULT ''`;
       await db`
         CREATE TABLE IF NOT EXISTS mi_filings (
           id TEXT PRIMARY KEY,

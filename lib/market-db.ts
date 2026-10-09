@@ -230,6 +230,7 @@ export interface AcquisitionInput {
   sourceUrl: string;
   publisher?: string;
   eventType?: "acquisition" | "bankruptcy" | "expansion" | "contract" | "relocation" | "ipo" | "policy" | "investment";
+  headline?: string;
   summary?: string;
 }
 
@@ -264,10 +265,10 @@ export async function upsertAcquisitions(rows: AcquisitionInput[]): Promise<numb
     if (r.target && seenKeys.has(key)) continue;
     seenKeys.add(key);
     const res = await db`
-      INSERT INTO mi_acquisitions (id, acquirer, target, target_location, industry, deal_value, announced_date, source_url, publisher, event_type, summary)
+      INSERT INTO mi_acquisitions (id, acquirer, target, target_location, industry, deal_value, announced_date, source_url, publisher, event_type, summary, headline)
       VALUES (${newId()}, ${r.acquirer ?? ""}, ${r.target ?? ""}, ${r.targetLocation ?? ""}, ${r.industry ?? ""},
               ${r.dealValue ?? null}, ${r.announcedDate ?? ""}, ${r.sourceUrl}, ${r.publisher ?? ""},
-              ${r.eventType ?? "acquisition"}, ${r.summary ?? ""})
+              ${r.eventType ?? "acquisition"}, ${r.summary ?? ""}, ${r.headline ?? ""})
       ON CONFLICT (source_url) DO NOTHING
       RETURNING (xmax = 0) AS inserted`;
     if (res[0]?.inserted) added++;
@@ -287,6 +288,7 @@ export async function getAcquisitions(status?: string): Promise<MiAcquisition[]>
     dealValue: numOrNull(r.deal_value), announcedDate: str(r.announced_date),
     sourceUrl: str(r.source_url), publisher: str(r.publisher),
     eventType: (str(r.event_type) || "acquisition") as MiAcquisition["eventType"],
+    headline: str(r.headline),
     summary: str(r.summary),
     status: str(r.status) as MiAcquisition["status"], createdAt: String(r.created_at),
   }));
@@ -301,14 +303,27 @@ export async function setAcquisitionStatus(id: string, status: MiAcquisition["st
 export async function updateAcquisitionSummary(
   id: string,
   summary: string,
-  dealValue?: number | null
+  dealValue?: number | null,
+  headline?: string
 ): Promise<void> {
   await ensureSchema();
-  if (dealValue !== undefined && dealValue !== null) {
-    await sql()`UPDATE mi_acquisitions SET summary = ${summary}, deal_value = ${dealValue} WHERE id = ${id}`;
+  const db = sql();
+  if (headline !== undefined && headline.trim()) {
+    if (dealValue !== undefined && dealValue !== null) {
+      await db`UPDATE mi_acquisitions SET summary = ${summary}, deal_value = ${dealValue}, headline = ${headline.trim()} WHERE id = ${id}`;
+    } else {
+      await db`UPDATE mi_acquisitions SET summary = ${summary}, headline = ${headline.trim()} WHERE id = ${id}`;
+    }
+  } else if (dealValue !== undefined && dealValue !== null) {
+    await db`UPDATE mi_acquisitions SET summary = ${summary}, deal_value = ${dealValue} WHERE id = ${id}`;
   } else {
-    await sql()`UPDATE mi_acquisitions SET summary = ${summary} WHERE id = ${id}`;
+    await db`UPDATE mi_acquisitions SET summary = ${summary} WHERE id = ${id}`;
   }
+}
+
+export async function updateAcquisitionHeadline(id: string, headline: string): Promise<void> {
+  await ensureSchema();
+  await sql()`UPDATE mi_acquisitions SET headline = ${headline} WHERE id = ${id}`;
 }
 
 /** Remove un-triaged bankruptcy news rows (used to re-ingest with a tighter filter). */
