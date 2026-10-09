@@ -60,11 +60,12 @@ export async function GET(
         return NextResponse.json(await getListings(sp.get("status") ?? undefined));
       case "companies": {
         const sector = sp.get("sector") ?? undefined;
+        const off = Number(sp.get("offset") ?? 0);
         const [companies, total] = await Promise.all([
-          getCompanies(sector, Number(sp.get("limit") ?? 600)),
+          getCompanies(sector, Number(sp.get("limit") ?? 600), off),
           countCompanies(sector),
         ]);
-        return NextResponse.json({ companies, total });
+        return NextResponse.json({ companies, total, offset: off });
       }
       case "multiples":
         return NextResponse.json(await getMultiples());

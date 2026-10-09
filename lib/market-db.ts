@@ -225,26 +225,58 @@ function computeFit(r: CompanyInput): { fit: boolean; why: string } {
   const sig = r.signalValue ?? null;
   const money = (v: number) =>
     v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v / 1e3)}K`;
-  if (r.source === "USASpending" || r.source.startsWith("SAM")) {
-    if (sig !== null) {
-      const inBand = sig >= 250_000 && sig <= 100_000_000;
-      return {
-        fit: inBand && (age === null || age >= 3),
-        why: inBand ? `${money(sig)} federal awards FY23–26${yr ? ` · est. ${yr}` : ""}` : "",
-      };
-    }
+  // Fit v2 (Ethan, Oct 2026): never a fit if the company — or its parent — is a
+  // corporate giant, whatever a single subsidiary/location's numbers look like.
+  const GIANTS = [
+    "HONEYWELL", "RAYTHEON", "RTX CORPORATION", "BOEING", "LOCKHEED", "NORTHROP", "GENERAL DYNAMICS",
+    "L3HARRIS", "BAE SYSTEMS", "LEIDOS", "BOOZ ALLEN", "PERATON", "COLLINS AEROSPACE", "PRATT & WHITNEY",
+    "AEROJET", "TEXTRON", "ROLLS ROYCE", "SAFRAN", "INTEL", "TAIWAN SEMICONDUCTOR", "MICROSOFT", "AMAZON",
+    "GOOGLE", "ORACLE", "WALMART", "TARGET CORPORATION", "CVS", "WALGREENS", "UNITEDHEALTH", "OPTUM",
+    "ELEVANCE", "AETNA", "CIGNA", "HUMANA", "KAISER", "BANNER HEALTH", "DIGNITY HEALTH", "COMMONSPIRIT",
+    "HONORHEALTH", "MAYO CLINIC", "PHOENIX CHILDREN", "TENET HEALTH", "HCA HEALTH", "UNIVERSAL HEALTH",
+    "PCL CONSTRUCTION", "SUNDT", "MORTENSON", "HENSEL PHELPS", "SKANSKA", "TURNER CONSTRUCTION", "BECHTEL",
+    "FLUOR", "AECOM", "JACOBS", "CATERPILLAR", "EATON CORPORATION", "PARKER HANNIFIN", "EMERSON ELECTRIC",
+  ];
+  const hay = [r.name ?? "", String(details.parentName ?? ""), String(details.dbaName ?? "")].join(" ").toUpperCase();
+  if (GIANTS.some((g) => hay.includes(g))) return { fit: false, why: "" };
+  // Holistic size evidence when enrichment has supplied it: estimated annual
+  // revenue (details.revenueEstimate) and employee count — hard caps beat any
+  // single-signal band.
+  const rev = typeof details.revenueEstimate === "number" ? details.revenueEstimate : null;
+  const emp = r.employees ?? (typeof details.employeesEstimate === "number" ? details.employeesEstimate : null);
+  if (rev !== null && rev > 150_000_000) return { fit: false, why: "" };
+  if (emp !== null && emp > 1500) return { fit: false, why: "" };
+  const locN = typeof details.locationCount === "number" ? details.locationCount : 1;
+  const locBit = locN > 1 ? ` · ${locN} locations` : "";
+  const evBits = [
+    rev !== null ? `est. revenue ${money(rev)}` : "",
+    emp !== null ? `~${emp.toLocaleString()} employees` : "",
+  ].filter(Boolean).join(" · ");
+  const evBit = evBits ? ` · ${evBits}` : "";
+  const src = r.source ?? "";
+  if ((src.includes("USASpending") || src.includes("SAM")) && sig !== null) {
+    const inBand = sig >= 250_000 && sig <= 100_000_000;
     return {
-      fit: age !== null && age >= 5,
-      why: age !== null && age >= 5 ? `Est. ${yr} · SAM-registered ${r.subsector || "supplier"}` : "",
+      fit: inBand && (age === null || age >= 3),
+      why: inBand ? `${money(sig)} federal awards FY23–26${yr ? ` · est. ${yr}` : ""}${locBit}${evBit}` : "",
     };
   }
-  if (r.source === "NPPES") {
-    return { fit: age !== null && age >= 5, why: age !== null && age >= 5 ? `Operating since ${yr} · ${r.subsector || "healthcare provider"}` : "" };
+  if (src.includes("SAM")) {
+    const evInBand = (rev !== null && rev >= 1_000_000 && rev <= 150_000_000) || (emp !== null && emp >= 8 && emp <= 1500);
+    const fit = (age !== null && age >= 5) || (age !== null && age >= 3 && evInBand);
+    return {
+      fit,
+      why: fit ? `Est. ${yr} · SAM-registered ${r.subsector || "supplier"}${locBit}${evBit}` : "",
+    };
   }
-  if (r.source === "AZ ROC") {
+  if (src.includes("NPPES")) {
+    const fit = age !== null && age >= 5;
+    return { fit, why: fit ? `Operating since ${yr} · ${r.subsector || "healthcare provider"}${locBit}${evBit}` : "" };
+  }
+  if (src.includes("ROC")) {
     const n = typeof details.licenseCount === "number" ? details.licenseCount : 1;
     const fit = age !== null && age >= 7 && (n >= 2 || /General|Engineering/.test(r.subsector ?? ""));
-    return { fit, why: fit ? `Licensed since ${yr} · ${n} license${n > 1 ? "s" : ""} on file` : "" };
+    return { fit, why: fit ? `Licensed since ${yr} · ${n} license${n > 1 ? "s" : ""} on file${locBit}${evBit}` : "" };
   }
   return { fit: false, why: "" };
 }
@@ -330,6 +362,67 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
   return { received: clean.length, total: numOrNull(cnt[0]?.n) ?? 0 };
 }
 
+export interface ConsolidateRow extends CompanyInput {
+  /** "source|dedupKey" keys of the member rows this consolidated row replaces. */
+  absorb: string[];
+}
+
+const STATUS_RANK: Record<string, number> = { new: 0, dismissed: 1, keep: 2, added: 3 };
+
+/**
+ * Replace groups of duplicate member rows (same company, many locations /
+ * registrations, possibly spanning sectors and sources) with one consolidated
+ * row per company. Fit is re-judged by computeFit on the consolidated numbers
+ * at insert. Triage status carries over from the best-ranked absorbed row.
+ */
+export async function consolidateCompanies(rows: ConsolidateRow[]): Promise<{ groups: number; absorbed: number }> {
+  await ensureSchema();
+  const db = sql();
+  const keyOf = (s: string, d: string) => `${s}|${d}`;
+  const absorbKeys = Array.from(new Set(rows.flatMap((r) => r.absorb ?? [])));
+  const statusByKey = new Map<string, string>();
+  for (let i = 0; i < absorbKeys.length; i += 1500) {
+    const chunk = absorbKeys.slice(i, i + 1500);
+    const found = await db`SELECT source, dedup_key, status FROM mi_companies WHERE (source || '|' || dedup_key) = ANY(${chunk})`;
+    for (const f of found as unknown as Record<string, unknown>[]) {
+      statusByKey.set(keyOf(String(f.source), String(f.dedup_key)), String(f.status));
+    }
+  }
+  for (let i = 0; i < absorbKeys.length; i += 1500) {
+    const chunk = absorbKeys.slice(i, i + 1500);
+    await db`DELETE FROM mi_companies WHERE (source || '|' || dedup_key) = ANY(${chunk})`;
+  }
+  const bySource = new Map<string, ConsolidateRow[]>();
+  for (const r of rows) {
+    const list = bySource.get(r.source) ?? [];
+    list.push(r);
+    bySource.set(r.source, list);
+  }
+  for (const [source, list] of bySource) {
+    await importCompanies(source, list, false);
+  }
+  const keysByStatus = new Map<string, string[]>();
+  for (const r of rows) {
+    let best = "new";
+    for (const k of r.absorb ?? []) {
+      const s = statusByKey.get(k);
+      if (s && (STATUS_RANK[s] ?? 0) > (STATUS_RANK[best] ?? 0)) best = s;
+    }
+    if (best !== "new") {
+      const list = keysByStatus.get(best) ?? [];
+      list.push(keyOf(r.source, r.dedupKey));
+      keysByStatus.set(best, list);
+    }
+  }
+  for (const [status, keys] of keysByStatus) {
+    for (let i = 0; i < keys.length; i += 1500) {
+      const chunk = keys.slice(i, i + 1500);
+      await db`UPDATE mi_companies SET status = ${status} WHERE (source || '|' || dedup_key) = ANY(${chunk})`;
+    }
+  }
+  return { groups: rows.length, absorbed: absorbKeys.length };
+}
+
 export async function countCompanies(sector?: string): Promise<number> {
   await ensureSchema();
   const db = sql();
@@ -339,13 +432,14 @@ export async function countCompanies(sector?: string): Promise<number> {
   return numOrNull(rows[0]?.n) ?? 0;
 }
 
-export async function getCompanies(sector?: string, limit = 600): Promise<MiCompany[]> {
+export async function getCompanies(sector?: string, limit = 600, offset = 0): Promise<MiCompany[]> {
   await ensureSchema();
   const db = sql();
   const lim = Math.min(Math.max(limit, 1), 5000);
+  const off = Math.max(offset, 0);
   const rows = sector
-    ? await db`SELECT * FROM mi_companies WHERE sector = ${sector} ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim}`
-    : await db`SELECT * FROM mi_companies ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim}`;
+    ? await db`SELECT * FROM mi_companies WHERE sector = ${sector} ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim} OFFSET ${off}`
+    : await db`SELECT * FROM mi_companies ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim} OFFSET ${off}`;
   return rows.map((r) => ({
     id: str(r.id), dedupKey: str(r.dedup_key), name: str(r.name), sector: str(r.sector),
     subsector: str(r.subsector), naics: str(r.naics), city: str(r.city), state: str(r.state),

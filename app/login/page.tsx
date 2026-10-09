@@ -68,7 +68,7 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="ethan@cannycapitalpartners.com"
+              placeholder="Email address"
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#b8975a] focus:outline-none dark:border-white/15 dark:bg-[#0d1f3c] dark:text-[#e8dfc8] dark:placeholder:text-white/30"
             />
           </div>
@@ -100,11 +100,6 @@ export default function LoginPage() {
             {busy ? "Signing in…" : "Sign in"}
           </button>
         </form>
-
-        <p className="mt-6 rounded-lg bg-[#e8dfc8]/40 px-3 py-2 text-xs text-slate-500 dark:bg-white/5 dark:text-white/50">
-          Partner sign in:{" "}
-          <span className="font-medium">ethan@cannycapitalpartners.com</span>
-        </p>
       </div>
     </div>
   );
