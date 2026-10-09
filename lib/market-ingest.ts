@@ -10,6 +10,7 @@ import {
   upsertFilings,
   upsertIndicatorObs,
   upsertIndicatorObsBulk,
+  getIndicatorSeries,
   upsertWarn,
   backfillWarnIndustries,
   clearNewBankruptcyNews,
@@ -42,6 +43,14 @@ const FRED_SERIES: { id: string; title: string }[] = [
   { id: "SMS04000006562000001", title: "Arizona Health Care & Social Assistance Employment" },
   { id: "CEU6500000001", title: "US Education & Health Services Employment" },
   { id: "QTAXTOTALQTAXCAT3AZNO", title: "Arizona State Tax Collections (Quarterly)" },
+  // Commodity prices Arizona's economy depends on (mining, construction,
+  // energy): IMF global prices via FRED + EIA energy + PPI lumber.
+  { id: "PCOPPUSDM", title: "Copper — Global Price (IMF)" },
+  { id: "PGOLDUSDM", title: "Gold — Global Price (IMF)" },
+  { id: "PSILVUSDM", title: "Silver — Global Price (IMF)" },
+  { id: "MCOILWTICO", title: "WTI Crude Oil Price" },
+  { id: "MHHNGSP", title: "Natural Gas — Henry Hub Price" },
+  { id: "WPU081", title: "Lumber & Wood Products PPI" },
 ];
 
 interface FredObsResponse {
@@ -78,31 +87,38 @@ export async function ingestIndicators(): Promise<number> {
     }
   }
   let total = 0;
+  const failures: string[] = [];
   const results = await Promise.all(
     FRED_SERIES.map(async (s) => {
-      const meta = await getSeriesMeta(s.id);
-      const url =
-        `https://api.stlouisfed.org/fred/series/observations?series_id=${s.id}` +
-        `&api_key=${key}&file_type=json&observation_start=${startStr}&sort_order=asc&limit=100000`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`FRED ${s.id}: HTTP ${res.status}`);
-      const data = (await res.json()) as FredObsResponse;
-      const rows: IndicatorInput[] = (data.observations ?? [])
-        .filter((o) => o.value !== ".")
-        .map((o) => ({
-          source: "fred" as const,
-          seriesId: s.id,
-          title: s.title,
-          units: meta.units,
-          frequency: meta.frequency,
-          obsDate: o.date,
-          value: Number(o.value),
-        }));
-      return upsertIndicatorObs(rows);
+      try {
+        const meta = await getSeriesMeta(s.id);
+        const url =
+          `https://api.stlouisfed.org/fred/series/observations?series_id=${s.id}` +
+          `&api_key=${key}&file_type=json&observation_start=${startStr}&sort_order=asc&limit=100000`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`FRED ${s.id}: HTTP ${res.status}`);
+        const data = (await res.json()) as FredObsResponse;
+        const rows: IndicatorInput[] = (data.observations ?? [])
+          .filter((o) => o.value !== ".")
+          .map((o) => ({
+            source: "fred" as const,
+            seriesId: s.id,
+            title: s.title,
+            units: meta.units,
+            frequency: meta.frequency,
+            obsDate: o.date,
+            value: Number(o.value),
+          }));
+        return await upsertIndicatorObs(rows);
+      } catch {
+        // One dead/renamed series must not sink the whole refresh.
+        failures.push(s.id);
+        return 0;
+      }
     })
   );
   total = results.reduce((a, b) => a + b, 0);
-  await logSync("indicators", "ok", total, `FRED: ${FRED_SERIES.length} series refreshed`);
+  await logSync("indicators", "ok", total, `FRED: ${FRED_SERIES.length} series refreshed${failures.length ? `; failed: ${failures.join(", ")}` : ""}`);
   return total;
 }
 
@@ -379,6 +395,7 @@ export async function ingestNews(): Promise<number> {
         announcedDate: announced,
         sourceUrl: item.link,
         publisher: item.source,
+        headline: headlineSummary(item.title),
         summary: buildEventBrief({ title: item.title, acquirer, target }),
       });
     }
@@ -505,6 +522,7 @@ export async function ingestEconomicEvents(): Promise<number> {
         sourceUrl: item.link,
         publisher: item.source,
         eventType,
+        headline: headlineSummary(item.title),
         summary: buildEventBrief({ title: item.title, target: subject }),
       });
     }
@@ -564,6 +582,7 @@ export async function ingestBankruptcyNews(): Promise<number> {
         sourceUrl: item.link,
         publisher: item.source,
         eventType: "bankruptcy",
+        headline: headlineSummary(item.title),
         summary: buildEventBrief({ title: item.title, target: company }),
       });
     }
@@ -1005,8 +1024,10 @@ const CBP_SECTORS: { code: string; slug: string; name: string }[] = [
 
 /** How many companies (employer establishments) operate in each Arizona
  * sector — the acquisition target universe. Census County Business
- * Patterns, annual; stored as CBP_AZ_SEC_<slug>_ESTAB / _EMP series for
- * the latest two published years. Runs in the daily `all` ingest. */
+ * Patterns, annual; stored as CBP_AZ_SEC_<slug>_ESTAB / _EMP series.
+ * Every run refreshes the latest two published years; history back to
+ * 2017 (for the sector trend chart) is fetched only when missing, so
+ * the daily `all` run stays fast. Runs in the daily `all` ingest. */
 export async function ingestSectorCounts(): Promise<number> {
   const key = process.env.CENSUS_KEY;
   if (!key) {
@@ -1046,13 +1067,24 @@ export async function ingestSectorCounts(): Promise<number> {
     await logSync("sector_counts", "error", 0, "No published CBP year found");
     return 0;
   }
+  // Latest two years always; older years (to 2017) only when not stored.
+  const existing = await getIndicatorSeries(["CBP_AZ_SEC_23_ESTAB"]).catch(() => []);
+  const haveYears = new Set(existing.map((o) => Number(o.obsDate.slice(0, 4))));
+  const years: number[] = [latestYear, latestYear - 1];
+  for (let y = latestYear - 2; y >= 2017; y--) {
+    if (!haveYears.has(y)) years.push(y);
+  }
+  const jobs: { year: number; s: (typeof CBP_SECTORS)[number] }[] = [];
+  for (const year of years) for (const s of CBP_SECTORS) jobs.push({ year, s });
   let total = 0;
-  for (const year of [latestYear, latestYear - 1]) {
-    const rows: IndicatorInput[] = [];
-    for (const s of CBP_SECTORS) {
-      try {
-        const v = await fetchSector(year, s.code);
-        if (v) {
+  for (let i = 0; i < jobs.length; i += 6) {
+    const batch = jobs.slice(i, i + 6);
+    const results = await Promise.all(
+      batch.map(async ({ year, s }) => {
+        try {
+          const v = await fetchSector(year, s.code);
+          if (!v) return [] as IndicatorInput[];
+          const rows: IndicatorInput[] = [];
           if (v.estab !== null)
             rows.push({
               source: "census",
@@ -1073,15 +1105,15 @@ export async function ingestSectorCounts(): Promise<number> {
               obsDate: `${year}-01-01`,
               value: v.emp,
             });
+          return rows;
+        } catch {
+          return [] as IndicatorInput[];
         }
-      } catch {
-        continue;
-      }
-      await new Promise((r) => setTimeout(r, 120));
-    }
-    total += await upsertIndicatorObs(rows);
+      })
+    );
+    total += await upsertIndicatorObs(results.flat());
   }
-  await logSync("sector_counts", "ok", total, `CBP sector establishments, latest ${latestYear}`);
+  await logSync("sector_counts", "ok", total, `CBP sector establishments, ${Math.min(...years)}–${latestYear}`);
   return total;
 }
 
