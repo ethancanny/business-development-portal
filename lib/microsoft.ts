@@ -459,7 +459,7 @@ export async function ensureSubscription(): Promise<{
   }
   // Recreate: Graph event subscriptions cap at ~4230 minutes.
   const expires = new Date(Date.now() + 4200 * 60000).toISOString();
-  const sub = (await graph("/me/subscriptions", undefined, {
+  const sub = (await graph("/subscriptions", undefined, {
     method: "POST",
     body: JSON.stringify({
       changeType: "created,updated,deleted",
@@ -473,7 +473,7 @@ export async function ensureSubscription(): Promise<{
     await setMsState("subscriptionId", sub.id);
     await setMsState("subscriptionExpiresAt", sub.expirationDateTime ?? expires);
     if (existingId && existingId !== sub.id) {
-      await graph(`/me/subscriptions/${existingId}`, undefined, { method: "DELETE" }).catch(
+      await graph(`/subscriptions/${existingId}`, undefined, { method: "DELETE" }).catch(
         () => null
       );
     }
@@ -504,7 +504,7 @@ export async function msStatus(): Promise<{
 export async function msDisconnect(): Promise<void> {
   const subId = await getMsState("subscriptionId");
   if (subId && (await getMsTokens())) {
-    await graph(`/me/subscriptions/${subId}`, undefined, { method: "DELETE" }).catch(() => null);
+    await graph(`/subscriptions/${subId}`, undefined, { method: "DELETE" }).catch(() => null);
   }
   await setMsState("subscriptionId", "");
   await setMsState("subscriptionExpiresAt", "");
