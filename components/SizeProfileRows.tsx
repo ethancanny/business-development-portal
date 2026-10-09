@@ -108,11 +108,17 @@ export default function SizeProfileRows({ obs }: { obs: MiIndicatorObs[] }) {
                 </div>
               </div>
               <p className="mt-1 text-xs text-slate-500 dark:text-white/50">
-                Under $5M rev: {p.below.toLocaleString()} ({pct(p.below)}%) ·{" "}
+                <b className="text-slate-500 dark:text-white/60">
+                  Under $5M rev: {p.below.toLocaleString()} ({pct(p.below)}%)
+                </b>{" "}
+                ·{" "}
                 <b className="text-[#8a6f3e] dark:text-[#d4b37a]">
                   $5–20M: {p.band.toLocaleString()} ({pct(p.band)}%)
                 </b>{" "}
-                · Over $20M: {p.above.toLocaleString()} ({pct(p.above)}%)
+                ·{" "}
+                <b className="text-[#132847] dark:text-[#9db8d4]">
+                  Over $20M: {p.above.toLocaleString()} ({pct(p.above)}%)
+                </b>
                 {p.ebitdaCount !== null && p.margin !== null && (
                   <>
                     {" "}· ≈ <b>{p.ebitdaCount.toLocaleString()} firms in the $500K–$2M EBITDA band</b> (at a ~
