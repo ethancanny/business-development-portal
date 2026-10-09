@@ -29,6 +29,17 @@ export async function GET(req: NextRequest) {
   const from = sp.get("from") ?? new Date(now - 14 * 86400000).toISOString();
   const to = sp.get("to") ?? new Date(now + 28 * 86400000).toISOString();
   try {
+    // ?live=1 (Calendar month view): pull the requested range straight from
+    // Graph first so any browsable month is fresh, then read the mirror.
+    if (sp.get("live") === "1") {
+      const spanMs = new Date(to).getTime() - new Date(from).getTime();
+      if (spanMs > 0 && spanMs <= 370 * 86400000) {
+        const { msConnected, pullGraphRange } = await import("@/lib/microsoft");
+        if (await msConnected()) {
+          await pullGraphRange(from, to).catch(() => null);
+        }
+      }
+    }
     const events = await getCalendarEvents(from, to);
     return NextResponse.json({ events });
   } catch (err) {

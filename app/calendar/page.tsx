@@ -68,6 +68,23 @@ const locText = (loc: string): string => {
 const dayKey = (iso: string): string =>
   new Date(iso).toLocaleDateString("en-US", { timeZone: "America/Phoenix" });
 
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+const phoenixCursor = (): { y: number; m: number } => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Phoenix",
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(new Date());
+  return {
+    y: Number(parts.find((p) => p.type === "year")?.value ?? 2026),
+    m: Number(parts.find((p) => p.type === "month")?.value ?? 1) - 1,
+  };
+};
+
 const dayLabel = (iso: string): string => {
   const today = new Date().toLocaleDateString("en-US", { timeZone: "America/Phoenix" });
   const tomorrow = new Date(Date.now() + 86400000).toLocaleDateString("en-US", {
@@ -123,6 +140,8 @@ export default function CalendarPage() {
   const [editRemoved, setEditRemoved] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [ms, setMs] = useState<MsStatus | null>(null);
+  const [view, setView] = useState<"list" | "calendar">("list");
+  const [cursor, setCursor] = useState<{ y: number; m: number }>(() => phoenixCursor());
 
   const loadPending = async () => {
     try {
@@ -152,6 +171,43 @@ export default function CalendarPage() {
     }
   };
 
+  const gridRange = (c: { y: number; m: number }) => {
+    const first = new Date(Date.UTC(c.y, c.m, 1, 12));
+    const start = new Date(first.getTime() - first.getUTCDay() * 86400000);
+    const end = new Date(start.getTime() + 42 * 86400000);
+    const iso = (d: Date) =>
+      `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(
+        d.getUTCDate()
+      ).padStart(2, "0")}T00:00:00-07:00`;
+    return { from: iso(start), to: iso(end) };
+  };
+
+  const loadRange = async (c: { y: number; m: number }) => {
+    const { from, to } = gridRange(c);
+    const r = await fetch(
+      `/api/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&live=1`
+    );
+    if (r.status === 401) {
+      router.replace("/login");
+      return;
+    }
+    if (r.ok) {
+      const d = await r.json();
+      if (Array.isArray(d.events)) setEvents(d.events);
+    }
+  };
+
+  const switchView = (v: "list" | "calendar", keepEvents = false) => {
+    setView(v);
+    try {
+      localStorage.setItem("ccp-cal-view", v);
+    } catch {
+      /* storage unavailable */
+    }
+    setEditingId("");
+    if (v === "list" && !keepEvents) loadEvents().catch(() => null);
+  };
+
   const loadMsStatus = async () => {
     try {
       const r = await fetch("/api/calendar/microsoft/status");
@@ -167,6 +223,13 @@ export default function CalendarPage() {
         await loadEvents();
         await loadPending();
         await loadMsStatus();
+        try {
+          if (localStorage.getItem("ccp-cal-view") === "calendar") {
+            setView("calendar");
+          }
+        } catch {
+          /* storage unavailable */
+        }
         const param = new URLSearchParams(window.location.search).get("ms");
         if (param === "connected") {
           setNotice("Outlook connected — real-time sync is on.");
@@ -182,10 +245,16 @@ export default function CalendarPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
+  // Calendar view: fetch the visible grid range live from Graph.
+  useEffect(() => {
+    if (view === "calendar") loadRange(cursor).catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, cursor]);
+
   // Live refresh: webhook-driven changes appear without a manual reload.
   useEffect(() => {
     const tick = () => {
-      loadEvents().catch(() => null);
+      (view === "calendar" ? loadRange(cursor) : loadEvents()).catch(() => null);
       loadPending().catch(() => null);
     };
     const id = window.setInterval(tick, 45000);
@@ -200,7 +269,7 @@ export default function CalendarPage() {
       document.removeEventListener("visibilitychange", onVis);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [view, cursor]);
 
   const queueIntent = async (
     action: "create" | "update" | "delete",
@@ -317,6 +386,39 @@ export default function CalendarPage() {
     pa.reverse();
     return { upcoming: up, past: pa };
   }, [events]);
+
+  const gridCells = useMemo(() => {
+    if (view !== "calendar") return [];
+    const first = new Date(Date.UTC(cursor.y, cursor.m, 1, 12));
+    const start = new Date(first.getTime() - first.getUTCDay() * 86400000);
+    const todayKey = new Date().toLocaleDateString("en-US", {
+      timeZone: "America/Phoenix",
+    });
+    const cells: {
+      key: string;
+      dateISO: string;
+      dayNum: number;
+      inMonth: boolean;
+      isToday: boolean;
+      events: CalendarEvent[];
+    }[] = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start.getTime() + i * 86400000);
+      const key = d.toLocaleDateString("en-US", { timeZone: "America/Phoenix" });
+      cells.push({
+        key: `${key}-${i}`,
+        dateISO: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(
+          2,
+          "0"
+        )}-${String(d.getUTCDate()).padStart(2, "0")}`,
+        dayNum: d.getUTCDate(),
+        inMonth: d.getUTCMonth() === cursor.m,
+        isToday: key === todayKey,
+        events: events.filter((e) => dayKey(e.startsAt) === key),
+      });
+    }
+    return cells;
+  }, [view, cursor, events]);
 
   const groups = (list: CalendarEvent[]) => {
     const keys: string[] = [];
@@ -570,6 +672,146 @@ export default function CalendarPage() {
     );
   };
 
+  const navBtn =
+    "rounded-lg border border-slate-300 px-2.5 py-1 text-sm font-bold text-slate-500 transition hover:border-[#b8975a]/60 hover:text-[#8a6f3e] dark:border-white/15 dark:text-white/60";
+  const selectCls =
+    "rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-[#0d1f3c] outline-none focus:border-[#b8975a] dark:border-white/15 dark:bg-white/[0.04] dark:text-white";
+  const moveCursor = (delta: number) =>
+    setCursor((c) => {
+      const d = new Date(Date.UTC(c.y, c.m + delta, 1));
+      return { y: d.getUTCFullYear(), m: d.getUTCMonth() };
+    });
+  const openInList = (e: CalendarEvent) => {
+    switchView("list", true);
+    setEditingId(e.eventId);
+    setEditDraft(draftOf(e));
+    setEditRemoved([]);
+  };
+  const startNewOn = (dateISO: string) => {
+    setDraft({ ...emptyDraft, date: dateISO });
+    setShowNew(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const timeShort = (e: CalendarEvent) =>
+    new Date(e.startsAt).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      timeZone: "America/Phoenix",
+    });
+
+  const calendarView = (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button onClick={() => moveCursor(-1)} className={navBtn} aria-label="Previous month">
+          ‹
+        </button>
+        <h3 className="min-w-[170px] text-center text-base font-bold text-[#0d1f3c] dark:text-white">
+          {MONTHS[cursor.m]} {cursor.y}
+        </h3>
+        <button onClick={() => moveCursor(1)} className={navBtn} aria-label="Next month">
+          ›
+        </button>
+        <button onClick={() => setCursor(phoenixCursor())} className={navBtn}>
+          Today
+        </button>
+        <div className="ml-auto flex gap-2">
+          <select
+            value={cursor.m}
+            onChange={(e) => setCursor({ y: cursor.y, m: Number(e.target.value) })}
+            className={selectCls}
+            aria-label="Month"
+          >
+            {MONTHS.map((name, i) => (
+              <option key={name} value={i}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={cursor.y}
+            onChange={(e) => setCursor({ y: Number(e.target.value), m: cursor.m })}
+            className={selectCls}
+            aria-label="Year"
+          >
+            {[2024, 2025, 2026, 2027, 2028].map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-7 overflow-hidden rounded-t-xl border border-b-0 border-slate-200 dark:border-white/10">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+          <div
+            key={d}
+            className="bg-slate-50 px-2 py-1.5 text-center text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:bg-white/[0.04] dark:text-white/40"
+          >
+            {d}
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-b-xl border border-slate-200 bg-slate-200 dark:border-white/10 dark:bg-white/10">
+        {gridCells.map((cell) => (
+          <div
+            key={cell.key}
+            onClick={() => startNewOn(cell.dateISO)}
+            className={`min-h-[92px] cursor-pointer p-1.5 transition hover:bg-[#b8975a]/10 sm:min-h-[108px] ${
+              cell.inMonth
+                ? "bg-white dark:bg-[#132847]/60"
+                : "bg-slate-50/70 dark:bg-white/[0.02]"
+            }`}
+          >
+            <span
+              className={
+                cell.isToday
+                  ? "flex h-6 w-6 items-center justify-center rounded-full bg-[#b8975a] text-[11px] font-bold text-white"
+                  : cell.inMonth
+                    ? "text-[11px] font-semibold text-slate-500 dark:text-white/60"
+                    : "text-[11px] text-slate-300 dark:text-white/25"
+              }
+            >
+              {cell.dayNum}
+            </span>
+            <div className="mt-1 space-y-1">
+              {cell.events.slice(0, 3).map((e) => (
+                <button
+                  key={e.eventId}
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    openInList(e);
+                  }}
+                  title={e.title}
+                  className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] transition ${
+                    e.dismissed
+                      ? "bg-slate-100 text-slate-400 line-through dark:bg-white/[0.03] dark:text-white/30"
+                      : "bg-[#b8975a]/15 text-[#0d1f3c] hover:bg-[#b8975a]/30 dark:text-white"
+                  }`}
+                >
+                  {!e.allDay && <span className="font-bold">{timeShort(e)} </span>}
+                  {e.title}
+                </button>
+              ))}
+              {cell.events.length > 3 && (
+                <button
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    switchView("list", true);
+                  }}
+                  className="block w-full text-left text-[11px] font-semibold text-[#8a6f3e] dark:text-[#d4b37a]"
+                >
+                  +{cell.events.length - 3} more
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
+        Click a day to start a new event on it — click an event to edit it.
+      </p>
+    </div>
+  );
+
   return (
     <div>
       <PageHero
@@ -633,6 +875,28 @@ export default function CalendarPage() {
           {notice && (
             <p className="text-sm text-[#8a6f3e] dark:text-[#d4b37a]">{notice}</p>
           )}
+          <div className="ml-auto flex overflow-hidden rounded-lg border border-slate-300 dark:border-white/15">
+            <button
+              onClick={() => switchView("list")}
+              className={`px-3 py-1.5 text-sm font-semibold transition ${
+                view === "list"
+                  ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                  : "text-slate-500 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/[0.06]"
+              }`}
+            >
+              ☰ List
+            </button>
+            <button
+              onClick={() => switchView("calendar")}
+              className={`px-3 py-1.5 text-sm font-semibold transition ${
+                view === "calendar"
+                  ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                  : "text-slate-500 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/[0.06]"
+              }`}
+            >
+              ▦ Calendar
+            </button>
+          </div>
         </div>
 
         {showNew && (
@@ -676,7 +940,9 @@ export default function CalendarPage() {
           </div>
         )}
 
-        {loading ? (
+        {view === "calendar" ? (
+          calendarView
+        ) : loading ? (
           <p className="text-sm text-slate-400 dark:text-white/40">Loading calendar…</p>
         ) : events.length === 0 && pending.length === 0 ? (
           <p className="text-sm text-slate-400 dark:text-white/40">

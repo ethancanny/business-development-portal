@@ -326,6 +326,14 @@ export async function pullGraphWindow(): Promise<{ imported: number; pruned: num
   const now = Date.now();
   const from = new Date(now - 16 * 86400000).toISOString();
   const to = new Date(now + 28 * 86400000).toISOString();
+  return pullGraphRange(from, to);
+}
+
+/** Pull an arbitrary range (calendar month view) into the mirror. */
+export async function pullGraphRange(
+  from: string,
+  to: string
+): Promise<{ imported: number; pruned: number; logged: number }> {
   const events: CalendarEvent[] = [];
   let path: string | null =
     `/me/calendarview?startDateTime=${encodeURIComponent(from)}&endDateTime=${encodeURIComponent(to)}` +
