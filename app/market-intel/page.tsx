@@ -494,19 +494,32 @@ export default function MarketIntelPage() {
         detail: `${Math.round(pLast.value || 0).toLocaleString()} permits in ${pLast.obsDate.slice(0, 7)} vs ${Math.round(avg12).toLocaleString()} 1-yr avg · FRED`,
       });
     }
+    // Defense candidate = the YTD change itself (monthly obligations are
+    // far too lumpy for a single-month reading; trailing zero months are
+    // unposted USASpending data, not real zeros).
     const dodObs = obs
       .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.value !== null)
       .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
-    const dodLast = dodObs[dodObs.length - 1];
-    const dodPrior = dodObs.slice(-13, -1);
-    if (dodLast && dodPrior.length >= 6) {
-      const dodAvg = dodPrior.reduce((s, o) => s + (o.value || 0), 0) / dodPrior.length;
-      if (dodAvg > 0) {
-        const chg = (((dodLast.value || 0) - dodAvg) / dodAvg) * 100;
+    while (dodObs.length > 0 && dodObs[dodObs.length - 1].value === 0) dodObs.pop();
+    if (dodObs.length > 0) {
+      const ly = dodObs[dodObs.length - 1].obsDate.slice(0, 4);
+      const py = String(Number(ly) - 1);
+      const curMonths = new Set(
+        dodObs.filter((o) => o.obsDate.startsWith(ly)).map((o) => o.obsDate.slice(5, 7))
+      );
+      const ytd = dodObs
+        .filter((o) => o.obsDate.startsWith(ly))
+        .reduce((s, o) => s + (o.value || 0), 0);
+      const ytdPrev = dodObs
+        .filter((o) => o.obsDate.startsWith(py) && curMonths.has(o.obsDate.slice(5, 7)))
+        .reduce((s, o) => s + (o.value || 0), 0);
+      if (ytdPrev > 0) {
+        const chg = ((ytd - ytdPrev) / ytdPrev) * 100;
+        const fmtB = (v: number) => (v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : `$${Math.round(v / 1e6)}M`);
         cands.push({
           score: Math.abs(chg),
-          headline: `Defense $ ${chg >= 0 ? "▲" : "▼"}${Math.abs(Math.round(chg))}%`,
-          detail: `$${Math.round((dodLast.value || 0) / 1e6)}M in ${dodLast.obsDate.slice(0, 7)} vs $${Math.round(dodAvg / 1e6)}M avg/mo · USASpending`,
+          headline: `Defense $ ${chg >= 0 ? "▲" : "▼"}${Math.abs(Math.round(chg))}% YTD`,
+          detail: `${fmtB(ytd)} in AZ defense contracts YTD vs ${fmtB(ytdPrev)} same period ${py} · USASpending`,
         });
       }
     }
@@ -1182,6 +1195,9 @@ export default function MarketIntelPage() {
             const dod = obs
               .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.value !== null)
               .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+            // Trailing zero months are unposted USASpending data, not real
+            // zeros — the YTD window ends at the last posted month.
+            while (dod.length > 0 && dod[dod.length - 1].value === 0) dod.pop();
             if (dod.length === 0) return null;
             const lastYear = dod[dod.length - 1].obsDate.slice(0, 4);
             const prevYear = String(Number(lastYear) - 1);
