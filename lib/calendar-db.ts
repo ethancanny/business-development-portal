@@ -41,6 +41,16 @@ async function ensure() {
   )`;
   await q`ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS web_url TEXT NOT NULL DEFAULT ''`;
   await q`ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS dismissed BOOLEAN NOT NULL DEFAULT false`;
+  await q`CREATE TABLE IF NOT EXISTS calendar_outbox (
+    id TEXT PRIMARY KEY,
+    action TEXT NOT NULL,
+    event_id TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending',
+    error TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    applied_at TIMESTAMPTZ
+  )`;
   ensured = true;
 }
 
@@ -115,4 +125,69 @@ export async function setCalendarEventDismissed(
   await ensure();
   const q = sql();
   await q`UPDATE calendar_events SET dismissed = ${dismissed}, updated_at = now() WHERE event_id = ${eventId}`;
+}
+
+/* ---------------- Two-way bridge outbox ----------------
+ * The portal has no Microsoft Graph credentials of its own; Ethan's Outlook
+ * connection lives agent-side. Edits made on the Calendar page are queued
+ * here as intents, and the 15-minute sync applies them to Outlook via the
+ * outlook-calendar CLI, then pulls the truth back. */
+
+export interface CalendarOutboxItem {
+  id: string;
+  action: "create" | "update" | "delete";
+  eventId: string;
+  payload: Record<string, unknown>;
+  status: "pending" | "done" | "failed";
+  error: string;
+  createdAt: string;
+}
+
+export async function addOutboxItem(
+  action: CalendarOutboxItem["action"],
+  eventId: string,
+  payload: Record<string, unknown>
+): Promise<string> {
+  await ensure();
+  const q = sql();
+  const id = `ob-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+  await q`INSERT INTO calendar_outbox (id, action, event_id, payload)
+    VALUES (${id}, ${action}, ${eventId}, ${JSON.stringify(payload)})`;
+  return id;
+}
+
+export async function listOutbox(status?: string): Promise<CalendarOutboxItem[]> {
+  await ensure();
+  const q = sql();
+  const rows = status
+    ? await q`SELECT id, action, event_id, payload, status, error, created_at FROM calendar_outbox WHERE status = ${status} ORDER BY created_at ASC LIMIT 100`
+    : await q`SELECT id, action, event_id, payload, status, error, created_at FROM calendar_outbox ORDER BY created_at DESC LIMIT 100`;
+  return rows.map((r) => {
+    let payload: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(str(r.payload));
+      if (parsed && typeof parsed === "object") payload = parsed as Record<string, unknown>;
+    } catch {
+      payload = {};
+    }
+    return {
+      id: str(r.id),
+      action: str(r.action) as CalendarOutboxItem["action"],
+      eventId: str(r.event_id),
+      payload,
+      status: str(r.status) as CalendarOutboxItem["status"],
+      error: str(r.error),
+      createdAt: str(r.created_at),
+    };
+  });
+}
+
+export async function completeOutbox(
+  id: string,
+  status: "done" | "failed",
+  error: string
+): Promise<void> {
+  await ensure();
+  const q = sql();
+  await q`UPDATE calendar_outbox SET status = ${status}, error = ${error}, applied_at = now() WHERE id = ${id}`;
 }
