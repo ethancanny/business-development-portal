@@ -181,16 +181,16 @@ function Section({
   return (
     <section
       className={`-mx-3 mb-6 rounded-2xl px-3 transition-colors duration-200 ${
-        open ? "bg-[#0d1f3c]/[0.07] pb-4 dark:bg-white/[0.04]" : ""
+        open ? "bg-[#0d1f3c] pb-4 dark:bg-[#1a3358]" : ""
       }`}
     >
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg border-b-2 px-2 pb-2 text-left transition-colors duration-200 hover:bg-[#0d1f3c]/[0.05] dark:hover:bg-white/[0.06] ${
+        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg border-b-2 px-2 pb-2 text-left transition-colors duration-200 ${
           open
-            ? "border-[#b8975a] bg-[#0d1f3c] dark:bg-[#b8975a]/25"
-            : "border-[#b8975a]/50"
+            ? "border-[#b8975a] hover:bg-[#26466e] dark:hover:bg-white/[0.10]"
+            : "border-[#b8975a]/50 hover:bg-[#d7e1f0] dark:hover:bg-white/[0.08]"
         }`}
       >
         <span>
@@ -229,15 +229,15 @@ function SubSection({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div
-      className={`-mx-3 mb-5 rounded-xl border-t-2 border-slate-400 px-3 pt-4 transition-colors duration-200 dark:border-white/30 ${
-        open ? "bg-[#0d1f3c]/[0.04] pb-3 dark:bg-white/[0.04]" : ""
+      className={`-mx-3 mb-5 rounded-xl border-t-2 border-slate-400 bg-white px-3 pt-4 transition-colors duration-200 dark:border-white/30 dark:bg-[#132847]/50 ${
+        open ? "pb-3" : ""
       }`}
     >
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 hover:bg-[#0d1f3c]/[0.05] dark:hover:bg-white/[0.06] ${
-          open ? "bg-[#0d1f3c]/[0.13] dark:bg-[#b8975a]/[0.16]" : ""
+        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 hover:bg-[#e6edf6] dark:hover:bg-white/[0.08] ${
+          open ? "bg-[#d7e1f0] dark:bg-[#b8975a]/[0.16]" : ""
         }`}
       >
         <span
@@ -376,7 +376,7 @@ export default function MarketIntelPage() {
         : hovRow === key
           ? dark
             ? "rgba(255,255,255,0.08)"
-            : "rgba(13,31,60,0.055)"
+            : "rgb(230,237,246)"
           : undefined,
     transition: "background-color 200ms ease",
   });
@@ -389,7 +389,7 @@ export default function MarketIntelPage() {
       selRow === key
         ? "bg-[#0d1f3c]/[0.16] dark:bg-[#b8975a]/[0.22]"
         : hovRow === key
-          ? "bg-[#0d1f3c]/[0.07] dark:bg-white/[0.08]"
+          ? "bg-[#e6edf6] dark:bg-white/[0.08]"
           : ""
     }`,
   });
@@ -1520,11 +1520,11 @@ export default function MarketIntelPage() {
                               : hoverSlug === r.slug
                                 ? dark
                                   ? "rgba(255,255,255,0.10)"
-                                  : "rgba(13,31,60,0.07)"
+                                  : "rgb(215,225,240)"
                                 : hovRow === `sector:${r.slug}`
                                   ? dark
                                     ? "rgba(255,255,255,0.08)"
-                                    : "rgba(13,31,60,0.055)"
+                                    : "rgb(230,237,246)"
                                   : undefined,
                           transition: "background-color 200ms ease",
                         }}
@@ -2160,7 +2160,7 @@ export default function MarketIntelPage() {
         <Section alt title="Acquisitions & Filings" sub="AZ acquisitions and SEC filings · last 7 days only">
           <div>
 {/* Tabs */}
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="mb-4 flex flex-wrap gap-2 rounded-xl bg-white p-1.5 dark:bg-white/5">
           {(TABS as readonly string[]).map((t) => (
             <button key={t} onClick={() => setTab(t as Tab)} className={tabBtn(tab === t)}>
               {t === "acquisitions" ? "Acquisitions" : t === "filings" ? "Filings" : t}
