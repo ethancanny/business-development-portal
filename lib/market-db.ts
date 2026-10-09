@@ -269,7 +269,7 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
   const cnt = sectors.length
     ? await db`SELECT count(*)::int AS n FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
     : await db`SELECT count(*)::int AS n FROM mi_companies WHERE source = ${source}`;
-  return { received: clean.length, total: num(cnt[0]?.n) };
+  return { received: clean.length, total: numOrNull(cnt[0]?.n) ?? 0 };
 }
 
 export async function countCompanies(sector?: string): Promise<number> {
@@ -278,7 +278,7 @@ export async function countCompanies(sector?: string): Promise<number> {
   const rows = sector
     ? await db`SELECT count(*)::int AS n FROM mi_companies WHERE sector = ${sector}`
     : await db`SELECT count(*)::int AS n FROM mi_companies`;
-  return num(rows[0]?.n);
+  return numOrNull(rows[0]?.n) ?? 0;
 }
 
 export async function getCompanies(sector?: string, limit = 600): Promise<MiCompany[]> {
