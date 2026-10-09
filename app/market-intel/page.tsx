@@ -633,32 +633,25 @@ export default function MarketIntelPage() {
         detail: `${Math.round(pLast.value || 0).toLocaleString()} permits in ${pLast.obsDate.slice(0, 7)} vs ${Math.round(avg12).toLocaleString()} 1-yr avg · FRED`,
       });
     }
-    // Defense candidate = the YTD change itself (monthly obligations are
-    // far too lumpy for a single-month reading; trailing zero months are
-    // unposted USASpending data, not real zeros).
+    // Defense candidate = trailing-12-month change. Monthly obligations are
+    // far too lumpy for single-month or calendar-YTD readings (a few giant
+    // awards land in single months — the old YTD framing showed +70% while
+    // the TTM figure was +39%); trailing zero months are unposted
+    // USASpending data, not real zeros.
     const dodObs = obs
       .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.value !== null)
       .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
     while (dodObs.length > 0 && dodObs[dodObs.length - 1].value === 0) dodObs.pop();
-    if (dodObs.length > 0) {
-      const ly = dodObs[dodObs.length - 1].obsDate.slice(0, 4);
-      const py = String(Number(ly) - 1);
-      const curMonths = new Set(
-        dodObs.filter((o) => o.obsDate.startsWith(ly)).map((o) => o.obsDate.slice(5, 7))
-      );
-      const ytd = dodObs
-        .filter((o) => o.obsDate.startsWith(ly))
-        .reduce((s, o) => s + (o.value || 0), 0);
-      const ytdPrev = dodObs
-        .filter((o) => o.obsDate.startsWith(py) && curMonths.has(o.obsDate.slice(5, 7)))
-        .reduce((s, o) => s + (o.value || 0), 0);
-      if (ytdPrev > 0) {
-        const chg = ((ytd - ytdPrev) / ytdPrev) * 100;
+    if (dodObs.length >= 24) {
+      const ttm = dodObs.slice(-12).reduce((s, o) => s + (o.value || 0), 0);
+      const ttmPrev = dodObs.slice(-24, -12).reduce((s, o) => s + (o.value || 0), 0);
+      if (ttmPrev > 0) {
+        const chg = ((ttm - ttmPrev) / ttmPrev) * 100;
         const fmtB = (v: number) => (v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : `$${Math.round(v / 1e6)}M`);
         cands.push({
           score: Math.abs(chg),
-          headline: `Defense $ ${chg >= 0 ? "▲" : "▼"}${Math.abs(Math.round(chg))}% YTD`,
-          detail: `${fmtB(ytd)} in AZ defense contracts YTD vs ${fmtB(ytdPrev)} same period ${py} · USASpending`,
+          headline: `Defense $ ${chg >= 0 ? "▲" : "▼"}${Math.abs(Math.round(chg))}% TTM`,
+          detail: `${fmtB(ttm)} obligated in AZ, 12 mo thru ${dodObs[dodObs.length - 1].obsDate.slice(0, 7)} vs ${fmtB(ttmPrev)} prior 12 mo · USASpending`,
         });
       }
     }
@@ -1478,35 +1471,32 @@ export default function MarketIntelPage() {
               .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.value !== null)
               .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
             // Trailing zero months are unposted USASpending data, not real
-            // zeros — the YTD window ends at the last posted month.
+            // zeros — windows end at the last posted month. Trailing-12-month
+            // framing: single awards move a month by billions, so YTD
+            // comparisons mislead (cross-checked Oct 2026 vs DoD's Defense
+            // Spending by State report — see A&D subsection note).
             while (dod.length > 0 && dod[dod.length - 1].value === 0) dod.pop();
-            if (dod.length === 0) return null;
-            const lastYear = dod[dod.length - 1].obsDate.slice(0, 4);
-            const prevYear = String(Number(lastYear) - 1);
-            const cur = dod.filter((o) => o.obsDate.startsWith(lastYear));
-            const months = new Set(cur.map((o) => o.obsDate.slice(5, 7)));
-            const prev = dod.filter(
-              (o) => o.obsDate.startsWith(prevYear) && months.has(o.obsDate.slice(5, 7))
-            );
-            const ytd = cur.reduce((s, o) => s + (o.value || 0), 0);
-            const ytdPrev = prev.reduce((s, o) => s + (o.value || 0), 0);
-            const chg = ytdPrev > 0 ? ((ytd - ytdPrev) / ytdPrev) * 100 : null;
+            if (dod.length < 12) return null;
+            const ttm = dod.slice(-12).reduce((s, o) => s + (o.value || 0), 0);
+            const ttmPrev =
+              dod.length >= 24 ? dod.slice(-24, -12).reduce((s, o) => s + (o.value || 0), 0) : 0;
+            const chg = ttmPrev > 0 ? ((ttm - ttmPrev) / ttmPrev) * 100 : null;
             const fmt$ = (v: number) =>
               v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : `$${Math.round(v / 1e6)}M`;
-            const thru = cur[cur.length - 1].obsDate.slice(0, 7);
+            const thru = dod[dod.length - 1].obsDate.slice(0, 7);
             return (
               <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-[#132847]/60">
                 <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">🛡 AZ Defense Contracts</p>
                 <p className="text-sm text-slate-600 dark:text-white/70">
-                  <b>{fmt$(ytd)} YTD</b> ({lastYear} through {thru})
+                  <b>{fmt$(ttm)}</b> trailing 12 mo (thru {thru})
                   {chg !== null && (
                     <span className={chg >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
-                      {" "}{chg >= 0 ? "▲" : "▼"} {Math.abs(chg).toFixed(1)}% vs same period {prevYear} ({fmt$(ytdPrev)})
+                      {" "}{chg >= 0 ? "▲" : "▼"} {Math.abs(chg).toFixed(1)}% vs prior 12 mo ({fmt$(ttmPrev)})
                     </span>
                   )}
                 </p>
                 <p className="text-xs text-slate-400 dark:text-white/40">
-                  Federal contract obligations in Arizona (USASpending) · full chart under Industries → Aerospace &amp; Defense.
+                  DoD contract obligations performed in Arizona (USASpending) · DoD&apos;s official state report put AZ contract spending at $14.7B in FY2024 — obligations run higher and arrive in lumps · full chart under Industries → Aerospace &amp; Defense.
                 </p>
               </div>
             );
@@ -1834,7 +1824,7 @@ export default function MarketIntelPage() {
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly obligations, $M, USASpending.gov · 5-yr</p>
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly DoD contract obligations performed in AZ, $M · USASpending.gov. Cross-check: DoD&apos;s Defense Spending by State report counts $14.5B (FY2023) / $14.7B (FY2024) in AZ contract spending — USASpending obligations run ~5–15% higher on a different methodology, and single awards (Raytheon missile lots, Boeing Apache, TriWest TRICARE) move individual months by billions, so judge the trend on 12-month windows, not single months.</p>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={defenseRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
