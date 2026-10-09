@@ -379,7 +379,16 @@ export async function consolidateCompanies(rows: ConsolidateRow[]): Promise<{ gr
   await ensureSchema();
   const db = sql();
   const keyOf = (s: string, d: string) => `${s}|${d}`;
-  const absorbKeys = Array.from(new Set(rows.flatMap((r) => r.absorb ?? [])));
+  const seenKeys: Record<string, true> = {};
+  const absorbKeys: string[] = [];
+  for (const r of rows) {
+    for (const k of r.absorb ?? []) {
+      if (!seenKeys[k]) {
+        seenKeys[k] = true;
+        absorbKeys.push(k);
+      }
+    }
+  }
   const statusByKey = new Map<string, string>();
   for (let i = 0; i < absorbKeys.length; i += 1500) {
     const chunk = absorbKeys.slice(i, i + 1500);
@@ -393,15 +402,18 @@ export async function consolidateCompanies(rows: ConsolidateRow[]): Promise<{ gr
     await db`DELETE FROM mi_companies WHERE (source || '|' || dedup_key) = ANY(${chunk})`;
   }
   const bySource = new Map<string, ConsolidateRow[]>();
+  const sourceOrder: string[] = [];
   for (const r of rows) {
+    if (!bySource.has(r.source)) sourceOrder.push(r.source);
     const list = bySource.get(r.source) ?? [];
     list.push(r);
     bySource.set(r.source, list);
   }
-  for (const [source, list] of bySource) {
-    await importCompanies(source, list, false);
+  for (const source of sourceOrder) {
+    await importCompanies(source, bySource.get(source) ?? [], false);
   }
   const keysByStatus = new Map<string, string[]>();
+  const statusOrder: string[] = [];
   for (const r of rows) {
     let best = "new";
     for (const k of r.absorb ?? []) {
@@ -409,18 +421,142 @@ export async function consolidateCompanies(rows: ConsolidateRow[]): Promise<{ gr
       if (s && (STATUS_RANK[s] ?? 0) > (STATUS_RANK[best] ?? 0)) best = s;
     }
     if (best !== "new") {
+      if (!keysByStatus.has(best)) statusOrder.push(best);
       const list = keysByStatus.get(best) ?? [];
       list.push(keyOf(r.source, r.dedupKey));
       keysByStatus.set(best, list);
     }
   }
-  for (const [status, keys] of keysByStatus) {
+  for (const status of statusOrder) {
+    const keys = keysByStatus.get(status) ?? [];
     for (let i = 0; i < keys.length; i += 1500) {
       const chunk = keys.slice(i, i + 1500);
       await db`UPDATE mi_companies SET status = ${status} WHERE (source || '|' || dedup_key) = ANY(${chunk})`;
     }
   }
   return { groups: rows.length, absorbed: absorbKeys.length };
+}
+
+export async function countFits(sector?: string): Promise<number> {
+  await ensureSchema();
+  const db = sql();
+  const rows = sector
+    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND details LIKE '{%' AND (details::jsonb ->> 'fit') = 'true'`
+    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE details LIKE '{%' AND (details::jsonb ->> 'fit') = 'true'`;
+  return Number((rows as unknown as { c: number }[])[0]?.c ?? 0);
+}
+
+export interface UpdateItem {
+  kind: "business" | "license" | "listing" | "operator" | "multiple";
+  title: string;
+  detail: string;
+  ts: string;
+}
+
+/**
+ * "Updates" cards for Market Intel: everything newly issued in the last 7
+ * days — new companies and licenses (registry first_seen; consolidated
+ * merge rows excluded so a consolidation run doesn't flood the strip),
+ * new business listings, operators newly added to the pipeline, and
+ * multiple moves between stored vintages. Registry floods collapse into
+ * one summary card per source.
+ */
+export async function getUpdates(
+  execs: { name: string; stage?: string; createdAt?: string }[]
+): Promise<UpdateItem[]> {
+  await ensureSchema();
+  const db = sql();
+  const items: UpdateItem[] = [];
+  const cutoff = new Date(Date.now() - 7 * 864e5).toISOString();
+  const money = (v: number) =>
+    v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v / 1e3)}K`;
+  const compRows = (await db`SELECT name, sector, city, source, signal_value, first_seen FROM mi_companies WHERE first_seen >= ${cutoff} AND details LIKE '{%' AND (details::jsonb ->> 'consolidated') IS DISTINCT FROM 'true' ORDER BY first_seen DESC LIMIT 400`) as unknown as Record<string, unknown>[];
+  const groupKeys: string[] = [];
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const r of compRows) {
+    const kind = String(r.source).includes("ROC") ? "license" : "business";
+    const key = `${kind}|${String(r.source)}`;
+    if (!groups.has(key)) groupKeys.push(key);
+    const list = groups.get(key) ?? [];
+    list.push(r);
+    groups.set(key, list);
+  }
+  for (const key of groupKeys) {
+    const list = groups.get(key) ?? [];
+    const kind = key.split("|")[0] as UpdateItem["kind"];
+    const source = key.split("|")[1];
+    if (list.length > 8) {
+      const top = list[0];
+      items.push({
+        kind,
+        title: `${list.length} new ${kind === "license" ? "licensed contractors" : "companies"} — ${source}`,
+        detail: `Latest: ${String(top.name)}${top.city ? ` · ${String(top.city)}` : ""} · ${String(top.sector)}`,
+        ts: String(top.first_seen),
+      });
+    } else {
+      for (const r of list) {
+        const sig = typeof r.signal_value === "number" ? r.signal_value : null;
+        items.push({
+          kind,
+          title: String(r.name),
+          detail: `${String(r.sector)}${r.city ? ` · ${String(r.city)}` : ""}${sig ? ` · ${money(sig)} federal awards` : ""}`,
+          ts: String(r.first_seen),
+        });
+      }
+    }
+  }
+  const listRows = (await db`SELECT title, price, cash_flow, industry, location, first_seen FROM mi_listings WHERE first_seen >= ${cutoff} ORDER BY first_seen DESC LIMIT 20`) as unknown as Record<string, unknown>[];
+  for (const r of listRows) {
+    const bits = [
+      typeof r.price === "number" ? `Asking ${money(r.price)}` : "",
+      typeof r.cash_flow === "number" ? `${money(r.cash_flow)} cash flow` : "",
+      String(r.industry ?? ""),
+      String(r.location ?? ""),
+    ].filter(Boolean);
+    items.push({ kind: "listing", title: String(r.title), detail: bits.join(" · "), ts: String(r.first_seen) });
+  }
+  const multRows = (await db`SELECT industry, size_band, period, ev_ebitda_median, ev_revenue_median, created_at FROM mi_multiples ORDER BY industry ASC, size_band ASC, period ASC`) as unknown as Record<string, unknown>[];
+  const multKeys: string[] = [];
+  const multGroups = new Map<string, Record<string, unknown>[]>();
+  for (const r of multRows) {
+    const key = `${String(r.industry)}|${String(r.size_band)}`;
+    if (!multGroups.has(key)) multKeys.push(key);
+    const list = multGroups.get(key) ?? [];
+    list.push(r);
+    multGroups.set(key, list);
+  }
+  for (const key of multKeys) {
+    const list = multGroups.get(key) ?? [];
+    if (list.length < 2) continue;
+    const cur = list[list.length - 1];
+    const prev = list[list.length - 2];
+    for (const [field, label] of [["ev_ebitda_median", "EV/EBITDA"], ["ev_revenue_median", "EV/Revenue"]] as const) {
+      const a = typeof prev[field] === "number" ? (prev[field] as number) : null;
+      const b = typeof cur[field] === "number" ? (cur[field] as number) : null;
+      if (a !== null && b !== null && Math.abs(b - a) >= 0.25) {
+        const d = b - a;
+        items.push({
+          kind: "multiple",
+          title: String(cur.industry),
+          detail: `${label} ${a.toFixed(1)}× → ${b.toFixed(1)}× (${d >= 0 ? "+" : ""}${d.toFixed(1)}×) · ${String(cur.size_band)}`,
+          ts: String(cur.created_at),
+        });
+        break;
+      }
+    }
+  }
+  for (const e of execs) {
+    if (e.createdAt && e.createdAt >= cutoff) {
+      items.push({
+        kind: "operator",
+        title: e.name,
+        detail: `Added to the pipeline${e.stage ? ` · ${e.stage}` : ""}`,
+        ts: e.createdAt,
+      });
+    }
+  }
+  items.sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+  return items.slice(0, 14);
 }
 
 export async function countCompanies(sector?: string): Promise<number> {

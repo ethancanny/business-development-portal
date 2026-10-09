@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
+import { getExecutives } from "@/lib/db";
 import {
   getAcquisitions,
   getEntities,
@@ -9,6 +10,8 @@ import {
   getListings,
   getCompanies,
   countCompanies,
+  countFits,
+  getUpdates,
   setCompanyStatus,
   getMultiples,
   getSyncLog,
@@ -28,6 +31,7 @@ const DATASETS = [
   "latest",
   "listings",
   "companies",
+  "updates",
   "multiples",
   "acquisitions",
   "filings",
@@ -61,11 +65,18 @@ export async function GET(
       case "companies": {
         const sector = sp.get("sector") ?? undefined;
         const off = Number(sp.get("offset") ?? 0);
-        const [companies, total] = await Promise.all([
+        const [companies, total, fitTotal] = await Promise.all([
           getCompanies(sector, Number(sp.get("limit") ?? 600), off),
           countCompanies(sector),
+          countFits(sector),
         ]);
-        return NextResponse.json({ companies, total, offset: off });
+        return NextResponse.json({ companies, total, fitTotal, offset: off });
+      }
+      case "updates": {
+        const execs = await getExecutives().catch(() => []);
+        return NextResponse.json(
+          await getUpdates(execs as { name: string; stage?: string; createdAt?: string }[])
+        );
       }
       case "multiples":
         return NextResponse.json(await getMultiples());
