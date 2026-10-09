@@ -21,6 +21,29 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const wantKey = String(body.dedupKey ?? "");
   const wantSource = String(body.source ?? "");
+  if (body.mode === "stray") {
+    const norm = (name: string) => {
+      let n = (name || "").toUpperCase();
+      for (const suf of [" INC", " LLC", " L.L.C.", " CORP", " CORPORATION", " CO", " COMPANY", " LTD", " LP", " LLP", " PLLC", " PC", " INC.", ","]) {
+        n = n.split(suf).join(" ");
+      }
+      return n.split(/\s+/).map((t) => t.replace(/\./g, "")).filter(Boolean).join(" ");
+    };
+    const strays: { sector: string; source: string; dedupKey: string; name: string }[] = [];
+    for (const sec of ["Aerospace & Defense", "Healthcare", "Advanced Manufacturing", "Specialty Trades & Construction"]) {
+      const all: { source: string; dedupKey: string; name: string }[] = [];
+      for (let off = 0; ; off += 5000) {
+        const rows = await getCompanies(sec, 5000, off);
+        if (!rows.length) break;
+        for (const r of rows) all.push({ source: r.source, dedupKey: r.dedupKey, name: r.name });
+        if (rows.length < 5000) break;
+      }
+      const entKeys: Record<string, true> = {};
+      for (const r of all) if (r.dedupKey.startsWith("ENT-")) entKeys[norm(r.name)] = true;
+      for (const r of all) if (!r.dedupKey.startsWith("ENT-") && entKeys[norm(r.name)]) strays.push({ sector: sec, ...r });
+    }
+    return NextResponse.json({ ok: true, strays });
+  }
   if (body.mode === "ent") {
     const ents: { sector: string; source: string; dedupKey: string; name: string; signalValue: number | null; detLen: number; valid: boolean }[] = [];
     for (const sec of ["Aerospace & Defense", "Healthcare", "Advanced Manufacturing", "Specialty Trades & Construction"]) {
