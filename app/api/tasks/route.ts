@@ -62,5 +62,21 @@ export async function POST(req: NextRequest) {
     execName:
       task.relatedKind === "executive" ? task.relatedName || null : null,
   });
+  // Real-time bridge (Ethan, Oct 9, 2026): a dated follow-up linked to a
+  // profile also creates the Outlook event immediately via Graph.
+  // Best-effort — never fail task creation because Microsoft is unreachable.
+  if (task.dueDate) {
+    try {
+      const { createEventFromTask } = await import("@/lib/microsoft");
+      await createEventFromTask({
+        title: task.title,
+        dueDate: task.dueDate,
+        relatedKind: task.relatedKind,
+        relatedId: task.relatedId,
+      });
+    } catch {
+      /* the watchdog pull remains as the safety net */
+    }
+  }
   return NextResponse.json(task, { status: 201 });
 }

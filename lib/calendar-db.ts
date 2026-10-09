@@ -51,6 +51,22 @@ async function ensure() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     applied_at TIMESTAMPTZ
   )`;
+  // Microsoft Graph direct connection (Ethan, Oct 9, 2026): OAuth tokens for
+  // Ethan's Microsoft account live server-side only (Neon), scoped to
+  // Calendars.ReadWrite + offline_access. ms_state holds the webhook
+  // subscription id/expiry and its clientState secret.
+  await q`CREATE TABLE IF NOT EXISTS ms_tokens (
+    id TEXT PRIMARY KEY,
+    access_token TEXT NOT NULL DEFAULT '',
+    refresh_token TEXT NOT NULL DEFAULT '',
+    expires_at BIGINT NOT NULL DEFAULT 0,
+    account_email TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await q`CREATE TABLE IF NOT EXISTS ms_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+  )`;
   ensured = true;
 }
 
@@ -60,9 +76,16 @@ export async function importCalendarEvents(
   events: CalendarEvent[],
   windowStart: string,
   windowEnd: string
-): Promise<{ imported: number; pruned: number }> {
+): Promise<{ imported: number; pruned: number; newIds: string[] }> {
   await ensure();
   const q = sql();
+  const incomingIds = events.map((e) => e.eventId);
+  let newIds: string[] = [];
+  if (incomingIds.length > 0) {
+    const existing = await q`SELECT event_id FROM calendar_events WHERE event_id = ANY(${incomingIds})`;
+    const existingSet = new Set(existing.map((r) => str(r.event_id)));
+    newIds = incomingIds.filter((id) => !existingSet.has(id));
+  }
   for (const e of events) {
     await q`INSERT INTO calendar_events (event_id, title, starts_at, ends_at, location, attendees, all_day, web_url, updated_at)
       VALUES (${e.eventId}, ${e.title}, ${e.startsAt}, ${e.endsAt}, ${e.location}, ${JSON.stringify(e.attendees)}, ${e.allDay}, ${e.webUrl}, now())
@@ -86,7 +109,114 @@ export async function importCalendarEvents(
     await q`DELETE FROM calendar_events WHERE starts_at >= ${windowStart} AND starts_at < ${windowEnd} AND NOT (event_id = ANY(${ids}))`;
   }
   const after = await q`SELECT COUNT(*)::int AS n FROM calendar_events WHERE starts_at >= ${windowStart} AND starts_at < ${windowEnd}`;
-  return { imported: events.length, pruned: Number(before[0]?.n ?? 0) - Number(after[0]?.n ?? 0) + 0 };
+  return { imported: events.length, pruned: Number(before[0]?.n ?? 0) - Number(after[0]?.n ?? 0) + 0, newIds };
+}
+
+/** Single-event upsert (Graph writes) — never prunes, preserves dismissed. */
+export async function upsertCalendarEvent(e: CalendarEvent): Promise<boolean> {
+  await ensure();
+  const q = sql();
+  const existing = await q`SELECT event_id FROM calendar_events WHERE event_id = ${e.eventId}`;
+  const isNew = existing.length === 0;
+  await q`INSERT INTO calendar_events (event_id, title, starts_at, ends_at, location, attendees, all_day, web_url, updated_at)
+    VALUES (${e.eventId}, ${e.title}, ${e.startsAt}, ${e.endsAt}, ${e.location}, ${JSON.stringify(e.attendees)}, ${e.allDay}, ${e.webUrl}, now())
+    ON CONFLICT (event_id) DO UPDATE SET
+      title = EXCLUDED.title,
+      starts_at = EXCLUDED.starts_at,
+      ends_at = EXCLUDED.ends_at,
+      location = EXCLUDED.location,
+      attendees = EXCLUDED.attendees,
+      all_day = EXCLUDED.all_day,
+      web_url = EXCLUDED.web_url,
+      updated_at = now()`;
+  return isNew;
+}
+
+export async function deleteCalendarEvent(eventId: string): Promise<void> {
+  await ensure();
+  const q = sql();
+  await q`DELETE FROM calendar_events WHERE event_id = ${eventId}`;
+}
+
+export async function getCalendarEventById(eventId: string): Promise<CalendarEvent | null> {
+  await ensure();
+  const q = sql();
+  const rows = await q`SELECT event_id, title, starts_at, ends_at, location, attendees, all_day, web_url, dismissed FROM calendar_events WHERE event_id = ${eventId}`;
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  let attendees: string[] = [];
+  try {
+    const parsed = JSON.parse(str(r.attendees));
+    if (Array.isArray(parsed)) attendees = parsed.map((a) => String(a));
+  } catch {
+    attendees = [];
+  }
+  return {
+    eventId: str(r.event_id),
+    title: str(r.title),
+    startsAt: str(r.starts_at),
+    endsAt: str(r.ends_at),
+    location: str(r.location),
+    attendees,
+    allDay: Boolean(r.all_day),
+    webUrl: str(r.web_url),
+    dismissed: Boolean(r.dismissed),
+  };
+}
+
+/* ---------------- Microsoft Graph token/state store ---------------- */
+
+export interface MsTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number; // epoch ms
+  accountEmail: string;
+}
+
+export async function getMsTokens(): Promise<MsTokens | null> {
+  await ensure();
+  const q = sql();
+  const rows = await q`SELECT access_token, refresh_token, expires_at, account_email FROM ms_tokens WHERE id = 'ethan'`;
+  if (rows.length === 0) return null;
+  return {
+    accessToken: str(rows[0].access_token),
+    refreshToken: str(rows[0].refresh_token),
+    expiresAt: Number(rows[0].expires_at ?? 0),
+    accountEmail: str(rows[0].account_email),
+  };
+}
+
+export async function saveMsTokens(t: MsTokens): Promise<void> {
+  await ensure();
+  const q = sql();
+  await q`INSERT INTO ms_tokens (id, access_token, refresh_token, expires_at, account_email, updated_at)
+    VALUES ('ethan', ${t.accessToken}, ${t.refreshToken}, ${t.expiresAt}, ${t.accountEmail}, now())
+    ON CONFLICT (id) DO UPDATE SET
+      access_token = EXCLUDED.access_token,
+      refresh_token = EXCLUDED.refresh_token,
+      expires_at = EXCLUDED.expires_at,
+      account_email = EXCLUDED.account_email,
+      updated_at = now()`;
+}
+
+export async function clearMsTokens(): Promise<void> {
+  await ensure();
+  const q = sql();
+  await q`DELETE FROM ms_tokens WHERE id = 'ethan'`;
+}
+
+export async function getMsState(key: string): Promise<string> {
+  await ensure();
+  const q = sql();
+  const rows = await q`SELECT value FROM ms_state WHERE key = ${key}`;
+  return rows.length ? str(rows[0].value) : "";
+}
+
+export async function setMsState(key: string, value: string): Promise<void> {
+  await ensure();
+  const q = sql();
+  await q`INSERT INTO ms_state (key, value) VALUES (${key}, ${value})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
 }
 
 export async function getCalendarEvents(from: string, to: string): Promise<CalendarEvent[]> {

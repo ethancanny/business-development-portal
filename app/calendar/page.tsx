@@ -23,6 +23,12 @@ interface OutboxItem {
   status: string;
 }
 
+interface MsStatus {
+  configured: boolean;
+  connected: boolean;
+  accountEmail: string;
+}
+
 interface Draft {
   title: string;
   date: string;
@@ -97,6 +103,7 @@ export default function CalendarPage() {
   const [editingId, setEditingId] = useState<string>("");
   const [editDraft, setEditDraft] = useState<Draft>(emptyDraft);
   const [notice, setNotice] = useState("");
+  const [ms, setMs] = useState<MsStatus | null>(null);
 
   const loadPending = async () => {
     try {
@@ -110,27 +117,50 @@ export default function CalendarPage() {
     }
   };
 
+  const loadEvents = async () => {
+    const from = new Date(Date.now() - 16 * 86400000).toISOString();
+    const to = new Date(Date.now() + 28 * 86400000).toISOString();
+    const r = await fetch(
+      `/api/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+    );
+    if (r.status === 401) {
+      router.replace("/login");
+      return;
+    }
+    if (r.ok) {
+      const d = await r.json();
+      if (Array.isArray(d.events)) setEvents(d.events);
+    }
+  };
+
+  const loadMsStatus = async () => {
+    try {
+      const r = await fetch("/api/calendar/microsoft/status");
+      if (r.ok) setMs(await r.json());
+    } catch {
+      /* banner just stays hidden */
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
-        const from = new Date(Date.now() - 16 * 86400000).toISOString();
-        const to = new Date(Date.now() + 28 * 86400000).toISOString();
-        const r = await fetch(
-          `/api/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
-        );
-        if (r.status === 401) {
-          router.replace("/login");
-          return;
-        }
-        if (r.ok) {
-          const d = await r.json();
-          if (Array.isArray(d.events)) setEvents(d.events);
-        }
+        await loadEvents();
         await loadPending();
+        await loadMsStatus();
+        const param = new URLSearchParams(window.location.search).get("ms");
+        if (param === "connected") {
+          setNotice("Outlook connected — real-time sync is on.");
+        } else if (param && param.startsWith("error")) {
+          setNotice("Microsoft connection didn't complete — try Connect again.");
+        } else if (param === "not-configured") {
+          setNotice("Real-time sync isn't configured yet (missing Microsoft app keys).");
+        }
       } finally {
         setLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   const queueIntent = async (
@@ -138,6 +168,30 @@ export default function CalendarPage() {
     eventId: string,
     payload: Record<string, unknown>
   ) => {
+    // Real-time path: write straight to Outlook via Graph when connected.
+    if (ms?.connected) {
+      const url =
+        action === "create"
+          ? "/api/calendar/events"
+          : action === "update"
+            ? "/api/calendar/events/update"
+            : "/api/calendar/events/delete";
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId, payload }),
+      });
+      if (r.ok) {
+        setNotice("Saved to Outlook ✓");
+        await loadEvents();
+        return;
+      }
+      if (r.status !== 409) {
+        setNotice("Something went wrong saving that — please try again.");
+        return;
+      }
+      // 409 = connection dropped; fall through to the queued path.
+    }
     const r = await fetch("/api/calendar/outbox", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -149,6 +203,13 @@ export default function CalendarPage() {
     } else {
       setNotice("Something went wrong saving that — please try again.");
     }
+  };
+
+  const disconnectMs = async () => {
+    if (!window.confirm("Disconnect Outlook from the portal? Events stop syncing in real time.")) return;
+    await fetch("/api/calendar/microsoft/disconnect", { method: "POST" });
+    setMs((prev) => (prev ? { ...prev, connected: false, accountEmail: "" } : prev));
+    setNotice("Outlook disconnected.");
   };
 
   const submitNew = async () => {
@@ -388,8 +449,9 @@ export default function CalendarPage() {
               </button>
             </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
-              Changes apply to Outlook on the next sync (~15 min). Attendees can&apos;t be
-              changed here — edit those in Outlook.
+              {ms?.connected
+                ? "Changes save straight to Outlook. Attendees can't be changed here — edit those in Outlook."
+                : "Changes apply to Outlook on the next sync (~15 min). Attendees can't be changed here — edit those in Outlook."}
             </p>
           </div>
         )}
@@ -424,6 +486,47 @@ export default function CalendarPage() {
         subtitle="Your Outlook calendar, mirrored into the portal — syncs every few minutes"
       />
       <div className="mx-auto max-w-[1100px] px-4 py-6 sm:px-6">
+        {ms && !ms.connected && ms.configured && (
+          <div className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-[#b8975a]/50 bg-[#b8975a]/10 px-4 py-3.5">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">
+                Connect Outlook for real-time sync
+              </p>
+              <p className="text-xs text-slate-500 dark:text-white/60">
+                One sign-in, and events you create or edit here land in Outlook instantly —
+                and Outlook changes appear here in seconds. Calendar-only permission; no
+                mail access.
+              </p>
+            </div>
+            <a
+              href="/api/calendar/microsoft/connect"
+              className="rounded-lg bg-[#0d1f3c] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#16294d] dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+            >
+              Connect Outlook
+            </a>
+          </div>
+        )}
+        {ms?.connected && (
+          <div className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 dark:border-emerald-500/25 dark:bg-emerald-500/10">
+            <p className="flex-1 text-sm font-medium text-emerald-800 dark:text-emerald-200">
+              ⚡ Real-time sync on{ms.accountEmail ? ` — ${ms.accountEmail}` : ""}
+            </p>
+            <button
+              onClick={disconnectMs}
+              className="rounded-lg border border-emerald-300 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/30 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
+            >
+              Disconnect
+            </button>
+          </div>
+        )}
+        {ms && !ms.configured && (
+          <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+            <p className="text-xs text-slate-500 dark:text-white/50">
+              Real-time sync isn&apos;t configured yet — events currently sync every ~15
+              minutes. Ask Muse to finish the Microsoft connection setup.
+            </p>
+          </div>
+        )}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <button
             onClick={() => setShowNew((s) => !s)}
@@ -454,9 +557,9 @@ export default function CalendarPage() {
               </button>
             </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
-              New events are created in Outlook on the next sync (~15 min). If the title
-              names an operator or business in the pipeline, a note is logged on their
-              profile automatically.
+              {ms?.connected
+                ? "New events are created in Outlook instantly. If the title names an operator or business in the pipeline, a note is logged on their profile automatically."
+                : "New events are created in Outlook on the next sync (~15 min). If the title names an operator or business in the pipeline, a note is logged on their profile automatically."}
             </p>
           </div>
         )}
