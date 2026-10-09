@@ -379,7 +379,16 @@ export async function consolidateCompanies(rows: ConsolidateRow[]): Promise<{ gr
   await ensureSchema();
   const db = sql();
   const keyOf = (s: string, d: string) => `${s}|${d}`;
-  const absorbKeys = Array.from(new Set(rows.flatMap((r) => r.absorb ?? [])));
+  const seenKeys: Record<string, true> = {};
+  const absorbKeys: string[] = [];
+  for (const r of rows) {
+    for (const k of r.absorb ?? []) {
+      if (!seenKeys[k]) {
+        seenKeys[k] = true;
+        absorbKeys.push(k);
+      }
+    }
+  }
   const statusByKey = new Map<string, string>();
   for (let i = 0; i < absorbKeys.length; i += 1500) {
     const chunk = absorbKeys.slice(i, i + 1500);
@@ -393,15 +402,18 @@ export async function consolidateCompanies(rows: ConsolidateRow[]): Promise<{ gr
     await db`DELETE FROM mi_companies WHERE (source || '|' || dedup_key) = ANY(${chunk})`;
   }
   const bySource = new Map<string, ConsolidateRow[]>();
+  const sourceOrder: string[] = [];
   for (const r of rows) {
+    if (!bySource.has(r.source)) sourceOrder.push(r.source);
     const list = bySource.get(r.source) ?? [];
     list.push(r);
     bySource.set(r.source, list);
   }
-  for (const [source, list] of bySource) {
-    await importCompanies(source, list, false);
+  for (const source of sourceOrder) {
+    await importCompanies(source, bySource.get(source) ?? [], false);
   }
   const keysByStatus = new Map<string, string[]>();
+  const statusOrder: string[] = [];
   for (const r of rows) {
     let best = "new";
     for (const k of r.absorb ?? []) {
@@ -409,12 +421,14 @@ export async function consolidateCompanies(rows: ConsolidateRow[]): Promise<{ gr
       if (s && (STATUS_RANK[s] ?? 0) > (STATUS_RANK[best] ?? 0)) best = s;
     }
     if (best !== "new") {
+      if (!keysByStatus.has(best)) statusOrder.push(best);
       const list = keysByStatus.get(best) ?? [];
       list.push(keyOf(r.source, r.dedupKey));
       keysByStatus.set(best, list);
     }
   }
-  for (const [status, keys] of keysByStatus) {
+  for (const status of statusOrder) {
+    const keys = keysByStatus.get(status) ?? [];
     for (let i = 0; i < keys.length; i += 1500) {
       const chunk = keys.slice(i, i + 1500);
       await db`UPDATE mi_companies SET status = ${status} WHERE (source || '|' || dedup_key) = ANY(${chunk})`;
