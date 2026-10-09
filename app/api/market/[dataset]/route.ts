@@ -11,6 +11,7 @@ import {
   getSyncLog,
   getWarn,
   setAcquisitionStatus,
+  updateAcquisitionSummary,
   setFilingStatus,
   setWarnStatus,
   setListingStatus,
@@ -92,6 +93,14 @@ export async function POST(
         }
         break;
       case "acquisitions":
+        if (body.id && typeof body.summary === "string" && body.summary.trim()) {
+          await updateAcquisitionSummary(
+            String(body.id),
+            body.summary.trim().slice(0, 700),
+            typeof body.dealValue === "number" ? body.dealValue : undefined
+          );
+          return NextResponse.json({ ok: true });
+        }
         if (body.id && body.status) {
           await setAcquisitionStatus(String(body.id), body.status);
           return NextResponse.json({ ok: true });

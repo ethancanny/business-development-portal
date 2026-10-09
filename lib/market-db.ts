@@ -296,6 +296,21 @@ export async function setAcquisitionStatus(id: string, status: MiAcquisition["st
   await sql()`UPDATE mi_acquisitions SET status = ${status} WHERE id = ${id}`;
 }
 
+/** Enriched summary written back by the events agent after reading the
+ * source article (real amounts/jobs/details the headline omits). */
+export async function updateAcquisitionSummary(
+  id: string,
+  summary: string,
+  dealValue?: number | null
+): Promise<void> {
+  await ensureSchema();
+  if (dealValue !== undefined && dealValue !== null) {
+    await sql()`UPDATE mi_acquisitions SET summary = ${summary}, deal_value = ${dealValue} WHERE id = ${id}`;
+  } else {
+    await sql()`UPDATE mi_acquisitions SET summary = ${summary} WHERE id = ${id}`;
+  }
+}
+
 /** Remove un-triaged bankruptcy news rows (used to re-ingest with a tighter filter). */
 export async function clearNewBankruptcyNews(): Promise<number> {
   await ensureSchema();
