@@ -73,10 +73,7 @@ export async function GET(
         return NextResponse.json({ companies, total, fitTotal, offset: off });
       }
       case "updates": {
-        const execs = await getExecutives().catch(() => []);
-        return NextResponse.json(
-          await getUpdates(execs as { name: string; stage?: string; createdAt?: string }[])
-        );
+        return NextResponse.json(await getUpdates());
       }
       case "multiples":
         return NextResponse.json(await getMultiples());

@@ -512,13 +512,13 @@ export interface UpdateItem {
  * cards only — never individual items. "+N new companies / licensed
  * contractors" per registry source (first_seen in the last 7 days;
  * consolidated merge rows excluded), "+N new businesses for sale",
- * "+N local acquisitions", "+N new operators", and multiple moves
- * between stored vintages (shown as from → to so the move is
- * self-verifying; fires only when two distinct vintages exist).
+ * "+N local acquisitions", and multiple moves between stored
+ * vintages (shown as from → to so the move is self-verifying; fires
+ * only when two distinct vintages exist). Companies merge into ONE
+ * card per kind across all sources. Operators are NOT shown here
+ * (Ethan, Oct 9, 2026).
  */
-export async function getUpdates(
-  execs: { name: string; stage?: string; createdAt?: string }[]
-): Promise<UpdateItem[]> {
+export async function getUpdates(): Promise<UpdateItem[]> {
   await ensureSchema();
   const db = sql();
   const items: UpdateItem[] = [];
@@ -528,7 +528,7 @@ export async function getUpdates(
   const groups = new Map<string, Record<string, unknown>[]>();
   for (const r of compRows) {
     const kind = String(r.source).includes("ROC") ? "license" : "business";
-    const key = `${kind}|${String(r.source)}`;
+    const key = kind;
     if (!groups.has(key)) groupKeys.push(key);
     const list = groups.get(key) ?? [];
     list.push(r);
@@ -536,13 +536,12 @@ export async function getUpdates(
   }
   for (const key of groupKeys) {
     const list = groups.get(key) ?? [];
-    const kind = key.split("|")[0] as UpdateItem["kind"];
-    const source = key.split("|")[1];
+    const kind = key as UpdateItem["kind"];
     const top = list[0];
     items.push({
       kind,
       title: `+${list.length} new ${kind === "license" ? "licensed contractors" : "companies"}`,
-      detail: `${source} · latest: ${String(top.name)}${top.city ? ` · ${String(top.city)}` : ""} · ${String(top.sector)}`,
+      detail: `Latest: ${String(top.name)}${top.city ? ` · ${String(top.city)}` : ""} · ${String(top.sector)}`,
       ts: String(top.first_seen),
     });
   }
@@ -599,16 +598,7 @@ export async function getUpdates(
       }
     }
   }
-  const newExecs = execs.filter((e) => e.createdAt && e.createdAt >= cutoff);
-  if (newExecs.length > 0) {
-    const latestTs = newExecs.map((e) => e.createdAt as string).sort().reverse()[0];
-    items.push({
-      kind: "operator",
-      title: `+${newExecs.length} new operators`,
-      detail: "Added to the pipeline in the last 7 days",
-      ts: latestTs,
-    });
-  }
+  // Operators intentionally NOT shown in Updates (Ethan, Oct 9, 2026).
   items.sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
   return items.slice(0, 14);
 }
