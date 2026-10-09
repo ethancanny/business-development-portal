@@ -1171,7 +1171,7 @@ export default function MarketIntelPage() {
 
   return (
     <div className="min-h-screen">
-      <PageHero eyebrow="Canny Capital Partners" title="Market Intel" subtitle="Arizona-focused investing" />
+      <PageHero eyebrow="Canny Capital Partners" title="Market Intel" subtitle="Arizona private equity" />
 
       <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
         {error && (
