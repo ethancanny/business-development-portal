@@ -10,36 +10,23 @@ import type { MiMultiple } from "@/lib/types";
 export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples: MiMultiple[]; onAdded: () => void; dark: boolean }) {
   const [form, setForm] = useState({ sourceReport: "", period: "", industry: "", sizeBand: "", evEbitdaLow: "", evEbitdaHigh: "", evEbitdaMedian: "", evRevenueMedian: "", notes: "" });
   const [saving, setSaving] = useState(false);
-  const [selRow, setSelRow] = useState("");
-  const toggleRow = (key: string) => setSelRow((s) => (s === key ? "" : key));
-  // Row highlighting is painted from React state with inline styles (not
-  // utility classes) so hover/select always render. (Ethan, Oct 9, 2026.)
+  // Row hover highlighting — hover only (click-to-select removed at
+  // Ethan's request, Oct 9, 2026).
   const [hovRow, setHovRow] = useState("");
   const rowStyle = (key: string) => ({
     backgroundColor:
-      selRow === key
+      hovRow === key
         ? dark
-          ? "rgba(184,151,90,0.28)"
-          : "rgba(13,31,60,0.10)"
-        : hovRow === key
-          ? dark
-            ? "rgba(255,255,255,0.08)"
-            : "rgb(230,237,246)"
-          : undefined,
+          ? "rgba(255,255,255,0.08)"
+          : "rgb(230,237,246)"
+        : undefined,
     transition: "background-color 200ms ease",
   });
   const rowProps = (key: string) => ({
     onMouseEnter: () => setHovRow(key),
     onMouseLeave: () => setHovRow((h: string) => (h === key ? "" : h)),
-    onClick: () => toggleRow(key),
     style: rowStyle(key),
-    className: `border-b border-slate-100 dark:border-white/5 cursor-pointer ${
-      selRow === key
-        ? "bg-[#0d1f3c]/[0.10] dark:bg-[#b8975a]/[0.18]"
-        : hovRow === key
-          ? "bg-[#e6edf6] dark:bg-white/[0.08]"
-          : ""
-    }`,
+    className: "border-b border-slate-100 dark:border-white/5",
   });
   const set = (k: string) => (e: ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const input = "rounded-lg border border-slate-300 px-2 py-1.5 text-sm dark:border-white/15 dark:bg-white/5 dark:text-white";

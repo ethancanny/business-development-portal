@@ -17,8 +17,7 @@ export default function CompanyTargets({ sector }: { sector: string }) {
   // render regardless of stylesheet generation. (Ethan, Oct 9, 2026.)
   const rowBg = (c: MiCompany, isFit: boolean) => {
     const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
-    if (openId === c.id) return isFit ? "rgba(184,151,90,0.30)" : isDark ? "rgba(184,151,90,0.25)" : "rgba(13,31,60,0.10)";
-    if (hovId === c.id) return isFit ? "rgba(184,151,90,0.22)" : isDark ? "rgba(255,255,255,0.08)" : "rgb(230,237,246)";
+    if (hovId === c.id) return isFit ? "rgba(184,151,90,0.18)" : isDark ? "rgba(255,255,255,0.08)" : "rgb(230,237,246)";
     return isFit ? "rgba(184,151,90,0.12)" : undefined;
   };
   const [query, setQuery] = useState("");
