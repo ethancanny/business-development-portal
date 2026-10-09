@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import TaskList from "@/components/TaskList";
 import PageHero from "@/components/PageHero";
 import { DEAL_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type Task } from "@/lib/types";
+import type { CalendarEvent } from "@/lib/calendar-db";
 import { fmtMoney } from "@/lib/format";
 
 const TargetMap = dynamic(() => import("@/components/TargetMap"), {
@@ -20,6 +21,23 @@ const TargetMap = dynamic(() => import("@/components/TargetMap"), {
 
 const TERMINAL_STAGES = ["Closed Won", "Passed"];
 
+const fmtWhen = (iso: string, allDay: boolean): string => {
+  const d = new Date(iso);
+  const day = d.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "America/Phoenix",
+  });
+  if (allDay) return day;
+  const time = d.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Phoenix",
+  });
+  return `${day} · ${time}`;
+};
+
 export default function Overview() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -29,17 +47,21 @@ export default function Overview() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [flow, setFlow] = useState<DealFlowItem[]>([]);
+  const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
   const [weekTab, setWeekTab] = useState<"this" | "last">("this");
 
   const load = async () => {
     try {
-      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes] = await Promise.all([
+      const calFrom = new Date(Date.now() - 16 * 86400000).toISOString();
+      const calTo = new Date(Date.now() + 28 * 86400000).toISOString();
+      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes, calRes] = await Promise.all([
         fetch("/api/auth/me"),
         fetch("/api/deals"),
         fetch("/api/executives"),
         fetch("/api/tasks"),
         fetch("/api/interactions"),
         fetch("/api/deal-flow"),
+        fetch(`/api/calendar?from=${encodeURIComponent(calFrom)}&to=${encodeURIComponent(calTo)}`),
       ]);
       if (
         meRes.status === 401 ||
@@ -56,6 +78,10 @@ export default function Overview() {
       if (tasksRes.ok) setTasks(await tasksRes.json());
       if (ixRes.ok) setInteractions(await ixRes.json());
       if (flowRes.ok) setFlow(await flowRes.json());
+      if (calRes.ok) {
+        const cal = await calRes.json();
+        if (Array.isArray(cal.events)) setCalEvents(cal.events);
+      }
     } finally {
       setLoading(false);
     }
@@ -142,6 +168,70 @@ export default function Overview() {
       passed: deals.filter((d) => d.stage === "Passed" && inWin(d.updatedAt)).length,
     };
   }, [weekWindow, deals, execs, flow, interactions, tasks]);
+
+  // Calendar-driven activity highlights + upcoming important dates for the
+  // weekly summary (Ethan, Oct 9, 2026): Outlook events matched to pipeline
+  // operators by name in the event title.
+  const calSummary = useMemo(() => {
+    const { start, end } = weekWindow;
+    const startMs = start.getTime();
+    const endMs = end.getTime();
+    const personOf = (title: string): string => {
+      const t = title.toLowerCase();
+      for (let i = 0; i < execs.length; i++) {
+        const nm = execs[i].name;
+        const parts = nm.toLowerCase().split(" ");
+        const first = parts[0];
+        const last = parts[parts.length - 1];
+        if (
+          t.indexOf(nm.toLowerCase()) >= 0 ||
+          (last.length > 2 && t.indexOf(last) >= 0) ||
+          (first.length > 2 && t.indexOf(first) >= 0)
+        ) {
+          return nm;
+        }
+      }
+      return "";
+    };
+    const held: CalendarEvent[] = [];
+    const after: CalendarEvent[] = [];
+    calEvents.forEach((e) => {
+      const t = new Date(e.startsAt).getTime();
+      if (t >= startMs && t < endMs) held.push(e);
+      else if (t >= endMs && t < endMs + 21 * 86400000) after.push(e);
+    });
+    const lines: string[] = [];
+    const usedNext: string[] = [];
+    held.forEach((e) => {
+      const person = personOf(e.title);
+      if (!person) return;
+      let next: CalendarEvent | null = null;
+      for (let i = 0; i < after.length; i++) {
+        if (personOf(after[i].title) === person && usedNext.indexOf(after[i].eventId) < 0) {
+          next = after[i];
+          break;
+        }
+      }
+      if (next) {
+        usedNext.push(next.eventId);
+        const a = e.title.charAt(0).toLowerCase() + e.title.slice(1);
+        const b = next.title.charAt(0).toLowerCase() + next.title.slice(1);
+        lines.push(
+          `Moved from ${a} to ${b} — ${fmtWhen(next.startsAt, next.allDay)}${next.location ? ` · ${next.location}` : ""}`
+        );
+      } else {
+        lines.push(`${e.title} — ${fmtWhen(e.startsAt, e.allDay)}`);
+      }
+    });
+    const nowMs = Date.now();
+    const upcoming = calEvents
+      .filter((e) => {
+        const t = new Date(e.startsAt).getTime();
+        return t >= nowMs - 3600000 && t < nowMs + 14 * 86400000;
+      })
+      .slice(0, 6);
+    return { lines: lines.slice(0, 5), upcoming };
+  }, [calEvents, execs, weekWindow]);
 
   const staleDeals = useMemo(() => {
     const cutoff = new Date();
@@ -283,6 +373,38 @@ export default function Overview() {
             </span>
           ))}
         </div>
+        {calSummary.lines.length > 0 && (
+          <div className="mt-4">
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+              Activity highlights
+            </p>
+            <ul className="space-y-1">
+              {calSummary.lines.map((line, i) => (
+                <li key={i} className="text-sm text-slate-600 dark:text-white/75">
+                  • {line}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {weekTab === "this" && calSummary.upcoming.length > 0 && (
+          <div className="mt-4">
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+              Important dates
+            </p>
+            <ul className="space-y-1">
+              {calSummary.upcoming.map((e) => (
+                <li key={e.eventId} className="flex items-baseline justify-between gap-2 text-sm">
+                  <span className="truncate font-medium text-[#0d1f3c] dark:text-white">{e.title}</span>
+                  <span className="shrink-0 text-xs text-slate-400 dark:text-white/40">
+                    {fmtWhen(e.startsAt, e.allDay)}
+                    {e.location ? ` · ${e.location}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {staleDeals.length > 0 && (
