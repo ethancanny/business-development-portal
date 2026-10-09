@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     contactName: String(body.contactName ?? "").trim(),
     contactEmail: String(body.contactEmail ?? "").trim(),
     notes: String(body.notes ?? ""),
-    owner: String(body.owner ?? "").trim() || user.email,
+    owner: String(body.owner ?? "").trim() || user.name,
     city,
     lat: geo?.lat ?? null,
     lng: geo?.lng ?? null,

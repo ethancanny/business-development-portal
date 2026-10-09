@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     stage: EXEC_STAGES.includes(body.stage) ? body.stage : "Sourcing",
     background: String(body.background ?? ""),
     notes: String(body.notes ?? ""),
-    owner: String(body.owner ?? "").trim() || user.email,
+    owner: String(body.owner ?? "").trim() || user.name,
     industries: parseIndustries(body.industries),
     createdAt: now,
     updatedAt: now,
