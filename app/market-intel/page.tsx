@@ -209,11 +209,11 @@ function SubSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="mb-5 border-t-2 border-slate-300 pt-4 dark:border-white/20">
+    <div className="mb-5 border-t-[3px] border-slate-400 pt-4 dark:border-white/30">
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 border-b border-slate-200 pb-1.5 text-left dark:border-white/10"
+        className="flex w-full items-center justify-between gap-3 pb-1.5 text-left"
       >
         <span className="text-base font-bold text-[#0d1f3c] dark:text-white">{title}</span>
         <span className="text-lg leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
@@ -330,6 +330,15 @@ export default function MarketIntelPage() {
   const [multBand, setMultBand] = useState("EV $5–25M");
   const [sectorView, setSectorView] = useState<"trend" | "share">("share");
   const [hoverSlug, setHoverSlug] = useState<string | null>(null);
+  // Row hover + click-to-select highlighting for the data tables (Ethan, Oct 9, 2026).
+  const [selRow, setSelRow] = useState("");
+  const toggleRow = (key: string) => setSelRow((s) => (s === key ? "" : key));
+  const rowCls = (key: string) =>
+    `border-b border-slate-100 dark:border-white/5 cursor-pointer transition-colors duration-200 ${
+      selRow === key
+        ? "bg-[#0d1f3c]/[0.09] dark:bg-[#b8975a]/[0.18]"
+        : "hover:bg-slate-50 dark:hover:bg-white/5"
+    }`;
   const [hoverCommodity, setHoverCommodity] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -1447,7 +1456,12 @@ export default function MarketIntelPage() {
                         key={r.slug}
                         onMouseEnter={() => setHoverSlug(r.slug)}
                         onMouseLeave={() => setHoverSlug(null)}
-                        className={`border-b border-slate-100 transition-colors hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5 ${hoverSlug === r.slug ? "bg-slate-100 dark:bg-white/10" : ""}`}
+                        onClick={() => toggleRow(`sector:${r.slug}`)}
+                        className={`border-b border-slate-100 transition-colors duration-200 dark:border-white/5 ${
+                          selRow === `sector:${r.slug}`
+                            ? "cursor-pointer bg-[#0d1f3c]/[0.09] dark:bg-[#b8975a]/[0.18]"
+                            : `cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5 ${hoverSlug === r.slug ? "bg-slate-100 dark:bg-white/10" : ""}`
+                        }`}
                       >
                         <td className={td}>{r.name}</td>
                         <td className={`${td} font-medium`}>{r.estab.toLocaleString()}</td>
@@ -1503,7 +1517,7 @@ export default function MarketIntelPage() {
                 </tr></thead>
                 <tbody>
                   {[...defenseRows].slice(-12).reverse().map((r) => (
-                    <tr key={r.date} className="border-b border-slate-100 dark:border-white/5">
+                    <tr key={r.date} onClick={() => toggleRow(`defense:${r.date}`)} className={rowCls(`defense:${r.date}`)}>
                       <td className={td}>{shortDate(r.date)}</td>
                       <td className={`${td} font-medium`}>{typeof r.AZ_DOD_CONTRACTS === "number" ? `$${r.AZ_DOD_CONTRACTS.toLocaleString()}M` : "—"}</td>
                       <td className={td}>{typeof r.AZ_AEROSPACE_CONTRACTS === "number" ? `$${r.AZ_AEROSPACE_CONTRACTS.toLocaleString()}M` : "—"}</td>
@@ -1662,7 +1676,7 @@ export default function MarketIntelPage() {
                     const l = latest[id];
                     if (!l) return null;
                     return (
-                      <tr key={id} className="border-b border-slate-100 dark:border-white/5">
+                      <tr key={id} onClick={() => toggleRow(`ind:${id}`)} className={rowCls(`ind:${id}`)}>
                         <td className={td}>{l.title}</td>
                         <td className={`${td} font-medium`}>{l.value !== null ? l.value.toLocaleString() : "—"}{l.units ? <span className="text-slate-400"> {l.units}</span> : ""}</td>
                         <td className={td}>{l.obsDate ? fmtDate(l.obsDate) : "—"}</td>
@@ -1706,7 +1720,7 @@ export default function MarketIntelPage() {
               </tr></thead>
               <tbody>
                 {[...budgetRows].reverse().map((r) => (
-                  <tr key={r.date} className="border-b border-slate-100 dark:border-white/5">
+                  <tr key={r.date} onClick={() => toggleRow(`budget:${r.date}`)} className={rowCls(`budget:${r.date}`)}>
                     <td className={`${td} font-medium`}>{r.date}</td>
                     <td className={td}>{r.Revenue !== null ? `$${r.Revenue}B` : "—"}</td>
                     <td className={td}>{r.Spending !== null ? `$${r.Spending}B` : "—"}</td>
@@ -1758,7 +1772,7 @@ export default function MarketIntelPage() {
                     const v = last[label] as number | null;
                     const total = last["Total"] as number | null;
                     return (
-                      <tr key={label} className="border-b border-slate-100 dark:border-white/5">
+                      <tr key={label} onClick={() => toggleRow(`spend:${label}`)} className={rowCls(`spend:${label}`)}>
                         <td className={`${td} font-medium`}>{label}</td>
                         <td className={td}>{v !== null ? `$${v}B` : "—"}</td>
                         <td className={td}>{v !== null && total ? `${Math.round((v / total) * 1000) / 10}%` : "—"}</td>
@@ -1874,7 +1888,7 @@ export default function MarketIntelPage() {
                 </tr></thead>
                 <tbody>
                   {[...permitRows].slice(-12).reverse().map((r) => (
-                    <tr key={r.date} className="border-b border-slate-100 dark:border-white/5">
+                    <tr key={r.date} onClick={() => toggleRow(`permits:${r.date}`)} className={rowCls(`permits:${r.date}`)}>
                       <td className={td}>{shortDate(r.date)}</td>
                       <td className={`${td} font-medium`}>{typeof r.AZBPPRIV === "number" ? r.AZBPPRIV.toLocaleString() : "—"}</td>
                     </tr>
@@ -1922,7 +1936,7 @@ export default function MarketIntelPage() {
                     </tr></thead>
                     <tbody>
                       {countyPermits.map((c) => (
-                        <tr key={c.name} className="border-b border-slate-100 dark:border-white/5">
+                        <tr key={c.name} onClick={() => toggleRow(`county:${c.name}`)} className={rowCls(`county:${c.name}`)}>
                           <td className={`${td} font-medium`}>{c.name}</td>
                           <td className={td}>{c.value.toLocaleString()}</td>
                           <td className={td}>{c.sf !== null ? c.sf.toLocaleString() : "—"}</td>
@@ -2058,7 +2072,7 @@ export default function MarketIntelPage() {
                 {[...warn]
                   .sort((a, b) => (b.noticeDate || "").localeCompare(a.noticeDate || ""))
                   .map((w) => (
-                  <tr key={w.id} className="border-b border-slate-100 transition-colors hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5">
+                  <tr key={w.id} onClick={() => toggleRow(`warn:${w.id}`)} className={rowCls(`warn:${w.id}`)}>
                     <td className="px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-white/80">{w.employer}</td>
                     <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-[11px] text-[#8a6f3e] dark:text-[#d4b37a]">{w.industry}</span>}</td>
                     <td className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-white/80">{w.location}</td>
@@ -2104,7 +2118,7 @@ export default function MarketIntelPage() {
                     a.target.split(/\s+/).length <= 5 &&
                     a.target !== (a.headline || "");
                   return (
-                    <tr key={a.id} className="border-b border-slate-100 dark:border-white/5">
+                    <tr key={a.id} onClick={() => toggleRow(`acq:${a.id}`)} className={rowCls(`acq:${a.id}`)}>
                       <td className={`${td} max-w-md`}>
                         <span className="font-medium">{title}</span>
                         {pairOk && (
@@ -2145,7 +2159,7 @@ export default function MarketIntelPage() {
                 </tr></thead>
                 <tbody>
                   {filteredFilings.filter((f) => f.status !== "dismissed").map((f) => (
-                    <tr key={f.id} className="border-b border-slate-100 dark:border-white/5">
+                    <tr key={f.id} onClick={() => toggleRow(`filing:${f.id}`)} className={rowCls(`filing:${f.id}`)}>
                       <td className={td}>
                         {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="font-medium text-[#8a6f3e] underline dark:text-[#d4b37a]">{f.company}</a> : <span className="font-medium">{f.company}</span>}
                         <span className="block text-xs">
@@ -2196,6 +2210,14 @@ export default function MarketIntelPage() {
 function MultiplesPanel({ multiples, onAdded }: { multiples: MiMultiple[]; onAdded: () => void }) {
   const [form, setForm] = useState({ sourceReport: "", period: "", industry: "", sizeBand: "", evEbitdaLow: "", evEbitdaHigh: "", evEbitdaMedian: "", evRevenueMedian: "", notes: "" });
   const [saving, setSaving] = useState(false);
+  const [selRow, setSelRow] = useState("");
+  const toggleRow = (key: string) => setSelRow((s) => (s === key ? "" : key));
+  const rowCls = (key: string) =>
+    `border-b border-slate-100 dark:border-white/5 cursor-pointer transition-colors duration-200 ${
+      selRow === key
+        ? "bg-[#0d1f3c]/[0.09] dark:bg-[#b8975a]/[0.18]"
+        : "hover:bg-slate-50 dark:hover:bg-white/5"
+    }`;
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const input = "rounded-lg border border-slate-300 px-2 py-1.5 text-sm dark:border-white/15 dark:bg-white/5 dark:text-white";
 
@@ -2249,7 +2271,7 @@ function MultiplesPanel({ multiples, onAdded }: { multiples: MiMultiple[]; onAdd
           </tr></thead>
           <tbody>
             {multiples.map((m) => (
-              <tr key={m.id} className="border-b border-slate-100 dark:border-white/5">
+              <tr key={m.id} onClick={() => toggleRow(`mult:${m.id}`)} className={rowCls(`mult:${m.id}`)}>
                 <td className="px-3 py-2 text-sm font-medium text-slate-700 dark:text-white/80">{m.sourceReport}{m.sizeBand && <span className="block text-xs text-slate-400">{m.sizeBand}</span>}</td>
                 <td className="px-3 py-2 text-sm text-slate-700 dark:text-white/80">{m.period}</td>
                 <td className="px-3 py-2 text-sm text-slate-700 dark:text-white/80">{m.industry || "—"}</td>
