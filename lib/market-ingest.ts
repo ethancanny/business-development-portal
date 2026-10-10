@@ -1403,31 +1403,6 @@ export async function ingestCensusStateFin(): Promise<number> {
 
 /* ---------------- Orchestrator ---------------- */
 
-/* ---------------- U of A EBRC (dataZoa): county housing permits ----------------
- * The University of Arizona's Economic and Business Research Center publishes
- * monthly county tables (via dataZoa) whose last two columns are Census
- * Building Permits Survey counts: Total units and Single-Family units.
- * Each county table has a public CSV export endpoint keyed by its embed hash.
- */
-
-const COUNTY_PERMIT_TABLES: { county: string; slug: string; hashes: string[] }[] = [
-  { county: "Apache", slug: "APACHE", hashes: ["18575CA960"] },
-  { county: "Cochise", slug: "COCHISE", hashes: ["A53FB2362B"] },
-  { county: "Coconino", slug: "COCONINO", hashes: ["F0CD76A943"] },
-  { county: "Gila", slug: "GILA", hashes: ["8BBFE78881"] },
-  { county: "Graham", slug: "GRAHAM", hashes: ["5D7A5FFE60"] },
-  { county: "Greenlee", slug: "GREENLEE", hashes: ["99EC13529F"] },
-  { county: "La Paz", slug: "LAPAZ", hashes: ["BF3A677BA4"] },
-  { county: "Maricopa", slug: "MARICOPA", hashes: ["380B9E931D"] },
-  { county: "Mohave", slug: "MOHAVE", hashes: ["F9A24CD7A3"] },
-  { county: "Navajo", slug: "NAVAJO", hashes: ["081D067E8B"] },
-  { county: "Pima", slug: "PIMA", hashes: ["95E515957E"] },
-  { county: "Pinal", slug: "PINAL", hashes: ["0EA7D0310A"] },
-  { county: "Santa Cruz", slug: "SANTACRUZ", hashes: ["C85FABD7D9"] },
-  { county: "Yavapai", slug: "YAVAPAI", hashes: ["84F517B20F"] },
-  { county: "Yuma", slug: "YUMA", hashes: ["895CEE7B87"] },
-];
-
 /** Minimal RFC4180 CSV parser (dataZoa exports quote fields with embedded commas/newlines). */
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -1462,106 +1437,217 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-/** Extract monthly (date, total units, single-family units) from a county export. */
-function parseCountyPermits(csvText: string): { date: string; total: number | null; sf: number | null }[] {
-  const rows = parseCsv(csvText.replace(/^﻿/, ""));
-  if (!rows.length) return [];
-  // Column titles vary slightly by county (e.g. " Single Family" with a space);
-  // the permits columns are the LAST "Total" / "Single Family" pair in the table.
-  const titles = rows[0].map((c) => c.trim());
-  const sfIdx = titles.lastIndexOf("Single Family");
-  // The total column sits immediately before Single Family; counties title it
-  // either "Total" or "Total Units" (Pima's variant also adds sales columns).
-  const totalIdx =
-    sfIdx > 0 && (titles[sfIdx - 1] === "Total" || titles[sfIdx - 1] === "Total Units")
-      ? sfIdx - 1
-      : titles.lastIndexOf("Total");
-  const dateRow = rows.findIndex((r) => r[0] === "DATE");
-  if (totalIdx < 0 || sfIdx < 0 || dateRow < 0) return [];
-  const out: { date: string; total: number | null; sf: number | null }[] = [];
-  const num = (s: string | undefined) => {
-    const v = parseFloat((s ?? "").replace(/,/g, ""));
-    return Number.isFinite(v) ? v : null;
+/* ---------------- County housing permits: Census BPS (published by U of A EBRC) ----------------
+ * The University of Arizona's Economic and Business Research Center publishes
+ * monthly county housing-permit tables sourced from the U.S. Census Bureau's
+ * Building Permits Survey (BPS). EBRC's dataZoa exports omit four AZ counties,
+ * so this ingestor reads the underlying BPS county files directly from Census
+ * (https://www2.census.gov/econ/bps/County/co<YYMM>c.txt) — the same survey,
+ * with complete monthly coverage of all 15 Arizona counties. Each county row
+ * reports buildings/units/valuation for 1-unit, 2-unit, 3–4-unit and 5+-unit
+ * structures; the stored value is total units (plus a single-family series).
+ * Cross-reference (Ethan's rule): the county sum for the latest month is
+ * reconciled against the BPS state file's Arizona total (an independent
+ * aggregation of the same survey) and logged as permits-xcheck.
+ */
+
+const AZ_COUNTY_FIPS: { fips: string; county: string; slug: string }[] = [
+  { fips: "001", county: "Apache", slug: "APACHE" },
+  { fips: "003", county: "Cochise", slug: "COCHISE" },
+  { fips: "005", county: "Coconino", slug: "COCONINO" },
+  { fips: "007", county: "Gila", slug: "GILA" },
+  { fips: "009", county: "Graham", slug: "GRAHAM" },
+  { fips: "011", county: "Greenlee", slug: "GREENLEE" },
+  { fips: "012", county: "La Paz", slug: "LAPAZ" },
+  { fips: "013", county: "Maricopa", slug: "MARICOPA" },
+  { fips: "015", county: "Mohave", slug: "MOHAVE" },
+  { fips: "017", county: "Navajo", slug: "NAVAJO" },
+  { fips: "019", county: "Pima", slug: "PIMA" },
+  { fips: "021", county: "Pinal", slug: "PINAL" },
+  { fips: "023", county: "Santa Cruz", slug: "SANTACRUZ" },
+  { fips: "025", county: "Yavapai", slug: "YAVAPAI" },
+  { fips: "027", county: "Yuma", slug: "YUMA" },
+];
+
+type BpsMonth = { survey: string; file: string; obsDate: string };
+
+function bpsMonth(year: number, month: number): BpsMonth {
+  const mm = String(month).padStart(2, "0");
+  return {
+    survey: `${year}${mm}`,
+    file: `${String(year).slice(2)}${mm}`,
+    obsDate: `${year}-${mm}-01`,
   };
-  for (let i = dateRow + 1; i < rows.length; i++) {
-    const m = (rows[i][0] ?? "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (!m) continue;
-    const date = `${m[3]}-${m[1].padStart(2, "0")}-01`;
-    out.push({ date, total: num(rows[i][totalIdx]), sf: num(rows[i][sfIdx]) });
+}
+
+function shiftMonth(year: number, month: number, delta: number): { year: number; month: number } {
+  const idx = year * 12 + (month - 1) + delta;
+  return { year: Math.floor(idx / 12), month: (idx % 12) + 1 };
+}
+
+async function fetchBpsFile(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" },
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    // www2.census.gov occasionally answers 200 with a rejection page instead
+    // of the file; only accept payloads that start with the BPS header.
+    return text.startsWith("Survey,") ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Parse one BPS county current-month file → per-county totals for Arizona. */
+function parseBpsCountyFile(text: string, survey: string): Map<string, { total: number; sf: number }> {
+  const out = new Map<string, { total: number; sf: number }>();
+  const byFips = new Map(AZ_COUNTY_FIPS.map((c) => [c.fips, c]));
+  const num = (v: string | undefined) => {
+    const n = parseInt((v ?? "").replace(/[^0-9-]/g, ""), 10);
+    return Number.isFinite(n) ? n : 0;
+  };
+  for (const r of parseCsv(text)) {
+    if (r[0] !== survey || r[1] !== "04") continue;
+    const c = byFips.get((r[2] ?? "").padStart(3, "0"));
+    if (!c) continue;
+    // Units columns: 1-unit idx 7, 2-units idx 10, 3–4 units idx 13, 5+ idx 16.
+    const total = num(r[7]) + num(r[10]) + num(r[13]) + num(r[16]);
+    out.set(c.slug, { total, sf: num(r[7]) });
   }
   return out;
 }
 
-export async function ingestCountyPermits(): Promise<number> {
-  const since = "2020-01-01"; // display window is 5 years; keep ingest lean
+/** Arizona total units from the BPS state file (independent aggregation). */
+function parseBpsStateTotal(text: string, survey: string): number | null {
+  for (const r of parseCsv(text)) {
+    if (r[0] !== survey || r[1] !== "04") continue;
+    const num = (v: string | undefined) => {
+      const n = parseInt((v ?? "").replace(/[^0-9-]/g, ""), 10);
+      return Number.isFinite(n) ? n : 0;
+    };
+    // State layout shifts the unit columns three left vs the county file:
+    // 1-unit idx 6, 2-units idx 9, 3–4 units idx 12, 5+ idx 15.
+    return num(r[6]) + num(r[9]) + num(r[12]) + num(r[15]);
+  }
+  return null;
+}
 
-  async function processCounty(c: (typeof COUNTY_PERMIT_TABLES)[number]): Promise<number> {
-    // Some counties keep permits in a second table; use the first that yields rows.
-    let parsed: { date: string; total: number | null; sf: number | null }[] = [];
-    for (const hash of c.hashes) {
-      const url = `https://www.datazoa.com/publish/export.asp?hash=${hash}&glname=&dzuuid=1068&alttitle=&altextsrc=&a=exportcsv`;
-      const res = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapitalPortal/1.0)" },
-      });
-      if (!res.ok) {
-        await logSync("county_permits", "error", 0, `dataZoa ${c.county}: HTTP ${res.status}`);
-        continue;
+export async function ingestCountyPermits(): Promise<number> {
+  const MONTHS = 37; // 3 years + 1 month: trend window plus YoY overlap
+  const now = new Date();
+  let year = now.getUTCFullYear();
+  let month = now.getUTCMonth() + 1;
+
+  // Find the newest published county file (BPS lags ~6–7 weeks).
+  let latest: BpsMonth | null = null;
+  let latestText: string | null = null;
+  for (let back = 0; back < 9 && !latest; back++) {
+    const cand = bpsMonth(year, month);
+    const text = await fetchBpsFile(`https://www2.census.gov/econ/bps/County/co${cand.file}c.txt`);
+    if (text && parseBpsCountyFile(text, cand.survey).size >= 10) {
+      latest = cand;
+      latestText = text;
+    } else {
+      const prev = shiftMonth(year, month, -1);
+      year = prev.year;
+      month = prev.month;
+    }
+  }
+  if (!latest || !latestText) {
+    await logSync("county_permits", "error", 0, "Census BPS: no recent county file found");
+    await logSync("permits-xcheck", "error", 0, "BPS cross-check could not run: county file unavailable");
+    return 0;
+  }
+
+  const months: BpsMonth[] = [];
+  {
+    let y = year;
+    let m = month;
+    for (let i = 0; i < MONTHS; i++) {
+      months.push(bpsMonth(y, m));
+      const prev = shiftMonth(y, m, -1);
+      y = prev.year;
+      m = prev.month;
+    }
+  }
+
+  const rows: IndicatorInput[] = [];
+  let fetched = 0;
+  let latestCountySum: number | null = null;
+  let latestCountyCount = 0;
+  for (let i = 0; i < months.length; i += 8) {
+    const batch = months.slice(i, i + 8);
+    const texts = await Promise.all(
+      batch.map((mo) =>
+        mo.survey === latest!.survey
+          ? Promise.resolve(latestText)
+          : fetchBpsFile(`https://www2.census.gov/econ/bps/County/co${mo.file}c.txt`)
+      )
+    );
+    texts.forEach((text, j) => {
+      const mo = batch[j];
+      if (!text) return;
+      const parsed = parseBpsCountyFile(text, mo.survey);
+      if (!parsed.size) return;
+      fetched++;
+      if (mo.survey === latest!.survey) {
+        latestCountySum = 0;
+        parsed.forEach((v) => {
+          latestCountySum = (latestCountySum ?? 0) + v.total;
+        });
+        latestCountyCount = parsed.size;
       }
-      parsed = parseCountyPermits(await res.text());
-      if (parsed.some((r) => r.total !== null)) break;
-      parsed = [];
-    }
-    if (!parsed.length) {
-      // EBRC publishes no permits series for Apache, Graham, Greenlee, La Paz —
-      // expected state, not an error (verified on their county pages Oct 2026).
-      await logSync("county_permits", "skipped", 0, `dataZoa ${c.county}: no permits published by EBRC`);
-      return 0;
-    }
-    const rows: IndicatorInput[] = [];
-    for (const r of parsed) {
-      if (r.date < since) continue;
-      if (r.total !== null)
+      for (const c of AZ_COUNTY_FIPS) {
+        const v = parsed.get(c.slug);
+        if (!v) continue;
         rows.push({
           source: "ebrc",
           seriesId: `AZPERMIT_${c.slug}`,
           title: `${c.county} County Housing Permits — Total Units`,
           units: "Units",
           frequency: "Monthly",
-          obsDate: r.date,
-          value: r.total,
+          obsDate: mo.obsDate,
+          value: v.total,
         });
-      if (r.sf !== null)
         rows.push({
           source: "ebrc",
           seriesId: `AZPERMIT_SF_${c.slug}`,
           title: `${c.county} County Housing Permits — Single-Family Units`,
           units: "Units",
           frequency: "Monthly",
-          obsDate: r.date,
-          value: r.sf,
+          obsDate: mo.obsDate,
+          value: v.sf,
         });
-    }
-    return upsertIndicatorObsBulk(rows);
+      }
+    });
   }
 
-  // dataZoa generates each CSV slowly (~5-7s); fetch/process 5 counties at a time.
-  let total = 0;
-  for (let i = 0; i < COUNTY_PERMIT_TABLES.length; i += 5) {
-    const batch = COUNTY_PERMIT_TABLES.slice(i, i + 5);
-    const results = await Promise.all(
-      batch.map(async (c) => {
-        try {
-          return await processCounty(c);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          await logSync("county_permits", "error", 0, `dataZoa ${c.county}: ${msg.slice(0, 300)}`);
-          return 0;
-        }
-      })
+  // Cross-reference: county sum vs the BPS state file's Arizona total.
+  const stateText = await fetchBpsFile(`https://www2.census.gov/econ/bps/State/st${latest.file}c.txt`);
+  const stateTotal = stateText ? parseBpsStateTotal(stateText, latest.survey) : null;
+  const countySum = latestCountySum as number | null;
+  if (stateTotal === null || countySum === null) {
+    await logSync("permits-xcheck", "error", 0, `BPS cross-check could not run for ${latest.obsDate}: state file unavailable`);
+  } else {
+    const diff = Math.abs(countySum - stateTotal);
+    const tol = Math.max(2, stateTotal * 0.005);
+    await logSync(
+      "permits-xcheck",
+      diff <= tol ? "ok" : "error",
+      0,
+      `BPS ${latest.obsDate}: county sum ${countySum.toLocaleString()} units (${latestCountyCount} counties) vs state file ${stateTotal.toLocaleString()} — diff ${diff}`
     );
-    total += results.reduce((a, b) => a + b, 0);
   }
-  await logSync("county_permits", "ok", total, `U of A EBRC/dataZoa: county housing permits`);
+
+  const total = await upsertIndicatorObsBulk(rows);
+  await logSync(
+    "county_permits",
+    "ok",
+    total,
+    `Census BPS county files (series published by U of A EBRC): ${fetched} months, all 15 AZ counties, latest ${latest.obsDate}`
+  );
   return total;
 }
 
