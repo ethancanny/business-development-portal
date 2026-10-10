@@ -8,7 +8,9 @@ import type { MiCompany } from "@/lib/types";
  * Rendered inside that industry's own subsection on Market Intel, under
  * the size profile. Rows expand into a profile with registry details
  * and one-click promotion into the acquisition pipeline. */
-export default function CompanyTargets({ sector, fitOnly = false, heading }: { sector: string; fitOnly?: boolean; heading?: string }) {
+export default function CompanyTargets({ sector, sectors, fitOnly = false, heading }: { sector?: string; sectors?: string[]; fitOnly?: boolean; heading?: string }) {
+  const sectorList = sectors ?? (sector ? [sector] : []);
+  const multi = sectorList.length > 1;
   const [rows, setRows] = useState<MiCompany[] | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [fitTotal, setFitTotal] = useState<number | null>(null);
@@ -26,22 +28,33 @@ export default function CompanyTargets({ sector, fitOnly = false, heading }: { s
 
   useEffect(() => {
     let live = true;
-    fetch(`/api/market/companies?sector=${encodeURIComponent(sector)}&limit=800`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: { companies?: MiCompany[]; total?: number; fitTotal?: number } | MiCompany[]) => {
-        if (!live) return;
+    Promise.all(
+      sectorList.map((s) =>
+        fetch(`/api/market/companies?sector=${encodeURIComponent(s)}&limit=800`)
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => [])
+      )
+    ).then((results) => {
+      if (!live) return;
+      let merged: MiCompany[] = [];
+      let tot = 0;
+      let fits = 0;
+      for (const data of results as ({ companies?: MiCompany[]; total?: number; fitTotal?: number } | MiCompany[])[]) {
         const list = Array.isArray(data) ? data : (data.companies ?? []);
-        setRows(list);
-        setTotal(Array.isArray(data) ? list.length : (data.total ?? list.length));
-        setFitTotal(Array.isArray(data) ? null : (data.fitTotal ?? null));
-      })
-      .catch(() => {
-        if (live) setRows([]);
-      });
+        merged = merged.concat(list);
+        tot += Array.isArray(data) ? list.length : (data.total ?? list.length);
+        fits += Array.isArray(data) ? 0 : (data.fitTotal ?? 0);
+      }
+      merged.sort((a, b) => (b.signalValue ?? 0) - (a.signalValue ?? 0));
+      setRows(merged);
+      setTotal(tot);
+      setFitTotal(fits);
+    });
     return () => {
       live = false;
     };
-  }, [sector]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectorList.join("|")]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -111,7 +124,7 @@ export default function CompanyTargets({ sector, fitOnly = false, heading }: { s
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           companyName: c.name,
-          industry: sector,
+          industry: c.sector || sector || "",
           city: c.city ? `${c.city}, AZ` : "",
           contactName: c.contactName,
           source: `Market Intel — ${c.source}`,
@@ -169,7 +182,7 @@ export default function CompanyTargets({ sector, fitOnly = false, heading }: { s
         <p className="text-xs text-slate-500 dark:text-white/50">
           {fitOnly ? (
             <>
-              {(fitTotal ?? 0).toLocaleString()} fits in this industry · {sources}
+              {(fitTotal ?? 0).toLocaleString()} fits {multi ? "across all focus industries" : "in this industry"} · {sources}
               {total !== null && total > rows.length ? ` · fits shown from the top ${rows.length.toLocaleString()} companies by size signal` : ""}
             </>
           ) : (
@@ -199,6 +212,7 @@ export default function CompanyTargets({ sector, fitOnly = false, heading }: { s
           <thead>
             <tr>
               <th className={th}>Company</th>
+              {multi && <th className={th}>Industry</th>}
               <th className={th}>City</th>
               <th className={th}>Sub-sector</th>
               <th className={th}>Since</th>
@@ -228,6 +242,7 @@ export default function CompanyTargets({ sector, fitOnly = false, heading }: { s
                     {c.status === "keep" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">KEPT</span>}
                     {c.status === "added" && <span className="ml-2 rounded bg-[#b8975a]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">IN PIPELINE</span>}
                   </td>
+                  {multi && <td className={td}>{c.sector || "—"}</td>}
                   <td className={td}>{c.city || "—"}</td>
                   <td className={td}>{c.subsector || "—"}</td>
                   <td className={td}>{yearOf(c.formedDate) || "—"}</td>
@@ -236,7 +251,7 @@ export default function CompanyTargets({ sector, fitOnly = false, heading }: { s
                 </tr>
                 {openId === c.id && (
                   <tr key={`${c.id}-detail`} className="border-t border-slate-100 bg-slate-50/60 dark:border-white/5 dark:bg-white/5">
-                    <td colSpan={6} className="px-3 py-3">
+                    <td colSpan={multi ? 7 : 6} className="px-3 py-3">
                       <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-slate-700 dark:text-white/80 md:grid-cols-3">
                         {c.address && <p><span className="text-slate-400 dark:text-white/40">Address </span>{c.address}{c.zip ? `, ${c.zip}` : ""}</p>}
                         {c.contactName && <p><span className="text-slate-400 dark:text-white/40">Contact </span>{c.contactName}{c.contactTitle ? ` — ${c.contactTitle}` : ""}</p>}

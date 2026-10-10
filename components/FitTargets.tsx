@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import CompanyTargets from "@/components/CompanyTargets";
 
 /** Consolidated ★ Fit Targets (Ethan, Oct 10, 2026): every company
- * passing Canny's fit rules, in one section, switchable by focus
- * industry. Each table is the CompanyTargets table restricted to fits;
- * expanding a row converts the fit into the acquisition pipeline. */
+ * passing Canny's fit rules in ONE table. The industry switcher
+ * filters the same consolidated table (All = every focus industry,
+ * with an Industry column); expanding a row converts the fit into
+ * the acquisition pipeline. */
 const SECTORS = [
   "Aerospace & Defense",
   "Healthcare",
@@ -52,15 +53,12 @@ export default function FitTargets() {
           </button>
         ))}
       </div>
-      {tab === "All" ? (
-        SECTORS.map((s) => (
-          <div key={s} className="border-t border-slate-200 pt-2 first:border-t-0 first:pt-0 dark:border-white/10">
-            <CompanyTargets sector={s} fitOnly heading={`★ ${s} — fit targets`} />
-          </div>
-        ))
-      ) : (
-        <CompanyTargets sector={tab} fitOnly heading={`★ ${tab} — fit targets`} />
-      )}
+      <CompanyTargets
+        key={tab}
+        sectors={tab === "All" ? SECTORS : [tab]}
+        fitOnly
+        heading={tab === "All" ? "★ All fit targets" : `★ ${tab} — fit targets`}
+      />
     </div>
   );
 }
