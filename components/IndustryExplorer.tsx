@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Bar,
@@ -13,7 +13,6 @@ import {
   YAxis,
 } from "recharts";
 import MultiplesPanel from "@/components/MultiplesPanel";
-import { SubSection } from "@/components/market-sections";
 import type { MiMultiple } from "@/lib/types";
 
 /** Combined Industries & Multiples explorer (Ethan, Oct 10, 2026 —
@@ -25,9 +24,9 @@ import type { MiMultiple } from "@/lib/types";
  * median for that size band) flagged "est" — Ethan approved best
  * guesses where data isn't available. EV/EBITDA is the default metric
  * (toggle sits on the left). The All Industries view leads with the
- * industry-overall comparison (one chart + overall table); each
- * industry's subindustry table sits in a collapsible under it.
- * Focus-sector detail blocks
+ * industry-overall comparison (one chart + overall table); clicking
+ * an industry row in the overall table expands its subindustry
+ * multiples in place. Focus-sector detail blocks
  * (sector charts, size profiles, company targets) are passed in from
  * the page as `extras` and render under the selected focus industry. */
 
@@ -254,6 +253,7 @@ export default function IndustryExplorer({
   // EV/EBITDA is the default metric; its toggle sits on the left.
   const [metric, setMetric] = useState<"ebitda" | "revenue">("ebitda");
   const [band, setBand] = useState<string>("EV $25–100M");
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [hovRow, setHovRow] = useState("");
 
   const grid = dark ? "rgba(255,255,255,0.08)" : "rgba(13,31,60,0.08)";
@@ -444,7 +444,7 @@ export default function IndustryExplorer({
               </div>
             </div>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-              Each industry&apos;s overall (median) private-deal multiple — the subindustry tables below break it down. EV/EBITDA is the default; it runs sparse in the smaller bands, where the EV/Revenue view carries more published data.
+              Each industry&apos;s overall (median) private-deal multiple. <span className="font-medium text-slate-600 dark:text-white/60">Click an industry row to expand its subindustry multiples.</span> EV/EBITDA is the default; it runs sparse in the smaller bands, where the EV/Revenue view carries more published data.
             </p>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
@@ -475,40 +475,43 @@ export default function IndustryExplorer({
                     {BANDS.map((b) => (
                       <th key={b} className={th}>{b.replace("EV ", "")}</th>
                     ))}
+                    <th className={th}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {INDUSTRY_GROUPS.map((g) => (
-                    <tr
-                      key={g}
-                      onMouseEnter={() => setHovRow(`overall:${g}`)}
-                      onMouseLeave={() => setHovRow("")}
-                      style={rowStyle(`overall:${g}`, g === "Aerospace & Defense")}
-                      className="border-b border-slate-100 dark:border-white/5"
-                    >
-                      <td className={`${td} font-medium`}>{FOCUS.includes(g) ? "★ " : ""}{g}</td>
-                      {BANDS.map((b) => {
-                        const v = groupMedian(g, b);
-                        return (
-                          <td key={b} className={td}>{v !== null ? `${v.toFixed(2)}×` : "—"}</td>
-                        );
-                      })}
-                    </tr>
+                    <Fragment key={g}>
+                      <tr
+                        onClick={() => setOpenGroup(openGroup === g ? null : g)}
+                        onMouseEnter={() => setHovRow(`overall:${g}`)}
+                        onMouseLeave={() => setHovRow("")}
+                        style={rowStyle(`overall:${g}`, g === "Aerospace & Defense")}
+                        className="cursor-pointer border-b border-slate-100 dark:border-white/5"
+                      >
+                        <td className={`${td} font-medium`}>{FOCUS.includes(g) ? "★ " : ""}{g}</td>
+                        {BANDS.map((b) => {
+                          const v = groupMedian(g, b);
+                          return (
+                            <td key={b} className={td}>{v !== null ? `${v.toFixed(2)}×` : "—"}</td>
+                          );
+                        })}
+                        <td className={td}>{openGroup === g ? "▾" : "▸"}</td>
+                      </tr>
+                      {openGroup === g && (
+                        <tr className="border-b border-slate-100 bg-slate-50/60 dark:border-white/5 dark:bg-white/5">
+                          <td colSpan={7} className="px-3 py-3">
+                            {subTable(g)}
+                            <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
+                              Cells marked est are best guesses — the industry&apos;s median for that band — where no subindustry multiple is published.
+                            </p>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
             </div>
-          </div>
-
-          <div className="mt-5 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0">
-            {INDUSTRY_GROUPS.map((g, i) => (
-              <SubSection key={g} title={`${FOCUS.includes(g) ? "★ " : ""}${g} — subindustries`} alt={i % 2 === 1}>
-                {subTable(g)}
-                <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
-                  Median private-deal multiples by EV size band (ExitValue.ai), {metric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"}. Cells marked est are best guesses — the industry&apos;s median for that band — where no subindustry multiple is published.
-                </p>
-              </SubSection>
-            ))}
           </div>
 
           <div className="mt-4">
