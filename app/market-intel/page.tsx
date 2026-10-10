@@ -1030,125 +1030,7 @@ export default function MarketIntelPage() {
     `rounded-lg px-3 py-1.5 text-sm font-medium ${active ? "bg-[#d7e1f0] font-semibold text-[#0d1f3c] dark:bg-[#b8975a]/30 dark:text-[#e8cf9a]" : "text-slate-600 hover:bg-[#f0f4fa] dark:text-white/60 dark:hover:bg-white/5"}`;
 
   const overviewNode = (
-    <>
-      <EventStrip items={acqEvents} onDismiss={dismissEvent} />
-      <div className="mt-4">
-{sectorRows.length > 0 && (
-            <div className={`${chartCard} mb-4`}>
-              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona Companies by Sector</h3>
-                <div className="flex gap-1">
-                  {(["trend", "share"] as const).map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => setSectorView(v)}
-                      className={
-                        sectorView === v
-                          ? "rounded-full bg-[#b8975a] px-3 py-1 text-xs font-semibold text-white"
-                          : "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-500 hover:border-[#b8975a] dark:border-white/15 dark:text-white/50"
-                      }
-                    >
-                      {v === "trend" ? "Trend" : "Share"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-                Employer establishments by NAICS sector · U.S. Census Bureau, County Business Patterns · refreshed daily (CBP publishes annually)
-              </p>
-              {sectorView === "trend" ? (
-                <div className="h-[380px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
-                      <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="year" tick={{ fontSize: 11, fill: tick }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
-                      <Tooltip
-                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12, borderRadius: 8 }}
-                        cursor={{ stroke: grid }}
-                        formatter={(v, name) => [Number(v).toLocaleString(), name]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
-                      {sectorTrend.slugs.map((slug, i) => (
-                        <Line
-                          key={slug}
-                          type="monotone"
-                          dataKey={slug}
-                          name={SECTOR_SHORT[slug] ?? slug}
-                          stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                          strokeWidth={hoverSlug === slug ? 3.5 : 2}
-                          strokeOpacity={hoverSlug && hoverSlug !== slug ? 0.12 : 1}
-                          dot={false}
-                          activeDot={{ r: 3.5 }}
-                        />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <div className="h-[380px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={sectorPieData} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={1} stroke={dark ? "#132847" : "#ffffff"} strokeWidth={1}>
-                        {sectorPieData.map((d, i) => (
-                          <Cell
-                            key={d.name}
-                            fill={CHART_COLORS[i % CHART_COLORS.length]}
-                            fillOpacity={hoverSlug ? (d.slugs.includes(hoverSlug) ? 1 : 0.22) : 1}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
-                        formatter={(v, name) => [`${Number(v).toLocaleString()} (${sectorTotal ? ((Number(v) / sectorTotal) * 100).toFixed(1) : "0"}%)`, name]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-              <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
-                {sectorView === "trend" ? "Establishments per year — top 8 sectors" : `CBP ${sectorYear} mix`} · {sectorTotal.toLocaleString()} establishments statewide (CBP {sectorYear})
-              </p>
-              <div className={`${tableWrap} mt-3 max-h-[320px] overflow-y-auto`}>
-                <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
-                  <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                    <th className={th}>Sector</th><th className={th}>Companies</th><th className={th}>Employees</th><th className={th}>Share</th>
-                  </tr></thead>
-                  <tbody>
-                    {sectorRows.map((r) => (
-                      <tr
-                        key={r.slug}
-                        onMouseEnter={() => { setHoverSlug(r.slug); setHovRow(`sector:${r.slug}`); }}
-                        onMouseLeave={() => { setHoverSlug(null); setHovRow(""); }}
-                        style={{
-                          backgroundColor:
-                            hoverSlug === r.slug
-                              ? dark
-                                ? "rgba(255,255,255,0.10)"
-                                : "rgb(215,225,240)"
-                              : hovRow === `sector:${r.slug}`
-                                ? dark
-                                  ? "rgba(255,255,255,0.08)"
-                                  : "rgb(230,237,246)"
-                                : undefined,
-                          transition: "background-color 200ms ease",
-                        }}
-                        className="border-b border-slate-100 dark:border-white/5"
-                      >
-                        <td className={td}>{r.name}</td>
-                        <td className={`${td} font-medium`}>{r.estab.toLocaleString()}</td>
-                        <td className={td}>{r.emp ? r.emp.toLocaleString() : "—"}</td>
-                        <td className={td}>{sectorTotal ? `${((r.estab / sectorTotal) * 100).toFixed(1)}%` : "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-      </div>
-    </>
+    <EventStrip items={acqEvents} onDismiss={dismissEvent} />
   );
 
   const sectorExtras: Record<string, ReactNode> = {
@@ -1458,6 +1340,122 @@ export default function MarketIntelPage() {
           </div>
           {bottomTab === "econ" && (
             <div>
+          <SubSection alt title="Arizona Companies by Sector">
+{sectorRows.length > 0 && (
+            <div className={`${chartCard} mb-4`}>
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona Companies by Sector</h3>
+                <div className="flex gap-1">
+                  {(["trend", "share"] as const).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setSectorView(v)}
+                      className={
+                        sectorView === v
+                          ? "rounded-full bg-[#b8975a] px-3 py-1 text-xs font-semibold text-white"
+                          : "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-500 hover:border-[#b8975a] dark:border-white/15 dark:text-white/50"
+                      }
+                    >
+                      {v === "trend" ? "Trend" : "Share"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+                Employer establishments by NAICS sector · U.S. Census Bureau, County Business Patterns · refreshed daily (CBP publishes annually)
+              </p>
+              {sectorView === "trend" ? (
+                <div className="h-[380px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="year" tick={{ fontSize: 11, fill: tick }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
+                      <Tooltip
+                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12, borderRadius: 8 }}
+                        cursor={{ stroke: grid }}
+                        formatter={(v, name) => [Number(v).toLocaleString(), name]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
+                      {sectorTrend.slugs.map((slug, i) => (
+                        <Line
+                          key={slug}
+                          type="monotone"
+                          dataKey={slug}
+                          name={SECTOR_SHORT[slug] ?? slug}
+                          stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                          strokeWidth={hoverSlug === slug ? 3.5 : 2}
+                          strokeOpacity={hoverSlug && hoverSlug !== slug ? 0.12 : 1}
+                          dot={false}
+                          activeDot={{ r: 3.5 }}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="h-[380px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={sectorPieData} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={1} stroke={dark ? "#132847" : "#ffffff"} strokeWidth={1}>
+                        {sectorPieData.map((d, i) => (
+                          <Cell
+                            key={d.name}
+                            fill={CHART_COLORS[i % CHART_COLORS.length]}
+                            fillOpacity={hoverSlug ? (d.slugs.includes(hoverSlug) ? 1 : 0.22) : 1}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                        formatter={(v, name) => [`${Number(v).toLocaleString()} (${sectorTotal ? ((Number(v) / sectorTotal) * 100).toFixed(1) : "0"}%)`, name]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
+                {sectorView === "trend" ? "Establishments per year — top 8 sectors" : `CBP ${sectorYear} mix`} · {sectorTotal.toLocaleString()} establishments statewide (CBP {sectorYear})
+              </p>
+              <div className={`${tableWrap} mt-3 max-h-[320px] overflow-y-auto`}>
+                <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                  <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                    <th className={th}>Sector</th><th className={th}>Companies</th><th className={th}>Employees</th><th className={th}>Share</th>
+                  </tr></thead>
+                  <tbody>
+                    {sectorRows.map((r) => (
+                      <tr
+                        key={r.slug}
+                        onMouseEnter={() => { setHoverSlug(r.slug); setHovRow(`sector:${r.slug}`); }}
+                        onMouseLeave={() => { setHoverSlug(null); setHovRow(""); }}
+                        style={{
+                          backgroundColor:
+                            hoverSlug === r.slug
+                              ? dark
+                                ? "rgba(255,255,255,0.10)"
+                                : "rgb(215,225,240)"
+                              : hovRow === `sector:${r.slug}`
+                                ? dark
+                                  ? "rgba(255,255,255,0.08)"
+                                  : "rgb(230,237,246)"
+                                : undefined,
+                          transition: "background-color 200ms ease",
+                        }}
+                        className="border-b border-slate-100 dark:border-white/5"
+                      >
+                        <td className={td}>{r.name}</td>
+                        <td className={`${td} font-medium`}>{r.estab.toLocaleString()}</td>
+                        <td className={td}>{r.emp ? r.emp.toLocaleString() : "—"}</td>
+                        <td className={td}>{sectorTotal ? `${((r.estab / sectorTotal) * 100).toFixed(1)}%` : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          </SubSection>
           <SubSection title="Economic Indicators">
             <EventStrip items={allEvents} onDismiss={dismissEvent} />
             <div className="grid gap-4 lg:grid-cols-2">
