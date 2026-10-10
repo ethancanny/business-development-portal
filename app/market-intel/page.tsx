@@ -236,6 +236,35 @@ function SubSection({
   );
 }
 
+/** Full, always-open section (no collapse) — used for the page's two
+ * showcase areas, Market Multiples and Industries. (Ethan, Oct 9, 2026
+ * makeover: multiples + industries are full separate sections, not
+ * collapsible; the reference data moved to tabs at the bottom.) */
+function FullSection({
+  kicker,
+  title,
+  sub,
+  children,
+}: {
+  kicker?: string;
+  title: string;
+  sub?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mb-8">
+      <div className="border-b-2 border-[#b8975a] pb-2">
+        {kicker && (
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8a6f3c] dark:text-[#d4b37a]">{kicker}</p>
+        )}
+        <h2 className="text-xl font-bold text-[#0d1f3c] dark:text-white">{title}</h2>
+        {sub && <p className="mt-0.5 text-xs text-slate-500 dark:text-white/40">{sub}</p>}
+      </div>
+      <div className="pt-4">{children}</div>
+    </section>
+  );
+}
+
 /** Compact highlight strip of major events relevant to a section. */
 function EventStrip({
   items,
@@ -335,6 +364,7 @@ export default function MarketIntelPage() {
   const [latest, setLatest] = useState<LatestMap>({});
   const [obs, setObs] = useState<MiIndicatorObs[]>([]);
   const [tab, setTab] = useState<Tab>("acquisitions");
+  const [bottomTab, setBottomTab] = useState<"deals" | "econ">("deals");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [acquisitions, setAcquisitions] = useState<MiAcquisition[]>([]);
   const [filings, setFilings] = useState<MiFiling[]>([]);
@@ -960,7 +990,9 @@ export default function MarketIntelPage() {
     [obs, fiveYearCutoff]
   );
 
-  /** County housing permits (U of A EBRC): latest month per county, ranked. */
+  /** County housing permits (Census BPS, published by U of A EBRC): all
+   * counties ranked within the single most recent month they share, so the
+   * top-3 strip and share math never mix months. */
   const countyPermits = useMemo(() => {
     const per = PERMIT_COUNTIES.map((name) => {
       const id = `AZPERMIT_${countySlug(name)}`;
@@ -975,7 +1007,9 @@ export default function MarketIntelPage() {
         yoy: yoyChange(obs, id),
       };
     }).filter(Boolean) as { name: string; value: number; date: string; sf: number | null; yoy: number | null }[];
-    return per.sort((a, b) => b.value - a.value);
+    if (!per.length) return per;
+    const maxDate = per.map((c) => c.date).sort().slice(-1)[0];
+    return per.filter((c) => c.date === maxDate).sort((a, b) => b.value - a.value);
   }, [latest, obs]);
   const permitMonth = countyPermits.length
     ? countyPermits.map((c) => c.date).sort().slice(-1)[0]
@@ -1267,6 +1301,30 @@ export default function MarketIntelPage() {
           )}
         </div>
 
+        {/* Top permit counties (U of A EBRC, latest month) */}
+        {countyPermits.length >= 3 && (
+          <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-[#b8975a]/40 bg-[#b8975a]/5 px-4 py-3 dark:bg-[#b8975a]/10">
+            <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">
+              🏠 Top permit counties
+              <span className="ml-2 text-xs font-medium text-slate-500 dark:text-white/50">
+                {fmtMonth(permitMonth)} · housing permits issued
+              </span>
+            </p>
+            {countyPermits.slice(0, 3).map((c, i) => (
+              <p key={c.name} className="text-sm text-slate-700 dark:text-white/80">
+                <span className="font-bold text-[#8a6f3c] dark:text-[#d4b37a]">{i + 1}. {c.name}</span>{" "}
+                <span className="font-semibold text-[#0d1f3c] dark:text-white">{c.value.toLocaleString()}</span>
+                {c.yoy !== null && (
+                  <span className={c.yoy >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                    {" "}{c.yoy >= 0 ? "▲" : "▼"} {Math.abs(c.yoy).toFixed(0)}% YoY
+                  </span>
+                )}
+              </p>
+            ))}
+            <p className="text-xs text-slate-400 dark:text-white/40">Source: U.S. Census Bureau Building Permits Survey · published by U of A EBRC</p>
+          </div>
+        )}
+
         <UpdatesStrip />
 
         {/* Major-event headlines */}
@@ -1343,8 +1401,22 @@ export default function MarketIntelPage() {
         )}
 
         {/* Sections — organized by data type; charts summarize, tables hold source data */}
-        <Section title="Market Multiples" sub="Median deal multiples by industry and deal size — the valuation yardstick">
+        <FullSection kicker="Start here — the valuation yardstick" title="Market Multiples" sub="Median deal multiples by industry and deal size — what Arizona businesses actually sell for">
+          <div className="rounded-2xl border border-[#b8975a]/40 bg-gradient-to-br from-[#e6edf6] via-white to-[#f7f1e3] p-3 shadow-sm dark:from-[#132847] dark:via-[#0d1f3c] dark:to-[#1a3358] sm:p-4">
           <EventStrip items={acqEvents} onDismiss={dismissEvent} />
+{multChartData.length > 0 && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                <span className="rounded-full border border-[#b8975a]/60 bg-white/80 px-3 py-1 text-xs font-semibold text-[#0d1f3c] dark:bg-white/10 dark:text-white">
+                  ★ Highest: {multChartData[0].industry} — {Number(multChartData[0].value).toFixed(1)}×
+                </span>
+                <span className="rounded-full border border-[#b8975a]/40 bg-white/60 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-white/5 dark:text-white/70">
+                  {multChartData.length} industries in view
+                </span>
+                <span className="rounded-full border border-[#b8975a]/40 bg-white/60 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-white/5 dark:text-white/70">
+                  {effMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} · {multBand} deals
+                </span>
+              </div>
+            )}
 <div className={`${chartCard} lg:col-span-2`}>
           <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Market Multiples by Industry</h3>
@@ -1390,9 +1462,10 @@ export default function MarketIntelPage() {
           <div className="mt-4">
             <MultiplesPanel multiples={multiples} dark={dark} onAdded={async () => setMultiples(await getJSON("/api/market/multiples"))} />
           </div>
-        </Section>
+          </div>
+        </FullSection>
 
-        <Section alt title="Industries" sub="Focus sectors: aerospace & defense, healthcare, manufacturing, trades">
+        <FullSection kicker="Focus sectors" title="Industries" sub="Aerospace & defense, healthcare, advanced manufacturing, specialty trades & construction — ★ fit targets are highlighted gold in the tables; expand a row for the contact on file and one-click Add to pipeline">
           {sectorRows.length > 0 && (
             <div className={`${chartCard} mb-4`}>
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
@@ -1507,7 +1580,7 @@ export default function MarketIntelPage() {
               </div>
             </div>
           )}
-          <SubSection title="Aerospace & Defense">
+          <SubSection title="Aerospace & Defense" defaultOpen>
             <EventStrip items={industryEvents("Aerospace & Defense")} onDismiss={dismissEvent} />
             {sectorLine("3364")}
             {hasSizeProfile(obs, "3364") && <SizeProfileRow obs={obs} slug="3364" />}
@@ -1564,7 +1637,7 @@ export default function MarketIntelPage() {
             </div>
           </SubSection>
 
-          <SubSection alt title="Healthcare">
+          <SubSection alt title="Healthcare" defaultOpen>
             <EventStrip items={industryEvents("Healthcare")} onDismiss={dismissEvent} />
             {sectorLine("62")}
             {hasSizeProfile(obs, "62") && <SizeProfileRow obs={obs} slug="62" />}
@@ -1588,7 +1661,7 @@ export default function MarketIntelPage() {
             </div>
           </SubSection>
 
-          <SubSection title="Advanced Manufacturing">
+          <SubSection title="Advanced Manufacturing" defaultOpen>
             <EventStrip items={industryEvents("Advanced Manufacturing")} onDismiss={dismissEvent} />
             {sectorLine("3133")}
             {hasSizeProfile(obs, "3133") && <SizeProfileRow obs={obs} slug="3133" />}
@@ -1612,7 +1685,7 @@ export default function MarketIntelPage() {
             </div>
           </SubSection>
 
-          <SubSection alt title="Specialty Trades & Construction">
+          <SubSection alt title="Specialty Trades & Construction" defaultOpen>
             <EventStrip items={industryEvents("Specialty Trades & Construction")} onDismiss={dismissEvent} />
             {sectorLine("23")}
             {hasSizeProfile(obs, "23") && <SizeProfileRow obs={obs} slug="23" />}
@@ -1635,9 +1708,19 @@ export default function MarketIntelPage() {
           </div>
             </div>
           </SubSection>
-        </Section>
+        </FullSection>
 
-        <Section title="Arizona Economic Data" sub="State-level indicators, budget, demographics, and permitting">
+        {/* Bottom reference block — tabbed: Acquisitions & Filings (default) | Arizona Economic Data */}
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white/60 p-3 dark:border-white/10 dark:bg-[#132847]/30 sm:p-4">
+          <div className="mb-2 flex flex-wrap items-center gap-2 border-b-2 border-[#b8975a]/50 pb-3">
+            <button onClick={() => setBottomTab("deals")} className={tabBtn(bottomTab === "deals")}>Acquisitions &amp; Filings</button>
+            <button onClick={() => setBottomTab("econ")} className={tabBtn(bottomTab === "econ")}>Arizona Economic Data</button>
+            <span className="ml-auto hidden text-xs text-slate-400 dark:text-white/40 sm:block">
+              {bottomTab === "deals" ? "AZ acquisitions and SEC filings · last 7 days only" : "State indicators, budget, demographics, permitting & WARN"}
+            </span>
+          </div>
+          {bottomTab === "econ" && (
+            <div>
           <SubSection title="Economic Indicators">
             <EventStrip items={allEvents} onDismiss={dismissEvent} />
             <div className="grid gap-4 lg:grid-cols-2">
@@ -1872,29 +1955,6 @@ export default function MarketIntelPage() {
 
           <SubSection alt title="Permitting & Licensing">
             <EventStrip items={expansionEvents} onDismiss={dismissEvent} />
-            {/* Top permit counties (U of A EBRC, latest month) */}
-            {countyPermits.length >= 3 && (
-              <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-[#b8975a]/40 bg-[#b8975a]/5 px-4 py-3 dark:bg-[#b8975a]/10">
-                <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">
-                  🏠 Top permit counties
-                  <span className="ml-2 text-xs font-medium text-slate-500 dark:text-white/50">
-                    {fmtMonth(permitMonth)} · housing permits issued
-                  </span>
-                </p>
-                {countyPermits.slice(0, 3).map((c, i) => (
-                  <p key={c.name} className="text-sm text-slate-700 dark:text-white/80">
-                    <span className="font-bold text-[#8a6f3c] dark:text-[#d4b37a]">{i + 1}. {c.name}</span>{" "}
-                    <span className="font-semibold text-[#0d1f3c] dark:text-white">{c.value.toLocaleString()}</span>
-                    {c.yoy !== null && (
-                      <span className={c.yoy >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
-                        {" "}{c.yoy >= 0 ? "▲" : "▼"} {Math.abs(c.yoy).toFixed(0)}% YoY
-                      </span>
-                    )}
-                  </p>
-                ))}
-                <p className="text-xs text-slate-400 dark:text-white/40">Source: U.S. Census Bureau via U of A EBRC</p>
-              </div>
-            )}
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">AZ Housing Permits</h3>
@@ -1935,7 +1995,7 @@ export default function MarketIntelPage() {
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <div className={chartCard}>
                 <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Housing Permits by County — Top 5</h3>
-                <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Total units authorized, monthly · U.S. Census Bureau via U of A EBRC · 5-yr</p>
+                <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Total units authorized, monthly · U.S. Census Bureau BPS · 5-yr</p>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={countyChartRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
@@ -1961,7 +2021,7 @@ export default function MarketIntelPage() {
               </div>
               <div className={chartCard}>
                 <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Permits by County — {permitMonth ? fmtMonth(permitMonth) : "Latest"}</h3>
-                <p className="mb-3 text-xs text-slate-500 dark:text-white/40">11 of 15 counties · total units authorized · U of A EBRC (Apache, Graham, Greenlee &amp; La Paz aren&apos;t published by EBRC)</p>
+                <p className="mb-3 text-xs text-slate-500 dark:text-white/40">All 15 counties · total units authorized · U.S. Census Bureau BPS — the county series published by U of A EBRC</p>
                 <div className={tableWrap}>
                   <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
                     <thead><tr className="border-b border-slate-200 dark:border-white/10">
@@ -2120,10 +2180,12 @@ export default function MarketIntelPage() {
             <p className="px-3 py-2 text-xs text-slate-400 dark:text-white/30">Layoffs often precede sales — worth a look when a target-industry employer appears. Source: WARN Act notices dataset.</p>
           </div>
           </SubSection>
-        </Section>
+            </div>
+          )}
 
 
-        <Section alt title="Acquisitions & Filings" sub="AZ acquisitions and SEC filings · last 7 days only">
+          {bottomTab === "deals" && (
+            <div>
           <div>
 {/* Tabs */}
         <div className="mb-4 flex flex-wrap gap-2">
@@ -2217,7 +2279,9 @@ export default function MarketIntelPage() {
         )}
 
           </div>
-        </Section>
+            </div>
+          )}
+        </div>
 
         {/* Sync status */}
         {syncLog.length > 0 && (
