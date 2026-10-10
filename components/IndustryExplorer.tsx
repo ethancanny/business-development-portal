@@ -2,7 +2,18 @@
 
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import MultiplesPanel from "@/components/MultiplesPanel";
+import { SubSection } from "@/components/market-sections";
 import type { MiMultiple } from "@/lib/types";
 
 /** Combined Industries & Multiples explorer (Ethan, Oct 10, 2026 —
@@ -13,8 +24,10 @@ import type { MiMultiple } from "@/lib/types";
  * no published multiple show a best-guess estimate (the industry's own
  * median for that size band) flagged "est" — Ethan approved best
  * guesses where data isn't available. EV/EBITDA is the default metric
- * (toggle sits on the left). The All Industries view stacks the
- * multiples table for every industry. Focus-sector detail blocks
+ * (toggle sits on the left). The All Industries view leads with the
+ * industry-overall comparison (one chart + overall table); each
+ * industry's subindustry table sits in a collapsible under it.
+ * Focus-sector detail blocks
  * (sector charts, size profiles, company targets) are passed in from
  * the page as `extras` and render under the selected focus industry. */
 
@@ -240,8 +253,11 @@ export default function IndustryExplorer({
   const [industry, setIndustry] = useState<string>("All Industries");
   // EV/EBITDA is the default metric; its toggle sits on the left.
   const [metric, setMetric] = useState<"ebitda" | "revenue">("ebitda");
+  const [band, setBand] = useState<string>("EV $25–100M");
   const [hovRow, setHovRow] = useState("");
 
+  const grid = dark ? "rgba(255,255,255,0.08)" : "rgba(13,31,60,0.08)";
+  const tick = dark ? "rgba(255,255,255,0.55)" : "#64748b";
   const card = "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60";
   const th = "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50";
   const td = "px-3 py-2 text-sm text-slate-700 dark:text-white/80";
@@ -294,6 +310,16 @@ export default function IndustryExplorer({
     }
     return median(vals);
   };
+
+  // Industry-overall comparison for the All view chart: each industry's
+  // median multiple for the selected band + metric.
+  const overallChart = INDUSTRY_GROUPS.map((g) => ({
+    label: g,
+    value: groupMedian(g, band),
+    ad: g === "Aerospace & Defense",
+  }))
+    .filter((d) => d.value !== null && d.value !== undefined)
+    .sort((a, b) => (b.value as number) - (a.value as number));
 
   const rowStyle = (key: string, hot = false) => ({
     backgroundColor:
@@ -406,22 +432,85 @@ export default function IndustryExplorer({
       {industry === "All Industries" && (
         <div>
           {overview}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Multiples by subindustry — all industries</h3>
-            {metricToggle}
-          </div>
-          <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-            Median private-deal multiples by EV size band (ExitValue.ai). Cells marked <span className="font-semibold">est</span> are best guesses — the industry&apos;s median for that band — where no subindustry multiple is published. EV/EBITDA is the default; it runs sparse in the smaller bands, where the est fills and the EV/Revenue view carry more published data.
-          </p>
-          {INDUSTRY_GROUPS.map((g) => (
-            <div key={g} className={`${card} mb-4`}>
-              <h4 className="mb-2 text-sm font-semibold text-[#0d1f3c] dark:text-white">
-                {FOCUS.includes(g) ? "★ " : ""}{g}
-                <span className="ml-2 text-xs font-normal text-slate-400 dark:text-white/40">{metric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"}</span>
-              </h4>
-              {subTable(g)}
+          <div className={card}>
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Industry overall multiples</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                {metricToggle}
+                <span className="mx-1 hidden h-4 w-px bg-slate-200 dark:bg-white/10 sm:block" />
+                {BANDS.map((b) => (
+                  <button key={b} onClick={() => setBand(b)} className={pillSm(band === b)}>{b}</button>
+                ))}
+              </div>
             </div>
-          ))}
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+              Each industry&apos;s overall (median) private-deal multiple — the subindustry tables below break it down. EV/EBITDA is the default; it runs sparse in the smaller bands, where the EV/Revenue view carries more published data.
+            </p>
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={overallChart} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis type="number" tick={{ fontSize: 11, fill: tick }} />
+                  <YAxis type="category" dataKey="label" width={210} tick={{ fontSize: 12, fill: tick }} />
+                  <Tooltip
+                    contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                    formatter={(v) => [`${v}x`, metric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"]}
+                  />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={16}>
+                    {overallChart.map((d) => (
+                      <Cell key={d.label} fill={d.ad ? (dark ? "#e8cf9a" : "#0d1f3c") : "#b8975a"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            {overallChart.length === 0 && (
+              <p className="py-4 text-center text-sm text-slate-400">No {metric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} data for the {band} band yet — try another band or metric.</p>
+            )}
+            <div className="mt-3 overflow-x-auto border-t border-slate-100 pt-3 dark:border-white/10">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-white/10">
+                    <th className={th}>Industry</th>
+                    {BANDS.map((b) => (
+                      <th key={b} className={th}>{b.replace("EV ", "")}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {INDUSTRY_GROUPS.map((g) => (
+                    <tr
+                      key={g}
+                      onMouseEnter={() => setHovRow(`overall:${g}`)}
+                      onMouseLeave={() => setHovRow("")}
+                      style={rowStyle(`overall:${g}`, g === "Aerospace & Defense")}
+                      className="border-b border-slate-100 dark:border-white/5"
+                    >
+                      <td className={`${td} font-medium`}>{FOCUS.includes(g) ? "★ " : ""}{g}</td>
+                      {BANDS.map((b) => {
+                        const v = groupMedian(g, b);
+                        return (
+                          <td key={b} className={td}>{v !== null ? `${v.toFixed(2)}×` : "—"}</td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="mt-5 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0">
+            {INDUSTRY_GROUPS.map((g, i) => (
+              <SubSection key={g} title={`${FOCUS.includes(g) ? "★ " : ""}${g} — subindustries`} alt={i % 2 === 1}>
+                {subTable(g)}
+                <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
+                  Median private-deal multiples by EV size band (ExitValue.ai), {metric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"}. Cells marked est are best guesses — the industry&apos;s median for that band — where no subindustry multiple is published.
+                </p>
+              </SubSection>
+            ))}
+          </div>
+
           <div className="mt-4">
             <MultiplesPanel multiples={multiples} dark={dark} onAdded={onMultiplesAdded} />
           </div>
