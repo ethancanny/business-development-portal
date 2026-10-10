@@ -8,9 +8,10 @@ import type { MiCompany } from "@/lib/types";
  * Rendered inside that industry's own subsection on Market Intel, under
  * the size profile. Rows expand into a profile with registry details
  * and one-click promotion into the acquisition pipeline. */
-export default function CompanyTargets({ sector }: { sector: string }) {
+export default function CompanyTargets({ sector, fitOnly = false, heading }: { sector: string; fitOnly?: boolean; heading?: string }) {
   const [rows, setRows] = useState<MiCompany[] | null>(null);
   const [total, setTotal] = useState<number | null>(null);
+  const [fitTotal, setFitTotal] = useState<number | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [hovId, setHovId] = useState<string | null>(null);
   // Row colors painted from state via inline styles so hover/select always
@@ -27,11 +28,12 @@ export default function CompanyTargets({ sector }: { sector: string }) {
     let live = true;
     fetch(`/api/market/companies?sector=${encodeURIComponent(sector)}&limit=800`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((data: { companies?: MiCompany[]; total?: number } | MiCompany[]) => {
+      .then((data: { companies?: MiCompany[]; total?: number; fitTotal?: number } | MiCompany[]) => {
         if (!live) return;
         const list = Array.isArray(data) ? data : (data.companies ?? []);
         setRows(list);
         setTotal(Array.isArray(data) ? list.length : (data.total ?? list.length));
+        setFitTotal(Array.isArray(data) ? null : (data.fitTotal ?? null));
       })
       .catch(() => {
         if (live) setRows([]);
@@ -46,12 +48,14 @@ export default function CompanyTargets({ sector }: { sector: string }) {
     return (rows ?? []).filter(
       (c) =>
         c.status !== "dismissed" &&
+        (!fitOnly || fitOf(c).fit) &&
         (!q ||
           c.name.toLowerCase().includes(q) ||
           c.city.toLowerCase().includes(q) ||
           c.subsector.toLowerCase().includes(q))
     );
-  }, [rows, query]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, query, fitOnly]);
 
   if (rows === null) {
     return <p className="mt-4 text-xs text-slate-400 dark:text-white/30">Loading company targets…</p>;
@@ -161,11 +165,20 @@ export default function CompanyTargets({ sector }: { sector: string }) {
   return (
     <div className="mb-5 mt-5">
       <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Company targets</h3>
+        <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">{heading ?? "Company targets"}</h3>
         <p className="text-xs text-slate-500 dark:text-white/50">
-          {(total ?? rows.length).toLocaleString()} companies · {sources}
-          {withSignal ? ` · ranked by ${withSignal.toLowerCase()}` : ""}
-          {total !== null && total > rows.length ? ` · showing top ${rows.length}` : ""}
+          {fitOnly ? (
+            <>
+              {(fitTotal ?? 0).toLocaleString()} fits in this industry · {sources}
+              {total !== null && total > rows.length ? ` · fits shown from the top ${rows.length.toLocaleString()} companies by size signal` : ""}
+            </>
+          ) : (
+            <>
+              {(total ?? rows.length).toLocaleString()} companies · {sources}
+              {withSignal ? ` · ranked by ${withSignal.toLowerCase()}` : ""}
+              {total !== null && total > rows.length ? ` · showing top ${rows.length}` : ""}
+            </>
+          )}
         </p>
       </div>
       <input
@@ -174,6 +187,13 @@ export default function CompanyTargets({ sector }: { sector: string }) {
         placeholder="Search name, city, or sub-sector…"
         className="mb-2 w-full max-w-sm rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#b8975a] dark:border-white/10 dark:bg-[#132847]/40 dark:text-white/85"
       />
+      {fitOnly && visible.length === 0 && (
+        <p className="mb-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-500 dark:border-white/10 dark:text-white/50">
+          {fitTotal === 0
+            ? "No companies in this industry currently pass the fit rules (size, independence, focus sector)."
+            : "No fits among the top companies loaded by size signal — fits exist further down this industry's registry."}
+        </p>
+      )}
       <div className="max-h-96 overflow-auto rounded-xl border border-slate-200 dark:border-white/10">
         <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
           <thead>
@@ -257,7 +277,9 @@ export default function CompanyTargets({ sector }: { sector: string }) {
       </div>
       {visible.length > 300 && <p className="mt-1 text-xs text-slate-400 dark:text-white/30">Showing the top 300 — search to narrow the list.</p>}
       <p className="mt-1 text-xs text-slate-400 dark:text-white/30">
-        Public-registry profiles. Registry data shows existence, specialty, age, and size signals — not financials; revenue and EBITDA stay modeled at the sector level above.
+        {fitOnly
+          ? "Fits pass Canny's fit rules — right-sized, independent, in a focus sector. Expand any row to convert it into the acquisition pipeline."
+          : "Public-registry profiles. Registry data shows existence, specialty, age, and size signals — not financials; revenue and EBITDA stay modeled at the sector level above."}
       </p>
     </div>
   );
