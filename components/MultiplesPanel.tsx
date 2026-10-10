@@ -13,19 +13,23 @@ export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples
   // Row hover highlighting — hover only (click-to-select removed at
   // Ethan's request, Oct 9, 2026).
   const [hovRow, setHovRow] = useState("");
-  const rowStyle = (key: string) => ({
+  const rowStyle = (key: string, hot = false) => ({
     backgroundColor:
       hovRow === key
-        ? dark
-          ? "rgba(255,255,255,0.08)"
-          : "rgb(230,237,246)"
-        : undefined,
+        ? hot
+          ? "rgba(184,151,90,0.22)"
+          : dark
+            ? "rgba(255,255,255,0.08)"
+            : "rgb(230,237,246)"
+        : hot
+          ? "rgba(184,151,90,0.12)"
+          : undefined,
     transition: "background-color 200ms ease",
   });
-  const rowProps = (key: string) => ({
+  const rowProps = (key: string, hot = false) => ({
     onMouseEnter: () => setHovRow(key),
     onMouseLeave: () => setHovRow((h: string) => (h === key ? "" : h)),
-    style: rowStyle(key),
+    style: rowStyle(key, hot),
     className: "border-b border-slate-100 dark:border-white/5",
   });
   const set = (k: string) => (e: ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -81,10 +85,10 @@ export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples
           </tr></thead>
           <tbody>
             {multiples.map((m) => (
-              <tr key={m.id} {...rowProps(`mult:${m.id}`)}>
+              <tr key={m.id} {...rowProps(`mult:${m.id}`, /aerospace|defense/i.test(m.industry || ""))}>
                 <td className="px-3 py-2 text-sm font-medium text-slate-700 dark:text-white/80">{m.sourceReport}{m.sizeBand && <span className="block text-xs text-slate-400">{m.sizeBand}</span>}</td>
                 <td className="px-3 py-2 text-sm text-slate-700 dark:text-white/80">{m.period}</td>
-                <td className="px-3 py-2 text-sm text-slate-700 dark:text-white/80">{m.industry || "—"}</td>
+                <td className="px-3 py-2 text-sm text-slate-700 dark:text-white/80">{m.industry || "—"}{/aerospace|defense/i.test(m.industry || "") && <span className="ml-2 rounded bg-[#b8975a] px-1.5 py-0.5 text-[10px] font-bold text-white">★ A&D</span>}</td>
                 <td className="px-3 py-2 text-sm text-slate-700 dark:text-white/80">
                   {m.evEbitdaMedian ? `${m.evEbitdaMedian}x` : m.evEbitdaLow && m.evEbitdaHigh ? `${m.evEbitdaLow}–${m.evEbitdaHigh}x` : "—"}
                 </td>
