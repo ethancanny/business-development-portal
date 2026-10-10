@@ -247,7 +247,7 @@ export default function ValleyDemographics() {
   }, [metric]);
 
   const tabCls = (active: boolean) =>
-    `rounded-lg px-3 py-1.5 text-sm font-medium ${active ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]" : "text-slate-600 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/5"}`;
+    `rounded-lg px-3 py-1.5 text-sm font-medium ${active ? "bg-[#d7e1f0] font-semibold text-[#0d1f3c] dark:bg-[#b8975a]/30 dark:text-[#e8cf9a]" : "text-slate-600 hover:bg-[#f0f4fa] dark:text-white/60 dark:hover:bg-white/5"}`;
 
   return (
     <div>
