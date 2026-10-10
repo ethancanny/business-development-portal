@@ -1198,6 +1198,8 @@ export default function MarketIntelPage() {
   const tableWrap = "overflow-x-auto rounded-xl border border-slate-200 dark:border-white/10";
   const th = "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50";
   const td = "px-3 py-2 text-sm text-slate-700 dark:text-white/80";
+  // Toggle/tab buttons: the selected state is a LIGHT tint, never a dark
+  // fill. (Ethan, Oct 9, 2026: "make sure the row doesn't turn dark when selected")
   const tabBtn = (active: boolean) =>
     `rounded-lg px-3 py-1.5 text-sm font-medium ${active ? "bg-[#d7e1f0] font-semibold text-[#0d1f3c] dark:bg-[#b8975a]/30 dark:text-[#e8cf9a]" : "text-slate-600 hover:bg-[#f0f4fa] dark:text-white/60 dark:hover:bg-white/5"}`;
 
