@@ -20,6 +20,7 @@ import PageHero from "@/components/PageHero";
 import SizeProfileRow, { hasSizeProfile, SUBSECTOR_IDS_CSV } from "@/components/SizeProfileRows";
 import CompanyTargets from "@/components/CompanyTargets";
 import MultiplesPanel from "@/components/MultiplesPanel";
+import { Section, SubSection, FullSection, EventStrip } from "@/components/market-sections";
 import UpdatesStrip from "@/components/UpdatesStrip";
 import ValleyDemographics from "@/components/ValleyDemographics";
 import { useTheme } from "@/components/ThemeProvider";
@@ -162,179 +163,6 @@ const shortDate = (d: string) => (d?.length >= 7 ? d.slice(0, 7) : d);
 
 const TABS = ["acquisitions", "filings"] as const;
 type Tab = (typeof TABS)[number];
-
-/** Collapsible section: charts summarize, source data lives inside. */
-function Section({
-  title,
-  sub,
-  alt = false,
-  defaultOpen = false,
-  children,
-}: {
-  title: string;
-  sub?: string;
-  alt?: boolean;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <section className="mb-6">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg border-b-2 px-2 pb-2 text-left transition-colors duration-200 ${
-          open
-            ? "border-[#b8975a] bg-[#e6edf6] dark:bg-white/[0.07]"
-            : "border-[#b8975a]/50 hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05]"
-        }`}
-      >
-        <span>
-          <span className="block text-lg font-bold text-[#0d1f3c] dark:text-white">{title}</span>
-          {sub && <span className="block text-xs text-slate-500 dark:text-white/40">{sub}</span>}
-        </span>
-        <span className="text-xl leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
-      </button>
-      {open && (
-        <div className="pt-4 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0">
-          {children}
-        </div>
-      )}
-    </section>
-  );
-}
-
-/** Collapsible subsection, nested inside a Section. */
-function SubSection({
-  title,
-  alt = false,
-  defaultOpen = false,
-  children,
-}: {
-  title: string;
-  alt?: boolean;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="mb-5 border-t-2 border-slate-400 pt-4 dark:border-white/30">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 ${
-          open
-            ? "bg-[#e6edf6] dark:bg-white/[0.07]"
-            : "hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05]"
-        }`}
-      >
-        <span className="text-base font-bold text-[#0d1f3c] dark:text-white">{title}</span>
-        <span className="text-lg leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
-      </button>
-      {open && <div className="pt-3">{children}</div>}
-    </div>
-  );
-}
-
-/** Full, always-open section (no collapse) — used for the page's two
- * showcase areas, Market Multiples and Industries. (Ethan, Oct 9, 2026
- * makeover: multiples + industries are full separate sections, not
- * collapsible; the reference data moved to tabs at the bottom.) */
-function FullSection({
-  kicker,
-  title,
-  sub,
-  children,
-}: {
-  kicker?: string;
-  title: string;
-  sub?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="mb-8">
-      <div className="border-b-2 border-[#b8975a] pb-2">
-        {kicker && (
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8a6f3c] dark:text-[#d4b37a]">{kicker}</p>
-        )}
-        <h2 className="text-xl font-bold text-[#0d1f3c] dark:text-white">{title}</h2>
-        {sub && <p className="mt-0.5 text-xs text-slate-500 dark:text-white/40">{sub}</p>}
-      </div>
-      <div className="pt-4">{children}</div>
-    </section>
-  );
-}
-
-/** Compact highlight strip of major events relevant to a section. */
-function EventStrip({
-  items,
-  onDismiss,
-}: {
-  items: MiAcquisition[];
-  onDismiss: (a: MiAcquisition) => void;
-}) {
-  const [openId, setOpenId] = useState<string | null>(null);
-  if (items.length === 0) return null;
-  const typeLabel: Record<string, string> = {
-    acquisition: "Acquisition",
-    bankruptcy: "Bankruptcy",
-    expansion: "Major Expansion",
-    investment: "New Investment",
-    contract: "Contract Award",
-    relocation: "Relocation",
-    ipo: "IPO",
-    policy: "Market Policy",
-  };
-  return (
-    <div className="mt-4">
-      <p className="mb-2 text-xs font-bold uppercase tracking-wider text-[#8a6f3c] dark:text-[#d4b37a]">
-        ★ Major events
-      </p>
-      <div className="grid gap-2 md:grid-cols-3">
-        {items.map((a) => (
-          <div
-            key={a.id}
-            className="relative rounded-lg border border-[#b8975a]/40 bg-[#b8975a]/5 p-3 dark:bg-[#b8975a]/10"
-          >
-            <a href={a.sourceUrl || undefined} target="_blank" rel="noreferrer" className="block">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#8a6f3c] dark:text-[#d4b37a]">
-                {typeLabel[a.eventType] || a.eventType}
-                {a.announcedDate ? ` · ${fmtDate(a.announcedDate)}` : ""}
-              </p>
-              <p className="mt-0.5 pr-4 text-sm font-semibold text-[#0d1f3c] dark:text-white">
-                {decodeEntities(a.headline || a.target || a.acquirer || "Unnamed")}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-white/50">{a.publisher || "News"}</p>
-            </a>
-            {a.summary && (
-              <div className="mt-1.5">
-                <button
-                  onClick={() => setOpenId(openId === a.id ? null : a.id)}
-                  className="text-[11px] font-medium text-[#8a6f3c] underline-offset-2 hover:underline dark:text-[#d4b37a]"
-                >
-                  {openId === a.id ? "Hide summary ▴" : "Summary ▾"}
-                </button>
-                {openId === a.id && (
-                  <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-white/60">
-                    {decodeEntities(a.summary)}
-                  </p>
-                )}
-              </div>
-            )}
-            <button
-              onClick={() => onDismiss(a)}
-              aria-label="Dismiss event"
-              title="Dismiss"
-              className="absolute right-1.5 top-1.5 rounded-full px-1.5 py-0.5 text-xs leading-none text-slate-400 transition hover:bg-black/5 hover:text-slate-700 dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 /** Display-side quality gates for event headlines (mirror the ingest
  * filters): no commentary/stock/drama noise; policy items must be market
@@ -1089,6 +917,16 @@ export default function MarketIntelPage() {
       .sort((a, b) => (b.value as number) - (a.value as number));
   }, [multiples, multBand, multMetric]);
 
+  // Aerospace & Defense spotlight: every A&D multiple on file, ordered by
+  // deal-size band — Canny-sized deals sit in the $5–25M EV band.
+  const adMultiples = useMemo(() => {
+    const order = ["EV < $5M", "EV $5–25M", "EV $25–100M", "EV $100–500M", "EV > $500M", "Public comps"];
+    return multiples
+      .filter((m) => /aerospace|defense/i.test(m.industry || ""))
+      .slice()
+      .sort((a, b) => order.indexOf(a.sizeBand) - order.indexOf(b.sizeBand));
+  }, [multiples]);
+
   const headlines = useMemo(() => {
     // Recency window: Major Events shows only the current day and the day
     // before — a "what just happened" feed refreshed by the daily ingest,
@@ -1301,30 +1139,6 @@ export default function MarketIntelPage() {
           )}
         </div>
 
-        {/* Top permit counties (U of A EBRC, latest month) */}
-        {countyPermits.length >= 3 && (
-          <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-[#b8975a]/40 bg-[#b8975a]/5 px-4 py-3 dark:bg-[#b8975a]/10">
-            <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">
-              🏠 Top permit counties
-              <span className="ml-2 text-xs font-medium text-slate-500 dark:text-white/50">
-                {fmtMonth(permitMonth)} · housing permits issued
-              </span>
-            </p>
-            {countyPermits.slice(0, 3).map((c, i) => (
-              <p key={c.name} className="text-sm text-slate-700 dark:text-white/80">
-                <span className="font-bold text-[#8a6f3c] dark:text-[#d4b37a]">{i + 1}. {c.name}</span>{" "}
-                <span className="font-semibold text-[#0d1f3c] dark:text-white">{c.value.toLocaleString()}</span>
-                {c.yoy !== null && (
-                  <span className={c.yoy >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
-                    {" "}{c.yoy >= 0 ? "▲" : "▼"} {Math.abs(c.yoy).toFixed(0)}% YoY
-                  </span>
-                )}
-              </p>
-            ))}
-            <p className="text-xs text-slate-400 dark:text-white/40">Source: U.S. Census Bureau Building Permits Survey · published by U of A EBRC</p>
-          </div>
-        )}
-
         <UpdatesStrip />
 
         {/* Major-event headlines */}
@@ -1451,7 +1265,14 @@ export default function MarketIntelPage() {
                   contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
                   formatter={(v, _name, props) => [`${v}x`, (props?.payload as { full?: string })?.full || ""]}
                 />
-                <Bar dataKey="value" fill={gold} radius={[0, 4, 4, 0]} barSize={16} />
+                <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={16}>
+                  {multChartData.map((d) => (
+                    <Cell
+                      key={d.full}
+                      fill={/aerospace|defense/i.test(d.full || d.industry || "") ? (dark ? "#e8cf9a" : "#0d1f3c") : gold}
+                    />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1459,6 +1280,43 @@ export default function MarketIntelPage() {
             <p className="py-4 text-center text-sm text-slate-400">No {effMetric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} data for this size band yet.</p>
           )}
         </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-[#b8975a]/60 bg-white p-4 dark:bg-[#132847]/40">
+              <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">★ Aerospace &amp; Defense — our market</h3>
+              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Every A&amp;D multiple on file, by deal size. The A&amp;D bar is highlighted in the chart above and its rows are tinted gold in the table below.</p>
+              <div className="space-y-1.5">
+                {adMultiples.map((m) => (
+                  <p key={m.id} className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+                    <span className="font-medium text-slate-600 dark:text-white/70">{m.sizeBand}</span>
+                    <span className="text-slate-700 dark:text-white/85">
+                      {m.evEbitdaMedian ? <><strong>{m.evEbitdaMedian}×</strong> EBITDA</> : m.evEbitdaLow && m.evEbitdaHigh ? <><strong>{m.evEbitdaLow}–{m.evEbitdaHigh}×</strong> EBITDA</> : null}
+                      {m.evEbitdaMedian || (m.evEbitdaLow && m.evEbitdaHigh) ? " · " : ""}
+                      {m.evRevenueMedian ? <><strong>{m.evRevenueMedian}×</strong> revenue</> : !m.evEbitdaMedian && !(m.evEbitdaLow && m.evEbitdaHigh) ? "—" : null}
+                      <span className="ml-2 text-xs text-slate-400 dark:text-white/40">{m.sourceReport.includes("Damodaran") ? "public comps" : "private deals"}</span>
+                    </span>
+                  </p>
+                ))}
+                {adMultiples.length === 0 && <p className="text-sm text-slate-400">No A&amp;D multiples on file yet.</p>}
+              </div>
+              <p className="mt-3 border-t border-slate-100 pt-2 text-xs text-slate-500 dark:border-white/10 dark:text-white/50">
+                Canny-sized targets ($500K–$2M EBITDA) land mostly in the $5–25M EV band, where the open dataset reports a revenue multiple only — private A&amp;D EBITDA multiples aren&apos;t disclosed at that size, so the $5–25M revenue figure is the working yardstick and the larger-band EBITDA figures are context, not comps.
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/40">
+              <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Typical deal structure — lower middle market</h3>
+              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">How sub-$50M deals were actually structured in Q2 2026, all industries.</p>
+              <div className="space-y-1.5 text-sm text-slate-700 dark:text-white/85">
+                <p className="flex flex-wrap items-baseline justify-between gap-x-3"><span className="font-medium text-slate-600 dark:text-white/70">Cash at close</span><span><strong>83–92%</strong> of value (buyer equity + senior debt)</span></p>
+                <p className="flex flex-wrap items-baseline justify-between gap-x-3"><span className="font-medium text-slate-600 dark:text-white/70">Seller financing</span><span><strong>under 10%</strong> of structure — below trend</span></p>
+                <p className="flex flex-wrap items-baseline justify-between gap-x-3"><span className="font-medium text-slate-600 dark:text-white/70">Remainder</span><span>earnouts, rollover equity, other contingent pieces</span></p>
+                <p className="flex flex-wrap items-baseline justify-between gap-x-3"><span className="font-medium text-slate-600 dark:text-white/70">Time to close</span><span>about <strong>11–12 months</strong> for lower-middle-market deals</span></p>
+                <p className="flex flex-wrap items-baseline justify-between gap-x-3"><span className="font-medium text-slate-600 dark:text-white/70">Competition</span><span><strong>87%</strong> of deals over $5M drew 3+ offers</span></p>
+              </div>
+              <p className="mt-3 border-t border-slate-100 pt-2 text-xs text-slate-500 dark:border-white/10 dark:text-white/50">
+                Source: IBBA &amp; M&amp;A Source Market Pulse, Q2 2026 (255 advisors, 181 closed deals, national). No A&amp;D-specific structure dataset is published — this is the lower-middle-market norm our deals are negotiated against.
+              </p>
+            </div>
+          </div>
           <div className="mt-4">
             <MultiplesPanel multiples={multiples} dark={dark} onAdded={async () => setMultiples(await getJSON("/api/market/multiples"))} />
           </div>
@@ -1954,6 +1812,29 @@ export default function MarketIntelPage() {
           </SubSection>
 
           <SubSection alt title="Permitting & Licensing">
+          {/* Top permit counties (U of A EBRC, latest month) */}
+          {countyPermits.length >= 3 && (
+            <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-[#b8975a]/40 bg-[#b8975a]/5 px-4 py-3 dark:bg-[#b8975a]/10">
+              <p className="text-sm font-bold text-[#0d1f3c] dark:text-white">
+                🏠 Top permit counties
+                <span className="ml-2 text-xs font-medium text-slate-500 dark:text-white/50">
+                  {fmtMonth(permitMonth)} · housing permits issued
+                </span>
+              </p>
+              {countyPermits.slice(0, 3).map((c, i) => (
+                <p key={c.name} className="text-sm text-slate-700 dark:text-white/80">
+                  <span className="font-bold text-[#8a6f3c] dark:text-[#d4b37a]">{i + 1}. {c.name}</span>{" "}
+                  <span className="font-semibold text-[#0d1f3c] dark:text-white">{c.value.toLocaleString()}</span>
+                  {c.yoy !== null && (
+                    <span className={c.yoy >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                      {" "}{c.yoy >= 0 ? "▲" : "▼"} {Math.abs(c.yoy).toFixed(0)}% YoY
+                    </span>
+                  )}
+                </p>
+              ))}
+              <p className="text-xs text-slate-400 dark:text-white/40">Source: U.S. Census Bureau Building Permits Survey · published by U of A EBRC</p>
+            </div>
+          )}
             <EventStrip items={expansionEvents} onDismiss={dismissEvent} />
             <div className="grid gap-4 lg:grid-cols-2">
 <div className={chartCard}>
