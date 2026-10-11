@@ -26,6 +26,13 @@ function parseStructure(body: unknown): DealStructureInput {
     const n = Number(v);
     if (isFinite(n)) out[k] = Math.max(0, Math.min(100, n));
   }
+  const amtKeys = ["cashAmt", "sellerAmt", "earnoutAmt", "rolloverAmt"] as const;
+  for (const k of amtKeys) {
+    const v = (body as Record<string, unknown>)[k];
+    if (v === null || v === undefined || v === "") continue;
+    const n = Number(v);
+    if (isFinite(n)) out[k] = Math.max(0, Math.min(1e12, n));
+  }
   return out;
 }
 

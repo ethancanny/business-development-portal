@@ -29,11 +29,16 @@ export interface DealDrivers {
   financials?: DriverLevel | "";
 }
 
-/** Expected deal structure, in % of total value (Oct 10, 2026).
- * Blank fields = assume the industry-typical structure. Structure
- * changes the *effective* multiple: contingent pieces are worth less
- * than cash at close. */
+/** Deal structure (Oct 10, 2026). Preferred form: the stated dollar
+ * amounts of a proposed/asking structure — the headline price is
+ * their sum, and the effective multiple discounts each piece for
+ * expected payout and time value. Percent fields are the legacy /
+ * fallback form; all blank = assume the industry-typical mix. */
 export interface DealStructureInput {
+  cashAmt?: number | null;
+  sellerAmt?: number | null;
+  earnoutAmt?: number | null;
+  rolloverAmt?: number | null;
   cashPct?: number | null;
   sellerPct?: number | null;
   earnoutPct?: number | null;

@@ -5,27 +5,46 @@ import { DEAL_STAGES, EXEC_STAGES, PARTNER_NAMES, type Deal, type DealDrivers, t
 import { fmtMoney, fmtDate } from "@/lib/format";
 import { DRIVER_DEFS, estimateMultiple, type MultipleEstimate } from "@/lib/valuation";
 
-/** Read-only rendering of a rough multiple estimate (base → drivers →
- * structure-adjusted effective range). Used in the deal modal's view
- * and edit modes; the edit mode recomputes it live from the form. */
+function fmtMultRange(lo: number, hi: number): string {
+  return lo.toFixed(1) === hi.toFixed(1)
+    ? `${lo.toFixed(1)}×`
+    : `${lo.toFixed(1)}–${hi.toFixed(1)}×`;
+}
+
+function fmtMoneyRange(lo: number | null, hi: number | null): string {
+  if (lo === null || hi === null) return "";
+  return Math.round(lo) === Math.round(hi)
+    ? fmtMoney(Math.round(lo))
+    : `${fmtMoney(Math.round(lo))} – ${fmtMoney(Math.round(hi))}`;
+}
+
+/** Read-only rendering of a rough multiple estimate: the fixed
+ * headline (stated price ÷ EBITDA), the effective multiple after
+ * discounting the structure for expected payout + time value, and
+ * our own cash-equivalent estimate from base + drivers. Used in the
+ * deal modal's view and edit modes; edit mode recomputes it live. */
 function EstimateBody({ est }: { est: MultipleEstimate }) {
   return (
     <div className="text-sm">
       <p>
         <span className="font-semibold text-slate-900 dark:text-white">
-          {est.headlineLow.toFixed(1)}–{est.headlineHigh.toFixed(1)}× EBITDA
+          {fmtMultRange(est.headlineLow, est.headlineHigh)} EBITDA
         </span>
         <span className="text-slate-500 dark:text-white/50">
-          {" "}headline at this structure · effective {est.cashEqLow.toFixed(1)}–{est.cashEqHigh.toFixed(1)}× (cash-equivalent)
+          {" "}headline ({est.headlineSource}) · effective {fmtMultRange(est.effLow, est.effHigh)}
         </span>
       </p>
-      {est.evLow !== null && est.evHigh !== null && est.statedEvLow !== null && est.statedEvHigh !== null && (
+      {est.statedEvLow !== null && est.statedEvHigh !== null && (
         <p className="text-slate-600 dark:text-[#c8bfa8]">
-          Stated price ≈ {fmtMoney(Math.round(est.statedEvLow))} – {fmtMoney(Math.round(est.statedEvHigh))}
-          {" · "}effective value ≈ {fmtMoney(Math.round(est.evLow))} – {fmtMoney(Math.round(est.evHigh))}
+          Stated price ≈ {fmtMoneyRange(est.statedEvLow, est.statedEvHigh)}
+          {" · "}effective value ≈ {fmtMoneyRange(est.effEvLow, est.effEvHigh)}
         </p>
       )}
       <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
+        Our estimate (base + drivers): {fmtMultRange(est.cashEqLow, est.cashEqHigh)} cash-equivalent
+        {est.evLow !== null && est.evHigh !== null ? ` ≈ ${fmtMoneyRange(est.evLow, est.evHigh)}` : ""}
+      </p>
+      <p className="text-xs text-slate-400 dark:text-white/40">
         Base {est.base.toFixed(2)}× — {est.baseBasis}
       </p>
       {est.driverNotes.map((n, i) => (
@@ -34,8 +53,9 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
       <p className="text-xs text-slate-400 dark:text-white/40">
         Structure{est.structureAssumed ? " (industry-typical, assumed)" : ""}: {est.structure.cash}% cash ·{" "}
         {est.structure.seller}% seller note · {est.structure.earnout}% earnout · {est.structure.rollover}% rollover
-        → the deferred/contingent pieces lift the headline multiple ~{(est.structureUplift * 100).toFixed(0)}% above
-        the effective multiple (each stated dollar is worth ~{(est.structureFactor * 100).toFixed(0)}¢ in cash terms).
+        → discounting for expected payout + time value, each stated dollar is worth ~
+        {(est.structureFactor * 100).toFixed(0)}¢, so the effective multiple sits ~
+        {((1 - est.structureFactor) * 100).toFixed(0)}% below the headline.
       </p>
     </div>
   );
@@ -163,10 +183,10 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
       .map((l) => ({ label: l.label ?? "", url: l.url ?? "" }))
       .concat([{ label: "", url: "" }]),
     drivers: { ...(deal?.drivers ?? {}) } as DealDrivers,
-    cashPct: deal?.structure?.cashPct != null ? String(deal.structure.cashPct) : "",
-    sellerPct: deal?.structure?.sellerPct != null ? String(deal.structure.sellerPct) : "",
-    earnoutPct: deal?.structure?.earnoutPct != null ? String(deal.structure.earnoutPct) : "",
-    rolloverPct: deal?.structure?.rolloverPct != null ? String(deal.structure.rolloverPct) : "",
+    cashAmt: deal?.structure?.cashAmt != null ? String(deal.structure.cashAmt) : "",
+    sellerAmt: deal?.structure?.sellerAmt != null ? String(deal.structure.sellerAmt) : "",
+    earnoutAmt: deal?.structure?.earnoutAmt != null ? String(deal.structure.earnoutAmt) : "",
+    rolloverAmt: deal?.structure?.rolloverAmt != null ? String(deal.structure.rolloverAmt) : "",
   });
 
   const setLink = (i: number, k: "label" | "url", v: string) =>
@@ -207,10 +227,15 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     setForm((f) => ({ ...f, drivers: { ...f.drivers, [key]: v as DealDrivers[typeof key] } }));
 
   const structureFromForm = () => ({
-    cashPct: form.cashPct.trim() === "" ? null : Number(form.cashPct),
-    sellerPct: form.sellerPct.trim() === "" ? null : Number(form.sellerPct),
-    earnoutPct: form.earnoutPct.trim() === "" ? null : Number(form.earnoutPct),
-    rolloverPct: form.rolloverPct.trim() === "" ? null : Number(form.rolloverPct),
+    cashAmt: form.cashAmt.trim() === "" ? null : Number(form.cashAmt),
+    sellerAmt: form.sellerAmt.trim() === "" ? null : Number(form.sellerAmt),
+    earnoutAmt: form.earnoutAmt.trim() === "" ? null : Number(form.earnoutAmt),
+    rolloverAmt: form.rolloverAmt.trim() === "" ? null : Number(form.rolloverAmt),
+    // Preserve any percent-based structure already on record.
+    cashPct: deal?.structure?.cashPct ?? null,
+    sellerPct: deal?.structure?.sellerPct ?? null,
+    earnoutPct: deal?.structure?.earnoutPct ?? null,
+    rolloverPct: deal?.structure?.rolloverPct ?? null,
   });
 
   const formDeal: Deal = {
@@ -476,24 +501,24 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
               ))}
             </div>
             <p className="mt-3 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
-              Expected structure (% of value) — leave blank to assume the industry-typical mix
+              Deal structure — stated amounts ($) — the headline price is their sum; leave all blank to assume the industry-typical mix
             </p>
-            <div className="mt-1 grid grid-cols-4 gap-2">
-              <Field label="Cash %">
-                <input type="number" min="0" max="100" className={inputCls} value={form.cashPct} onChange={set("cashPct")} placeholder="—" />
+            <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Field label="Cash $">
+                <input type="number" min="0" className={inputCls} value={form.cashAmt} onChange={set("cashAmt")} placeholder="—" />
               </Field>
-              <Field label="Seller %">
-                <input type="number" min="0" max="100" className={inputCls} value={form.sellerPct} onChange={set("sellerPct")} placeholder="—" />
+              <Field label="Seller note $">
+                <input type="number" min="0" className={inputCls} value={form.sellerAmt} onChange={set("sellerAmt")} placeholder="—" />
               </Field>
-              <Field label="Earnout %">
-                <input type="number" min="0" max="100" className={inputCls} value={form.earnoutPct} onChange={set("earnoutPct")} placeholder="—" />
+              <Field label="Earnout $">
+                <input type="number" min="0" className={inputCls} value={form.earnoutAmt} onChange={set("earnoutAmt")} placeholder="—" />
               </Field>
-              <Field label="Rollover %">
-                <input type="number" min="0" max="100" className={inputCls} value={form.rolloverPct} onChange={set("rolloverPct")} placeholder="—" />
+              <Field label="Rollover $">
+                <input type="number" min="0" className={inputCls} value={form.rolloverAmt} onChange={set("rolloverAmt")} placeholder="—" />
               </Field>
             </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
-              More of the price in earnouts, notes or rollover = a higher headline multiple for the same cash-equivalent value: cash counts at face value, a seller note ~95¢, rollover ~90¢, an earnout ~60¢ on the dollar.
+              The headline is the stated total — add $100K of earnout and the headline rises $100K. The effective multiple discounts it back down, piece by piece, for expected payout and time value: cash at face value, a seller note ~95¢, rollover ~90¢, an earnout ~60¢ on the dollar.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
