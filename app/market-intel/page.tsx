@@ -226,7 +226,7 @@ export default function MarketIntelPage() {
         const [latestData, obsData, acq, fil, warnData, mult, log, flow] = await Promise.all([
           getJSON<LatestMap>("/api/market/latest"),
           getJSON<MiIndicatorObs[]>(
-            "/api/market/indicators?series=AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE,AZ_SPEND_WELFARE,AZ_SPEND_EDUCATION,AZ_SPEND_INSURANCE,AZ_SPEND_HIGHWAYS,AZ_SPEND_CORRECTIONS,AZ_SPEND_HEALTH," +
+            "/api/market/indicators?series=DPRIME,SOFR,DGS10,DGS2,DFF,AZUR,UNRATE,AZMFG,MANEMP,AZCONS,USCONS,AZBPPRIV,PERMIT,AZSTHPI,USSTHPI,SMS04000006562000001,CEU6500000001,AZNA,PAYEMS,AZ_DOD_CONTRACTS,AZ_AEROSPACE_CONTRACTS,QTAXTOTALQTAXCAT3AZNO,AZ_STATE_REVENUE,AZ_STATE_EXPENDITURE,AZ_SPEND_WELFARE,AZ_SPEND_EDUCATION,AZ_SPEND_INSURANCE,AZ_SPEND_HIGHWAYS,AZ_SPEND_CORRECTIONS,AZ_SPEND_HEALTH," +
               COUNTY_PERMIT_SERIES +
               "," +
               SECTOR_SERIES +
@@ -286,6 +286,50 @@ export default function MarketIntelPage() {
     () => filterSince(seriesToRows(obs.filter((o) => ["AZUR", "UNRATE"].includes(o.seriesId)), ["AZUR", "UNRATE"]), fiveYearCutoff),
     [obs, fiveYearCutoff]
   );
+  const rateRows = useMemo(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 3);
+    return filterSince(
+      seriesToRows(obs.filter((o) => ["DPRIME", "DGS10", "SOFR"].includes(o.seriesId)), ["DPRIME", "DGS10", "SOFR"]),
+      d.toISOString().slice(0, 10)
+    );
+  }, [obs]);
+  const rateStats = useMemo(() => {
+    const defs = [
+      { id: "DPRIME", name: "Bank Prime Loan Rate" },
+      { id: "SOFR", name: "SOFR (overnight)" },
+      { id: "DGS10", name: "10-Year Treasury" },
+      { id: "DGS2", name: "2-Year Treasury" },
+      { id: "DFF", name: "Fed Funds Effective" },
+    ];
+    return defs.map((def) => {
+      const rows = obs
+        .filter((o) => o.seriesId === def.id && o.value !== null)
+        .slice()
+        .sort((a, b) => (a.obsDate < b.obsDate ? -1 : 1));
+      if (!rows.length)
+        return { ...def, latest: null as number | null, date: "", m1: null as number | null, y1: null as number | null };
+      const last = rows[rows.length - 1];
+      const at = (days: number) => {
+        const t = new Date(new Date(last.obsDate).getTime() - days * 86400000).toISOString().slice(0, 10);
+        let best: MiIndicatorObs | null = null;
+        for (const r of rows) {
+          if (r.obsDate <= t) best = r;
+          else break;
+        }
+        return best;
+      };
+      const m = at(30);
+      const y = at(365);
+      return {
+        ...def,
+        latest: last.value,
+        date: last.obsDate,
+        m1: m && m.value !== null && last.value !== null ? last.value - m.value : null,
+        y1: y && y.value !== null && last.value !== null ? last.value - y.value : null,
+      };
+    });
+  }, [obs]);
   const empRows = useMemo(
     () =>
       indexRows(
@@ -1266,7 +1310,7 @@ export default function MarketIntelPage() {
         </FullSection>
 
         {/* Combined Industries & Multiples (Oct 10, 2026 redo) + consolidated Fit Targets */}
-        <FullSection kicker="Start here — the valuation yardstick" title="Industries & Multiples" sub="One home for industries and their multiples — switch industries at the top for multiples by subindustry and the typical deal structure in each; best guesses are flagged est where no multiple is published">
+        <FullSection title="Industries & Multiples" sub="One home for industries and their multiples — switch industries at the top for multiples by subindustry and the typical deal structure in each; best guesses are flagged est where no multiple is published">
           <div className="rounded-2xl border border-[#b8975a]/40 bg-gradient-to-br from-[#e6edf6] via-white to-[#f7f1e3] p-3 shadow-sm dark:from-[#132847] dark:via-[#0d1f3c] dark:to-[#1a3358] sm:p-4">
             <IndustryExplorer
               multiples={multiples}
@@ -1404,6 +1448,65 @@ export default function MarketIntelPage() {
               </div>
             </div>
           )}
+          </SubSection>
+          <SubSection title="Market Rates">
+            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
+              The rates the pipeline valuation model prices against — FRED, refreshed daily with the other indicators. The 10-year is cross-checked against CBOE ^TNX on every ingest (rates-xcheck in the sync log).
+            </p>
+            <div className={tableWrap}>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-white/10">
+                    <th className={th}>Rate</th>
+                    <th className={th}>Current</th>
+                    <th className={th}>As of</th>
+                    <th className={th}>Change · 1 mo</th>
+                    <th className={th}>Change · 1 yr</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rateStats.map((r) => (
+                    <tr key={r.id} className="border-b border-slate-100 last:border-0 dark:border-white/5">
+                      <td className={td}>{r.name}</td>
+                      <td className={td}>{r.latest !== null ? `${r.latest.toFixed(2)}%` : "—"}</td>
+                      <td className={td}>{r.date || "—"}</td>
+                      <td className={td}>{r.m1 !== null ? `${r.m1 >= 0 ? "+" : ""}${Math.round(r.m1 * 100)} bps` : "—"}</td>
+                      <td className={td}>{r.y1 !== null ? `${r.y1 >= 0 ? "+" : ""}${Math.round(r.y1 * 100)} bps` : "—"}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td className={td}>Yield curve — 10-Yr minus 2-Yr</td>
+                    <td className={td}>
+                      {rateStats[2].latest !== null && rateStats[3].latest !== null
+                        ? `${(rateStats[2].latest! - rateStats[3].latest!).toFixed(2)}%`
+                        : "—"}
+                    </td>
+                    <td className={td} colSpan={3}>Spread</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div className={`${chartCard} mt-4`}>
+              <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Prime, 10-Year Treasury & SOFR</h3>
+              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Daily, %, FRED · 3-yr</p>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={rateRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                    <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
+                    <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} tickFormatter={(v: number) => `${v}%`} />
+                    <Tooltip
+                      contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
+                      labelFormatter={(l) => String(l)}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Line type="monotone" dataKey="DPRIME" name="Prime" stroke={gold} strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="DGS10" name="10-Yr Treasury" stroke={blue} strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="SOFR" name="SOFR" stroke={green} strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           </SubSection>
           <SubSection title="Economic Indicators">
             <EventStrip items={allEvents} onDismiss={dismissEvent} />
