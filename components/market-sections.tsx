@@ -44,7 +44,7 @@ export function Section({
         aria-expanded={open}
         className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg border-b-2 px-2 pb-2 text-left transition-colors duration-200 ${
           open
-            ? "border-[#b8975a] bg-[#e6edf6] dark:bg-white/[0.07]"
+            ? "border-[#b8975a]"
             : "border-[#b8975a]/50 hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05]"
         }`}
       >
@@ -83,7 +83,7 @@ export function SubSection({
         aria-expanded={open}
         className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 ${
           open
-            ? "bg-[#e6edf6] dark:bg-white/[0.07]"
+            ? ""
             : "hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05]"
         }`}
       >

@@ -230,11 +230,11 @@ function median(vals: number[]): number | null {
 
 const pill = (active: boolean) =>
   active
-    ? "rounded-full bg-[#d7e1f0] px-3.5 py-1.5 text-sm font-semibold text-[#0d1f3c] dark:bg-[#b8975a]/30 dark:text-[#e8cf9a]"
+    ? "rounded-full px-3.5 py-1.5 text-sm font-semibold text-[#0d1f3c] ring-1 ring-inset ring-[#b8975a] dark:text-[#e8cf9a]"
     : "rounded-full border border-slate-300 px-3.5 py-1.5 text-sm text-slate-600 hover:border-[#b8975a] dark:border-white/15 dark:text-white/60";
 const pillSm = (active: boolean) =>
   active
-    ? "rounded-full bg-[#d7e1f0] px-3 py-1 text-xs font-semibold text-[#0d1f3c] dark:bg-[#b8975a]/30 dark:text-[#e8cf9a]"
+    ? "rounded-full px-3 py-1 text-xs font-semibold text-[#0d1f3c] ring-1 ring-inset ring-[#b8975a] dark:text-[#e8cf9a]"
     : "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-500 hover:border-[#b8975a] dark:border-white/15 dark:text-white/50";
 
 export default function IndustryExplorer({
