@@ -17,6 +17,7 @@ const TYPE_STYLE: Record<ActivityType, { dot: string; label: string }> = {
   "deal.contact": { dot: "bg-sky-500", label: "Contact" },
   "deal.interaction": { dot: "bg-indigo-500", label: "Touch" },
   "deal.attachment": { dot: "bg-amber-500", label: "File" },
+  "deal.intake": { dot: "bg-teal-500", label: "CIM intake" },
   "flow.created": { dot: "bg-teal-500", label: "Deal flow" },
   "flow.converted": { dot: "bg-teal-700", label: "Converted" },
   "exec.created": { dot: "bg-[#0d1f3c]", label: "New candidate" },

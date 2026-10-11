@@ -354,6 +354,37 @@ export function resolveStructure(
   };
 }
 
+/** Piecewise-linear curve through [x, adjustment] points, clamped
+ * at the ends — the continuous form of a driver adjustment. */
+function curve(points: [number, number][], x: number): number {
+  if (x <= points[0][0]) return points[0][1];
+  for (let i = 1; i < points.length; i++) {
+    if (x <= points[i][0]) {
+      const [x0, y0] = points[i - 1];
+      const [x1, y1] = points[i];
+      return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
+    }
+  }
+  return points[points.length - 1][1];
+}
+
+/** How hard a given risk bites at this deal's size: the same
+ * concentration or key-person exposure costs more turns on a small
+ * deal than a large one (thinner buyer pool, less bench to absorb
+ * it). Applied to NEGATIVE concentration / owner-dependence
+ * adjustments only. */
+function sizeRiskFactor(band: string): number {
+  if (band.includes("< $5M")) return 1.15;
+  if (band.includes("$5–25M")) return 1.0;
+  if (band.includes("$25–100M")) return 0.85;
+  if (band.includes("$100–500M")) return 0.75;
+  return 0.65;
+}
+
+function fmtAdj(a: number): string {
+  return `${a >= 0 ? "+" : "−"}${Math.abs(a).toFixed(2)}×`;
+}
+
 export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: MarketRates): MultipleEstimate | null {
   const evRows = multiples.filter((m) => m.sourceReport.includes("ExitValue"));
   if (!evRows.length) return null;
@@ -391,20 +422,97 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
   }
   if (base === null || !isFinite(base) || base <= 0) return null;
 
-  // Drivers
+  // Drivers. Measured metrics (Oct 11, 2026) supersede the matching
+  // qualitative bucket: the adjustment scales continuously with the
+  // actual number, risk penalties scale with deal size, contracted
+  // recurring revenue mitigates concentration, and concentration
+  // compounding with owner dependence costs extra (the owner likely
+  // holds the key relationships). Buckets still apply wherever no
+  // metric is recorded.
   let driverAdj = 0;
   const driverNotes: string[] = [];
   const drivers: DealDrivers = deal.drivers ?? {};
+  const metrics = deal.metrics ?? {};
+  const sizeF = sizeRiskFactor(band);
+  const adjByKey: Partial<Record<keyof DealDrivers, number>> = {};
+
+  // Customer concentration — from measured customer shares.
+  if (metrics.topCustomerPct != null || metrics.top3Pct != null) {
+    const concCurve: [number, number][] = [[5, 0.5], [10, 0.35], [15, 0.15], [20, 0], [25, -0.2], [30, -0.38], [40, -0.62], [50, -0.85], [65, -1.05], [100, -1.25]];
+    const top3Curve: [number, number][] = [[15, 0.4], [30, 0.15], [45, -0.15], [60, -0.45], [75, -0.7], [90, -0.9]];
+    const parts: string[] = [];
+    let a: number;
+    if (metrics.topCustomerPct != null) {
+      a = curve(concCurve, metrics.topCustomerPct);
+      parts.push(`top customer ${metrics.topCustomerPct}% of revenue`);
+      if (metrics.top3Pct != null) {
+        a = 0.7 * a + 0.3 * curve(top3Curve, metrics.top3Pct);
+        parts.push(`top 3 at ${metrics.top3Pct}%`);
+      }
+    } else {
+      a = curve(top3Curve, metrics.top3Pct as number);
+      parts.push(`top 3 at ${metrics.top3Pct}% of revenue`);
+    }
+    let mitigated = false;
+    if (a < 0) {
+      a *= sizeF;
+      if (metrics.recurringPct != null && metrics.recurringPct >= 60) {
+        a *= 0.8;
+        mitigated = true;
+      }
+    }
+    adjByKey.concentration = a;
+    driverNotes.push(
+      `${fmtAdj(a)} customer concentration: ${parts.join(", ")}${a < 0 && sizeF !== 1 ? ` (size factor ${sizeF}×)` : ""}${mitigated ? " — contracted recurring revenue mitigates" : ""} [measured]`
+    );
+  }
+
+  // Recurring / contracted revenue — from the measured share.
+  if (metrics.recurringPct != null) {
+    const a = curve(
+      [[0, -0.55], [10, -0.4], [25, -0.15], [40, 0.05], [55, 0.3], [70, 0.5], [85, 0.68], [100, 0.75]],
+      metrics.recurringPct
+    );
+    adjByKey.recurring = a;
+    driverNotes.push(`${fmtAdj(a)} recurring revenue: ${metrics.recurringPct}% recurring / contracted [measured]`);
+  }
+
+  // Owner dependence — from the owner's hours in the business.
+  if (metrics.ownerHoursPerWeek != null) {
+    let a = curve(
+      [[0, 0.55], [5, 0.5], [10, 0.4], [20, 0.2], [30, 0], [35, -0.2], [40, -0.4], [45, -0.58], [50, -0.7], [60, -0.85], [80, -0.9]],
+      metrics.ownerHoursPerWeek
+    );
+    if (a < 0) a *= sizeF;
+    adjByKey.ownerDependence = a;
+    driverNotes.push(
+      `${fmtAdj(a)} owner dependence: owner works ~${metrics.ownerHoursPerWeek} hrs/week in the business${a < 0 && sizeF !== 1 ? ` (size factor ${sizeF}×)` : ""} [measured]`
+    );
+  }
+
+  // Bucket drivers — for every driver without a measured metric.
   for (const def of DRIVER_DEFS) {
+    if (adjByKey[def.key] !== undefined) continue;
     const lvl = drivers[def.key];
     if (lvl === "pos") {
-      driverAdj += def.weight;
+      adjByKey[def.key] = def.weight;
       driverNotes.push(`+${def.weight.toFixed(2)}× ${def.label.toLowerCase()}: ${def.posLabel.toLowerCase()}`);
     } else if (lvl === "neg") {
-      driverAdj -= def.weight;
+      adjByKey[def.key] = -def.weight;
       driverNotes.push(`−${def.weight.toFixed(2)}× ${def.label.toLowerCase()}: ${def.negLabel.toLowerCase()}`);
     }
   }
+
+  // Interaction: concentrated customers whose relationships run
+  // through a hands-on owner compound — the two risks are the same
+  // risk counted twice, plus a key-person premium on top.
+  let interactionAdj = 0;
+  if ((adjByKey.concentration ?? 0) <= -0.45 && (adjByKey.ownerDependence ?? 0) <= -0.3) {
+    interactionAdj = -0.25;
+    driverNotes.push("−0.25× interaction: concentrated customers + owner dependence — the owner likely holds the key relationships");
+  }
+
+  driverAdj = Object.values(adjByKey).reduce((sum, v) => sum + (v ?? 0), 0) + interactionAdj;
   driverAdj = Math.max(-2, Math.min(2, driverAdj));
 
   // Growth outlook — its own quantitative layer, separate from the

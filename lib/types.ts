@@ -62,6 +62,35 @@ export interface DealStructureInput {
   rolloverPct?: number | null;
 }
 
+/** Measured business metrics (Oct 11, 2026) — the raw inputs the
+ * valuation's continuous driver curves read. Recorded by hand in the
+ * deal modal or extracted from a CIM by the email intake. When a
+ * metric is present it supersedes the matching qualitative driver
+ * bucket: the adjustment scales with the actual number (and, for
+ * risk penalties, with deal size) instead of a flat step. */
+export interface DealMetrics {
+  /** Largest customer as % of revenue. */
+  topCustomerPct?: number | null;
+  /** Top 3 customers combined, % of revenue. */
+  top3Pct?: number | null;
+  /** Recurring / contracted revenue, % of revenue. */
+  recurringPct?: number | null;
+  /** Owner's working hours per week in the business. */
+  ownerHoursPerWeek?: number | null;
+}
+
+/** Stored synthesis (Oct 11, 2026): the agent's written valuation
+ * read on the deal — market context across the multiples sources,
+ * what the measured metrics imply, the verdict, and what's still
+ * missing. Refreshed when the deal's inputs change; inputsHash
+ * fingerprints the inputs it was written from so staleness shows. */
+export interface DealSynthesis {
+  text: string;
+  updatedAt: string;
+  inputsHash: string;
+  author?: string;
+}
+
 export interface Deal {
   id: string;
   companyName: string;
@@ -70,6 +99,8 @@ export interface Deal {
   dealValue: number;
   drivers?: DealDrivers;
   structure?: DealStructureInput;
+  metrics?: DealMetrics;
+  synthesis?: DealSynthesis | null;
   /** Annual revenue, if known. */
   revenue: number | null;
   /** Annual EBITDA, if known. */
@@ -227,6 +258,7 @@ export type ActivityType =
   | "deal.contact"
   | "deal.interaction"
   | "deal.attachment"
+  | "deal.intake"
   | "flow.created"
   | "flow.converted"
   | "exec.created"

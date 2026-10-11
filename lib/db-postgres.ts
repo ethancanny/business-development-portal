@@ -152,6 +152,10 @@ export function ensureSchema(): Promise<void> {
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS drivers JSONB NOT NULL DEFAULT '{}'`;
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS structure JSONB NOT NULL DEFAULT '{}'`;
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS metrics JSONB NOT NULL DEFAULT '{}'`;
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS synthesis JSONB`;
       /* ---- Market Intel tables ---- */
       await db`
         CREATE TABLE IF NOT EXISTS mi_indicators (
@@ -359,6 +363,14 @@ function rowToDeal(r: Record<string, unknown>): Deal {
       r.structure && typeof r.structure === "object"
         ? (r.structure as Deal["structure"])
         : {},
+    metrics:
+      r.metrics && typeof r.metrics === "object"
+        ? (r.metrics as Deal["metrics"])
+        : {},
+    synthesis:
+      r.synthesis && typeof r.synthesis === "object"
+        ? (r.synthesis as Deal["synthesis"])
+        : null,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
@@ -381,7 +393,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           id, company_name, industry, stage, deal_value, contact_name,
           contact_email, notes, owner, city, lat, lng, links, operator_ids,
           revenue, ebitda, asking_price, growth_pct, broker, source, drivers, structure,
-          created_at, updated_at
+          metrics, synthesis, created_at, updated_at
         ) VALUES (
           ${d.id}, ${d.companyName}, ${d.industry}, ${d.stage},
           ${d.dealValue || 0}, ${d.contactName}, ${d.contactEmail},
@@ -392,6 +404,8 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           ${d.broker ?? ""}, ${d.source ?? ""},
           ${JSON.stringify(d.drivers ?? {})},
           ${JSON.stringify(d.structure ?? {})},
+          ${JSON.stringify(d.metrics ?? {})},
+          ${d.synthesis ? JSON.stringify(d.synthesis) : null},
           ${d.createdAt}, ${d.updatedAt}
         )`
     ),

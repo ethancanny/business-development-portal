@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDeals, saveDeals, getExecutives, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { geocodeCity } from "@/lib/geo";
-import { DEAL_STAGES, type Deal, type DealDrivers, type DealLink, type DealStructureInput } from "@/lib/types";
+import { DEAL_STAGES, type Deal, type DealDrivers, type DealLink, type DealMetrics, type DealStructureInput } from "@/lib/types";
 
 const DRIVER_KEYS = ["concentration", "recurring", "ownerDependence", "growth", "margins", "management", "financials"] as const;
 
@@ -50,6 +50,24 @@ function parseStructure(body: unknown): DealStructureInput {
   const metric = (body as Record<string, unknown>)["earnoutMetric"];
   if (typeof metric === "string" && ["EBITDA", "Revenue", "Gross profit", "Other"].includes(metric)) {
     out.earnoutMetric = metric;
+  }
+  return out;
+}
+
+function parseMetrics(body: unknown): DealMetrics {
+  if (!body || typeof body !== "object") return {};
+  const out: DealMetrics = {};
+  const pctKeys = ["topCustomerPct", "top3Pct", "recurringPct"] as const;
+  for (const k of pctKeys) {
+    const v = (body as Record<string, unknown>)[k];
+    if (v === null || v === undefined || v === "") continue;
+    const n = Number(v);
+    if (isFinite(n)) out[k] = Math.max(0, Math.min(100, n));
+  }
+  const h = (body as Record<string, unknown>)["ownerHoursPerWeek"];
+  if (h !== null && h !== undefined && h !== "") {
+    const n = Number(h);
+    if (isFinite(n)) out.ownerHoursPerWeek = Math.max(0, Math.min(80, n));
   }
   return out;
 }
@@ -170,6 +188,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
       body.structure !== undefined
         ? parseStructure(body.structure)
         : prev.structure ?? {},
+    metrics:
+      body.metrics !== undefined ? parseMetrics(body.metrics) : prev.metrics ?? {},
     updatedAt: new Date().toISOString(),
   };
 
