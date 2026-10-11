@@ -52,6 +52,14 @@ const FRED_SERIES: { id: string; title: string }[] = [
   { id: "WPU081", title: "Lumber & Wood Products PPI" },
   { id: "WPU0121", title: "Hay & Forage PPI" },
   { id: "WPU01220101", title: "Raw Cotton PPI" },
+  // Market interest rates (Oct 10, 2026): power the Market Rates stat
+  // card and the pipeline valuation's structure pricing (seller-note
+  // value vs prime, earnout time value).
+  { id: "DPRIME", title: "Bank Prime Loan Rate" },
+  { id: "SOFR", title: "Secured Overnight Financing Rate (SOFR)" },
+  { id: "DGS10", title: "10-Year Treasury Yield" },
+  { id: "DGS2", title: "2-Year Treasury Yield" },
+  { id: "DFF", title: "Federal Funds Effective Rate" },
 ];
 
 interface FredObsResponse {
@@ -120,6 +128,34 @@ export async function ingestIndicators(): Promise<number> {
   );
   total = results.reduce((a, b) => a + b, 0);
   await logSync("indicators", "ok", total, `FRED: ${FRED_SERIES.length} series refreshed${failures.length ? `; failed: ${failures.join(", ")}` : ""}`);
+  // rates-xcheck (Ethan's cross-reference rule): FRED's 10Y (H.15) is
+  // reconciled against CBOE's 10Y yield index (^TNX via Yahoo), an
+  // independent feed. Tolerance is loose — ^TNX is live intraday,
+  // DGS10 is a daily close — and the verdict is logged either way.
+  try {
+    const rows10 = await getIndicatorSeries(["DGS10"]);
+    const valid10 = rows10.filter((o) => o.value !== null).sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+    const last10 = valid10[valid10.length - 1];
+    const yres = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/%5ETNX?range=5d&interval=1d", {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; CannyCapital/1.0)" },
+    });
+    const yj = (await yres.json()) as { chart?: { result?: { meta?: { regularMarketPrice?: number } }[] } };
+    const tnxRaw = yj?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    const tnx = typeof tnxRaw === "number" ? tnxRaw / 10 : null;
+    if (last10 && last10.value !== null && tnx !== null) {
+      const diff = Math.abs(tnx - last10.value);
+      await logSync(
+        "rates-xcheck",
+        diff <= 0.25 ? "ok" : "error",
+        1,
+        `FRED DGS10 ${last10.value.toFixed(2)}% (${last10.obsDate}) vs CBOE ^TNX ${tnx.toFixed(2)}% — diff ${diff.toFixed(2)}pp`
+      );
+    } else {
+      await logSync("rates-xcheck", "error", 0, "could not run: missing FRED DGS10 obs or Yahoo ^TNX quote");
+    }
+  } catch (e) {
+    await logSync("rates-xcheck", "error", 0, `could not run: ${(e as Error).message}`);
+  }
   return total;
 }
 
