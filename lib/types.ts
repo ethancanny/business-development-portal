@@ -76,6 +76,9 @@ export interface Deal {
   ebitda: number | null;
   /** Asking price, if known. */
   askingPrice: number | null;
+  /** Projected annual growth % — its own valuation layer
+   * (~0.05× per point, clamped ±1.25×). */
+  growthPct?: number | null;
   /** Broker / intermediary name, if any. */
   broker: string;
   /** How this target was sourced. */

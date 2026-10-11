@@ -50,6 +50,9 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
       {est.driverNotes.map((n, i) => (
         <p key={i} className="text-xs text-slate-500 dark:text-white/50">{n}</p>
       ))}
+      {est.growthNote && (
+        <p className="text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">{est.growthNote}</p>
+      )}
       {est.pieceNotes.map((n, i) => (
         <p key={`pn-${i}`} className="text-xs text-slate-500 dark:text-white/50">{n}</p>
       ))}
@@ -181,6 +184,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     revenue: deal?.revenue != null ? String(deal.revenue) : "",
     ebitda: deal?.ebitda != null ? String(deal.ebitda) : "",
     askingPrice: deal?.askingPrice != null ? String(deal.askingPrice) : "",
+    growthPct: deal?.growthPct != null ? String(deal.growthPct) : "",
     broker: deal?.broker ?? "",
     source: deal?.source ?? "",
     links: (deal?.links ?? [])
@@ -270,6 +274,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     revenue: form.revenue.trim() === "" ? null : Number(form.revenue) || null,
     ebitda: form.ebitda.trim() === "" ? null : Number(form.ebitda) || null,
     askingPrice: form.askingPrice.trim() === "" ? null : Number(form.askingPrice) || null,
+    growthPct: form.growthPct.trim() === "" ? null : Number(form.growthPct),
     broker: form.broker,
     source: form.source,
     contactName: "",
@@ -305,6 +310,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
       ebitda: form.ebitda.trim() === "" ? null : Number(form.ebitda) || null,
       askingPrice:
         form.askingPrice.trim() === "" ? null : Number(form.askingPrice) || null,
+      growthPct: form.growthPct.trim() === "" ? null : Number(form.growthPct),
       drivers: form.drivers,
       structure: structureFromForm(),
     };
@@ -522,6 +528,16 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
                   </select>
                 </label>
               ))}
+            </div>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <div className="w-52">
+                <Field label="Growth outlook — projected growth %/yr">
+                  <input type="number" step="1" className={inputCls} value={form.growthPct} onChange={set("growthPct")} placeholder="e.g. 10" />
+                </Field>
+              </div>
+              <p className="pb-2 text-xs text-slate-500 dark:text-white/50">
+                Growth gets its own adjustment, separate from the drivers above: about +0.5× per 10 points of projected growth, −0.5× per 10 points of decline (clamped at ±1.25×).
+              </p>
             </div>
             <p className="mt-3 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
               Deal structure — stated amounts ($) — the headline price is their sum; leave all blank to assume the industry-typical mix

@@ -152,6 +152,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
       body.ebitda !== undefined
         ? body.ebitda === null || body.ebitda === "" ? null : Number(body.ebitda) || null
         : prev.ebitda ?? null,
+    growthPct:
+      body.growthPct !== undefined
+        ? body.growthPct === null || body.growthPct === "" ? null : Math.max(-60, Math.min(150, Number(body.growthPct) || 0)) || null
+        : prev.growthPct ?? null,
     askingPrice:
       body.askingPrice !== undefined
         ? body.askingPrice === null || body.askingPrice === "" ? null : Number(body.askingPrice) || null

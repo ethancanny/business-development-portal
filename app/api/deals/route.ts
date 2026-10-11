@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
     operatorIds: parseIdList(body.operatorIds),
     revenue: body.revenue === null || body.revenue === undefined || body.revenue === "" ? null : Number(body.revenue) || null,
     ebitda: body.ebitda === null || body.ebitda === undefined || body.ebitda === "" ? null : Number(body.ebitda) || null,
+    growthPct: body.growthPct === null || body.growthPct === undefined || body.growthPct === "" ? null : Math.max(-60, Math.min(150, Number(body.growthPct) || 0)) || null,
     askingPrice: body.askingPrice === null || body.askingPrice === undefined || body.askingPrice === "" ? null : Number(body.askingPrice) || null,
     broker: String(body.broker ?? "").trim(),
     source: String(body.source ?? "").trim(),

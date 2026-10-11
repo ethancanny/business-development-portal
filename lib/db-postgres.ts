@@ -143,6 +143,8 @@ export function ensureSchema(): Promise<void> {
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS asking_price DOUBLE PRECISION`;
       await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS growth_pct DOUBLE PRECISION`;
+      await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS broker TEXT NOT NULL DEFAULT ''`;
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT ''`;
@@ -342,6 +344,7 @@ function rowToDeal(r: Record<string, unknown>): Deal {
       : [],
     revenue: r.revenue === null || r.revenue === undefined ? null : Number(r.revenue),
     ebitda: r.ebitda === null || r.ebitda === undefined ? null : Number(r.ebitda),
+    growthPct: r.growth_pct === null || r.growth_pct === undefined ? null : Number(r.growth_pct),
     askingPrice:
       r.asking_price === null || r.asking_price === undefined
         ? null
@@ -377,7 +380,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
         INSERT INTO deals (
           id, company_name, industry, stage, deal_value, contact_name,
           contact_email, notes, owner, city, lat, lng, links, operator_ids,
-          revenue, ebitda, asking_price, broker, source, drivers, structure,
+          revenue, ebitda, asking_price, growth_pct, broker, source, drivers, structure,
           created_at, updated_at
         ) VALUES (
           ${d.id}, ${d.companyName}, ${d.industry}, ${d.stage},
@@ -385,7 +388,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           ${d.notes}, ${d.owner}, ${d.city}, ${d.lat}, ${d.lng},
           ${JSON.stringify(d.links ?? [])},
           ${JSON.stringify(d.operatorIds ?? [])},
-          ${d.revenue}, ${d.ebitda}, ${d.askingPrice},
+          ${d.revenue}, ${d.ebitda}, ${d.askingPrice}, ${d.growthPct ?? null},
           ${d.broker ?? ""}, ${d.source ?? ""},
           ${JSON.stringify(d.drivers ?? {})},
           ${JSON.stringify(d.structure ?? {})},

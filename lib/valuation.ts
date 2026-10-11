@@ -35,9 +35,8 @@ export const DRIVER_DEFS: {
   weight: number;
 }[] = [
   { key: "concentration", label: "Customer concentration", negLabel: "High — a top customer is >25% of revenue", neuLabel: "Moderate", posLabel: "Low / diversified", weight: 0.75 },
-  { key: "recurring", label: "Recurring / contracted revenue", negLabel: "Mostly one-off / project work", neuLabel: "Mixed", posLabel: "Mostly recurring / contracted", weight: 0.5 },
-  { key: "ownerDependence", label: "Owner dependence", negLabel: "Business runs through the owner", neuLabel: "Some key-person risk", posLabel: "Runs without the owner", weight: 0.5 },
-  { key: "growth", label: "Growth trend", negLabel: "Declining", neuLabel: "Flat", posLabel: "Growing", weight: 0.5 },
+  { key: "recurring", label: "Recurring / contracted revenue", negLabel: "Mostly one-off / project work", neuLabel: "Mixed", posLabel: "Mostly recurring / contracted", weight: 0.75 },
+  { key: "ownerDependence", label: "Owner dependence", negLabel: "Business runs through the owner", neuLabel: "Some key-person risk", posLabel: "Runs without the owner", weight: 0.75 },
   { key: "margins", label: "Margins vs industry", negLabel: "Below typical", neuLabel: "In line", posLabel: "Above typical", weight: 0.5 },
   { key: "management", label: "Management depth", negLabel: "Thin — owner plus crew", neuLabel: "Some bench", posLabel: "Strong second layer", weight: 0.25 },
   { key: "financials", label: "Financial records", negLabel: "Messy / tax returns only", neuLabel: "Partial / reviewed", posLabel: "Clean — audited or QoE-ready", weight: 0.25 },
@@ -205,6 +204,9 @@ export interface MultipleEstimate {
   group: string | null;
   /** Net multiple points from recorded drivers (can be negative). */
   driverAdj: number;
+  /** Growth-outlook adjustment (its own layer, from growthPct). */
+  growthAdj: number;
+  growthNote: string | null;
   driverNotes: string[];
   /** Estimated cash-equivalent multiple range (base + drivers) —
    * what we'd estimate the business is worth, before any stated price. */
@@ -363,9 +365,19 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
       driverNotes.push(`−${def.weight.toFixed(2)}× ${def.label.toLowerCase()}: ${def.negLabel.toLowerCase()}`);
     }
   }
-  driverAdj = Math.max(-1.5, Math.min(1.5, driverAdj));
+  driverAdj = Math.max(-2, Math.min(2, driverAdj));
 
-  const mid = base + driverAdj;
+  // Growth outlook — its own quantitative layer, separate from the
+  // qualitative drivers: ~0.05× per point of projected annual
+  // growth (10%/yr ≈ +0.5×), clamped to ±1.25×.
+  const growthPct = deal.growthPct != null && isFinite(deal.growthPct) ? deal.growthPct : null;
+  const growthAdj = growthPct !== null ? Math.max(-1.25, Math.min(1.25, 0.05 * growthPct)) : 0;
+  const growthNote =
+    growthPct !== null
+      ? `Growth outlook: ${growthPct > 0 ? "+" : ""}${growthPct}%/yr projected (${growthAdj >= 0 ? "+" : "−"}${Math.abs(growthAdj).toFixed(2)}×)`
+      : null;
+
+  const mid = base + driverAdj + growthAdj;
   const cashEqLow = Math.max(1, mid - 0.5);
   const cashEqHigh = mid + 0.5;
 
@@ -418,6 +430,8 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
     band,
     group,
     driverAdj,
+    growthAdj,
+    growthNote,
     driverNotes,
     cashEqLow,
     cashEqHigh,
