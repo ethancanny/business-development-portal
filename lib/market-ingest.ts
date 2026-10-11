@@ -118,7 +118,9 @@ export async function ingestIndicators(): Promise<number> {
             obsDate: o.date,
             value: Number(o.value),
           }));
-        return await upsertIndicatorObs(rows);
+        // Bulk upsert: the daily rate series carry ~2,600 obs each in
+        // the 10-year window — the per-row upsert blew the 60s cap.
+        return await upsertIndicatorObsBulk(rows);
       } catch {
         // One dead/renamed series must not sink the whole refresh.
         failures.push(s.id);
