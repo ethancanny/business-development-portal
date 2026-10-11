@@ -13,12 +13,16 @@ import type { Deal, DealDrivers, DealStructureInput, MiMultiple } from "./types"
  *     margins, management depth, financial records) nudge the
  *     headline multiple up or down. Noting "concentration came down"
  *     (setting the driver to Low/diversified) raises the estimate.
- *  3. STRUCTURE — cash at close is worth face value; seller notes a
- *     touch less; rollover slightly less again; earnouts materially
- *     less (time + contingency). The structure mix converts the
- *     headline range into an EFFECTIVE range. Blank structure fields
- *     assume the industry-typical mix from the Market Intel
- *     deal-structure data.
+ *  3. STRUCTURE — the base range is a CASH-EQUIVALENT value. Pushing
+ *     value into deferred/contingent pieces RAISES the headline
+ *     multiple: a seller who takes an earnout (or a seller note, or
+ *     rollover) demands — and a buyer can concede — a bigger stated
+ *     price, because part of it is at risk and arrives late. Each
+ *     stated dollar is worth ~100¢ in cash, ~95¢ as a seller note,
+ *     ~90¢ as rollover, ~60¢ as an earnout; the headline multiple is
+ *     the cash-equivalent range grossed up by the mix's value factor.
+ *     Blank structure fields assume the industry-typical mix from
+ *     the Market Intel deal-structure data.
  *
  * It is deliberately rough — a yardstick that sharpens as more data
  * is recorded on the deal, not an appraisal. */
@@ -129,6 +133,11 @@ export interface MultipleEstimate {
   /** Net multiple points from recorded drivers (can be negative). */
   driverAdj: number;
   driverNotes: string[];
+  /** Cash-equivalent multiple range (base + drivers), before structure. */
+  cashEqLow: number;
+  cashEqHigh: number;
+  /** Headline (stated) multiple range at the structure mix — higher
+   * than cash-equivalent when value sits in earnouts/notes/rollover. */
   headlineLow: number;
   headlineHigh: number;
   /** Structure mix used, % of value. */
@@ -136,11 +145,14 @@ export interface MultipleEstimate {
   structureAssumed: boolean;
   /** Present-value factor of the structure mix (≤ 1). */
   structureFactor: number;
-  effLow: number;
-  effHigh: number;
-  /** Implied enterprise value range at the effective multiple. */
+  /** How much the structure inflates the headline over cash-equivalent. */
+  structureUplift: number;
+  /** Implied enterprise value range at the cash-equivalent multiple. */
   evLow: number | null;
   evHigh: number | null;
+  /** Implied stated price range at the headline multiple. */
+  statedEvLow: number | null;
+  statedEvHigh: number | null;
 }
 
 export function resolveStructure(
@@ -227,10 +239,12 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[]): MultipleE
   driverAdj = Math.max(-1.5, Math.min(1.5, driverAdj));
 
   const mid = base + driverAdj;
-  const headlineLow = Math.max(1, mid - 0.5);
-  const headlineHigh = mid + 0.5;
+  const cashEqLow = Math.max(1, mid - 0.5);
+  const cashEqHigh = mid + 0.5;
 
-  // Structure
+  // Structure: the cash-equivalent range grossed up by the mix's
+  // value factor gives the headline (stated) multiple — more earnout
+  // or deferral in the mix, higher the headline multiple.
   const { mix, assumed } = resolveStructure(deal, group);
   const structureFactor =
     (mix.cash * PIECE_VALUE.cash +
@@ -239,10 +253,12 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[]): MultipleE
       mix.earnout * PIECE_VALUE.earnout) /
     100;
 
-  const effLow = headlineLow * structureFactor;
-  const effHigh = headlineHigh * structureFactor;
-  const evLow = deal.ebitda ? effLow * deal.ebitda : null;
-  const evHigh = deal.ebitda ? effHigh * deal.ebitda : null;
+  const headlineLow = cashEqLow / structureFactor;
+  const headlineHigh = cashEqHigh / structureFactor;
+  const evLow = deal.ebitda ? cashEqLow * deal.ebitda : null;
+  const evHigh = deal.ebitda ? cashEqHigh * deal.ebitda : null;
+  const statedEvLow = deal.ebitda ? headlineLow * deal.ebitda : null;
+  const statedEvHigh = deal.ebitda ? headlineHigh * deal.ebitda : null;
 
   return {
     base,
@@ -251,15 +267,18 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[]): MultipleE
     group,
     driverAdj,
     driverNotes,
+    cashEqLow,
+    cashEqHigh,
     headlineLow,
     headlineHigh,
     structure: mix,
     structureAssumed: assumed,
     structureFactor,
-    effLow,
-    effHigh,
+    structureUplift: structureFactor > 0 ? 1 / structureFactor - 1 : 0,
     evLow,
     evHigh,
+    statedEvLow,
+    statedEvHigh,
   };
 }
 

@@ -41,8 +41,8 @@ export default function DealTable({
       if (sortKey === "estMultiple") {
         const ea = estOf(a);
         const eb = estOf(b);
-        const ma = ea ? (ea.effLow + ea.effHigh) / 2 : -1;
-        const mb = eb ? (eb.effLow + eb.effHigh) / 2 : -1;
+        const ma = ea ? (ea.headlineLow + ea.headlineHigh) / 2 : -1;
+        const mb = eb ? (eb.headlineLow + eb.headlineHigh) / 2 : -1;
         return (ma - mb) * sortDir;
       }
       const va = a[sortKey];
@@ -132,12 +132,12 @@ export default function DealTable({
                   const est = estOf(d);
                   if (!est) return <span className="text-slate-400">—</span>;
                   return (
-                    <span title={`${est.baseBasis}. Headline ${est.headlineLow.toFixed(1)}–${est.headlineHigh.toFixed(1)}× before structure.`}>
+                    <span title={`${est.baseBasis}. Cash-equivalent ${est.cashEqLow.toFixed(1)}–${est.cashEqHigh.toFixed(1)}×; the structure mix lifts the headline above it.`}>
                       <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">
-                        {est.effLow.toFixed(1)}–{est.effHigh.toFixed(1)}×
+                        {est.headlineLow.toFixed(1)}–{est.headlineHigh.toFixed(1)}×
                       </span>
                       <span className="block text-[11px] text-slate-400 dark:text-white/40">
-                        eff. EBITDA{est.structureAssumed ? " · typ. structure" : ""}
+                        headline · cash-eq {est.cashEqLow.toFixed(1)}–{est.cashEqHigh.toFixed(1)}×{est.structureAssumed ? " · typ. structure" : ""}
                       </span>
                     </span>
                   );

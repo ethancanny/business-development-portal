@@ -13,15 +13,16 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
     <div className="text-sm">
       <p>
         <span className="font-semibold text-slate-900 dark:text-white">
-          {est.effLow.toFixed(1)}–{est.effHigh.toFixed(1)}× EBITDA
+          {est.headlineLow.toFixed(1)}–{est.headlineHigh.toFixed(1)}× EBITDA
         </span>
         <span className="text-slate-500 dark:text-white/50">
-          {" "}effective · headline {est.headlineLow.toFixed(1)}–{est.headlineHigh.toFixed(1)}×
+          {" "}headline at this structure · cash-equivalent {est.cashEqLow.toFixed(1)}–{est.cashEqHigh.toFixed(1)}×
         </span>
       </p>
-      {est.evLow !== null && est.evHigh !== null && (
+      {est.evLow !== null && est.evHigh !== null && est.statedEvLow !== null && est.statedEvHigh !== null && (
         <p className="text-slate-600 dark:text-[#c8bfa8]">
-          Implied value ≈ {fmtMoney(Math.round(est.evLow))} – {fmtMoney(Math.round(est.evHigh))}
+          Stated price ≈ {fmtMoney(Math.round(est.statedEvLow))} – {fmtMoney(Math.round(est.statedEvHigh))}
+          {" · "}cash-equivalent value ≈ {fmtMoney(Math.round(est.evLow))} – {fmtMoney(Math.round(est.evHigh))}
         </p>
       )}
       <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
@@ -33,7 +34,8 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
       <p className="text-xs text-slate-400 dark:text-white/40">
         Structure{est.structureAssumed ? " (industry-typical, assumed)" : ""}: {est.structure.cash}% cash ·{" "}
         {est.structure.seller}% seller note · {est.structure.earnout}% earnout · {est.structure.rollover}% rollover
-        → worth about {(est.structureFactor * 100).toFixed(0)}¢ on the dollar today.
+        → the deferred/contingent pieces lift the headline multiple ~{(est.structureUplift * 100).toFixed(0)}% above
+        cash-equivalent (each stated dollar is worth ~{(est.structureFactor * 100).toFixed(0)}¢ in cash terms).
       </p>
     </div>
   );
@@ -491,7 +493,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
               </Field>
             </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
-              Structure changes what a headline multiple is worth today: cash counts at face value, a seller note ~95¢, rollover ~90¢, an earnout ~60¢ on the dollar.
+              More of the price in earnouts, notes or rollover = a higher headline multiple for the same cash-equivalent value: cash counts at face value, a seller note ~95¢, rollover ~90¢, an earnout ~60¢ on the dollar.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
