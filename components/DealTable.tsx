@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import type { Deal, Executive } from "@/lib/types";
+import type { Deal, Executive, MiMultiple } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
+import { estimateMultiple } from "@/lib/valuation";
 
-type SortKey = "companyName" | "industry" | "stage" | "dealValue" | "ebitda" | "owner" | "updatedAt";
+type SortKey = "companyName" | "industry" | "stage" | "dealValue" | "ebitda" | "estMultiple" | "owner" | "updatedAt";
 
 const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "companyName", label: "Company" },
@@ -13,6 +14,7 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "stage", label: "Stage" },
   { key: "dealValue", label: "Value" },
   { key: "ebitda", label: "EBITDA" },
+  { key: "estMultiple", label: "Est. multiple" },
   { key: "owner", label: "Owner" },
   { key: "updatedAt", label: "Updated" },
 ];
@@ -21,17 +23,28 @@ export default function DealTable({
   deals,
   execs,
   onSelect,
+  multiples = [],
 }: {
   deals: Deal[];
   execs: Executive[];
   onSelect: (d: Deal) => void;
+  multiples?: MiMultiple[];
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
 
+  const estOf = (d: Deal) => estimateMultiple(d, multiples);
+
   const sorted = useMemo(() => {
     const arr = [...deals];
     arr.sort((a, b) => {
+      if (sortKey === "estMultiple") {
+        const ea = estOf(a);
+        const eb = estOf(b);
+        const ma = ea ? (ea.effLow + ea.effHigh) / 2 : -1;
+        const mb = eb ? (eb.effLow + eb.effHigh) / 2 : -1;
+        return (ma - mb) * sortDir;
+      }
       const va = a[sortKey];
       const vb = b[sortKey];
       let cmp: number;
@@ -43,7 +56,8 @@ export default function DealTable({
       return cmp * sortDir;
     });
     return arr;
-  }, [deals, sortKey, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deals, sortKey, sortDir, multiples]);
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 1 ? -1 : 1));
@@ -112,6 +126,22 @@ export default function DealTable({
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
                 {d.ebitda != null ? fmtMoney(d.ebitda) : "—"}
+              </td>
+              <td className="whitespace-nowrap px-3 py-2.5">
+                {(() => {
+                  const est = estOf(d);
+                  if (!est) return <span className="text-slate-400">—</span>;
+                  return (
+                    <span title={`${est.baseBasis}. Headline ${est.headlineLow.toFixed(1)}–${est.headlineHigh.toFixed(1)}× before structure.`}>
+                      <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">
+                        {est.effLow.toFixed(1)}–{est.effHigh.toFixed(1)}×
+                      </span>
+                      <span className="block text-[11px] text-slate-400 dark:text-white/40">
+                        eff. EBITDA{est.structureAssumed ? " · typ. structure" : ""}
+                      </span>
+                    </span>
+                  );
+                })()}
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
                 {d.owner || <span className="text-slate-400">Unclaimed</span>}

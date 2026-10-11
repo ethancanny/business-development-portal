@@ -8,7 +8,7 @@ import ExecTable from "@/components/ExecTable";
 import PairingTable, { type Pairing } from "@/components/PairingTable";
 import { DealModal, ExecutiveModal } from "@/components/Modals";
 import PageHero from "@/components/PageHero";
-import { DEAL_STAGES, EXEC_STAGES, type Deal, type Executive } from "@/lib/types";
+import { DEAL_STAGES, EXEC_STAGES, type Deal, type Executive, type MiMultiple } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
 
 export default function Dashboard() {
@@ -23,12 +23,14 @@ export default function Dashboard() {
   const [stageFilter, setStageFilter] = useState("");
   const [dealModal, setDealModal] = useState<{ deal: Deal | null } | null>(null);
   const [execModal, setExecModal] = useState<{ exec: Executive | null } | null>(null);
+  const [multiples, setMultiples] = useState<MiMultiple[]>([]);
 
   const load = async () => {
     try {
-      const [dealsRes, execsRes] = await Promise.all([
+      const [dealsRes, execsRes, multRes] = await Promise.all([
         fetch("/api/deals"),
         fetch("/api/executives"),
+        fetch("/api/market/multiples"),
       ]);
       if (dealsRes.status === 401 || execsRes.status === 401) {
         router.replace("/login");
@@ -36,6 +38,7 @@ export default function Dashboard() {
       }
       if (dealsRes.ok) setDeals(await dealsRes.json());
       if (execsRes.ok) setExecs(await execsRes.json());
+      if (multRes.ok) setMultiples(await multRes.json());
     } finally {
       setLoading(false);
     }
@@ -258,6 +261,7 @@ export default function Dashboard() {
               deals={filteredDeals}
               execs={execs}
               onSelect={(d) => setDealModal({ deal: d })}
+              multiples={multiples}
             />
           ) : (
           <KanbanBoard<Deal>

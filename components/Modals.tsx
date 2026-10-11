@@ -1,8 +1,43 @@
 "use client";
 
-import { useState } from "react";
-import { DEAL_STAGES, EXEC_STAGES, PARTNER_NAMES, type Deal, type Executive } from "@/lib/types";
+import { useEffect, useState } from "react";
+import { DEAL_STAGES, EXEC_STAGES, PARTNER_NAMES, type Deal, type DealDrivers, type Executive, type MiMultiple } from "@/lib/types";
 import { fmtMoney, fmtDate } from "@/lib/format";
+import { DRIVER_DEFS, estimateMultiple, type MultipleEstimate } from "@/lib/valuation";
+
+/** Read-only rendering of a rough multiple estimate (base → drivers →
+ * structure-adjusted effective range). Used in the deal modal's view
+ * and edit modes; the edit mode recomputes it live from the form. */
+function EstimateBody({ est }: { est: MultipleEstimate }) {
+  return (
+    <div className="text-sm">
+      <p>
+        <span className="font-semibold text-slate-900 dark:text-white">
+          {est.effLow.toFixed(1)}–{est.effHigh.toFixed(1)}× EBITDA
+        </span>
+        <span className="text-slate-500 dark:text-white/50">
+          {" "}effective · headline {est.headlineLow.toFixed(1)}–{est.headlineHigh.toFixed(1)}×
+        </span>
+      </p>
+      {est.evLow !== null && est.evHigh !== null && (
+        <p className="text-slate-600 dark:text-[#c8bfa8]">
+          Implied value ≈ {fmtMoney(Math.round(est.evLow))} – {fmtMoney(Math.round(est.evHigh))}
+        </p>
+      )}
+      <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
+        Base {est.base.toFixed(2)}× — {est.baseBasis}
+      </p>
+      {est.driverNotes.map((n, i) => (
+        <p key={i} className="text-xs text-slate-500 dark:text-white/50">{n}</p>
+      ))}
+      <p className="text-xs text-slate-400 dark:text-white/40">
+        Structure{est.structureAssumed ? " (industry-typical, assumed)" : ""}: {est.structure.cash}% cash ·{" "}
+        {est.structure.seller}% seller note · {est.structure.earnout}% earnout · {est.structure.rollover}% rollover
+        → worth about {(est.structureFactor * 100).toFixed(0)}¢ on the dollar today.
+      </p>
+    </div>
+  );
+}
 
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#b8975a] focus:outline-none dark:border-white/15 dark:bg-[#0d1f3c] dark:text-[#e8dfc8] dark:placeholder:text-white/30";
@@ -125,6 +160,11 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     links: (deal?.links ?? [])
       .map((l) => ({ label: l.label ?? "", url: l.url ?? "" }))
       .concat([{ label: "", url: "" }]),
+    drivers: { ...(deal?.drivers ?? {}) } as DealDrivers,
+    cashPct: deal?.structure?.cashPct != null ? String(deal.structure.cashPct) : "",
+    sellerPct: deal?.structure?.sellerPct != null ? String(deal.structure.sellerPct) : "",
+    earnoutPct: deal?.structure?.earnoutPct != null ? String(deal.structure.earnoutPct) : "",
+    rolloverPct: deal?.structure?.rolloverPct != null ? String(deal.structure.rolloverPct) : "",
   });
 
   const setLink = (i: number, k: "label" | "url", v: string) =>
@@ -151,6 +191,54 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  // Valuation estimate: multiples come from Market Intel; the estimate
+  // recomputes live as financials, drivers and structure are recorded.
+  const [multiples, setMultiples] = useState<MiMultiple[]>([]);
+  useEffect(() => {
+    fetch("/api/market/multiples")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setMultiples(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
+
+  const setDriver = (key: keyof DealDrivers, v: string) =>
+    setForm((f) => ({ ...f, drivers: { ...f.drivers, [key]: v as DealDrivers[typeof key] } }));
+
+  const structureFromForm = () => ({
+    cashPct: form.cashPct.trim() === "" ? null : Number(form.cashPct),
+    sellerPct: form.sellerPct.trim() === "" ? null : Number(form.sellerPct),
+    earnoutPct: form.earnoutPct.trim() === "" ? null : Number(form.earnoutPct),
+    rolloverPct: form.rolloverPct.trim() === "" ? null : Number(form.rolloverPct),
+  });
+
+  const formDeal: Deal = {
+    id: deal?.id ?? "new",
+    companyName: form.companyName,
+    industry: form.industry,
+    stage: form.stage,
+    dealValue: Number(form.dealValue) || 0,
+    revenue: form.revenue.trim() === "" ? null : Number(form.revenue) || null,
+    ebitda: form.ebitda.trim() === "" ? null : Number(form.ebitda) || null,
+    askingPrice: form.askingPrice.trim() === "" ? null : Number(form.askingPrice) || null,
+    broker: form.broker,
+    source: form.source,
+    contactName: "",
+    contactEmail: "",
+    notes: "",
+    owner: form.owner,
+    city: form.city,
+    lat: null,
+    lng: null,
+    links: [],
+    operatorIds: form.operatorIds,
+    drivers: form.drivers,
+    structure: structureFromForm(),
+    createdAt: deal?.createdAt ?? "",
+    updatedAt: deal?.updatedAt ?? "",
+  };
+  const est = estimateMultiple(formDeal, multiples);
+  const viewEst = deal ? estimateMultiple(deal, multiples) : null;
+
   const save = async () => {
     if (!form.companyName.trim()) {
       setError("Company name is required");
@@ -167,6 +255,8 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
       ebitda: form.ebitda.trim() === "" ? null : Number(form.ebitda) || null,
       askingPrice:
         form.askingPrice.trim() === "" ? null : Number(form.askingPrice) || null,
+      drivers: form.drivers,
+      structure: structureFromForm(),
     };
     const res = await fetch(isNew ? "/api/deals" : `/api/deals/${deal!.id}`, {
       method: isNew ? "POST" : "PUT",
@@ -270,6 +360,14 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
           <DetailRow label="Notes" value={<span className="whitespace-pre-wrap text-slate-800 dark:text-[#e8dfc8]">{deal.notes}</span>} />
           <DetailRow label="Created" value={fmtDate(deal.createdAt)} />
           <DetailRow label="Updated" value={fmtDate(deal.updatedAt)} />
+          {viewEst && (
+            <div className="py-3">
+              <p className="mb-1 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
+                Estimated multiple (rough — sharpens as more is recorded)
+              </p>
+              <EstimateBody est={viewEst} />
+            </div>
+          )}
           <div className="flex gap-2 pt-4">
             <button
               onClick={() => setEditing(true)}
@@ -346,6 +444,55 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
                 placeholder="—"
               />
             </Field>
+          </div>
+          <div className="rounded-xl border border-slate-200 p-3 dark:border-white/10">
+            <p className="mb-1 text-sm font-semibold text-slate-900 dark:text-white">
+              Valuation estimate — rough, updates as you record more
+            </p>
+            {est ? (
+              <EstimateBody est={est} />
+            ) : (
+              <p className="text-xs text-slate-400 dark:text-white/40">
+                Needs an industry that matches Market Intel plus revenue/EBITDA on the deal.
+              </p>
+            )}
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {DRIVER_DEFS.map((def) => (
+                <label key={def.key} className="block">
+                  <span className={labelCls}>{def.label}</span>
+                  <select
+                    className={inputCls}
+                    value={form.drivers[def.key] ?? ""}
+                    onChange={(e) => setDriver(def.key, e.target.value)}
+                  >
+                    <option value="">Not noted yet</option>
+                    <option value="neg">{def.negLabel} (−{def.weight.toFixed(2)}×)</option>
+                    <option value="neu">{def.neuLabel} (no change)</option>
+                    <option value="pos">{def.posLabel} (+{def.weight.toFixed(2)}×)</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+            <p className="mt-3 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
+              Expected structure (% of value) — leave blank to assume the industry-typical mix
+            </p>
+            <div className="mt-1 grid grid-cols-4 gap-2">
+              <Field label="Cash %">
+                <input type="number" min="0" max="100" className={inputCls} value={form.cashPct} onChange={set("cashPct")} placeholder="—" />
+              </Field>
+              <Field label="Seller %">
+                <input type="number" min="0" max="100" className={inputCls} value={form.sellerPct} onChange={set("sellerPct")} placeholder="—" />
+              </Field>
+              <Field label="Earnout %">
+                <input type="number" min="0" max="100" className={inputCls} value={form.earnoutPct} onChange={set("earnoutPct")} placeholder="—" />
+              </Field>
+              <Field label="Rollover %">
+                <input type="number" min="0" max="100" className={inputCls} value={form.rolloverPct} onChange={set("rolloverPct")} placeholder="—" />
+              </Field>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
+              Structure changes what a headline multiple is worth today: cash counts at face value, a seller note ~95¢, rollover ~90¢, an earnout ~60¢ on the dollar.
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Broker / intermediary">
