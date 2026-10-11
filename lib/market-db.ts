@@ -523,26 +523,31 @@ export async function getUpdates(): Promise<UpdateItem[]> {
   const db = sql();
   const items: UpdateItem[] = [];
   const cutoff = new Date(Date.now() - 7 * 864e5).toISOString();
-  const compRows = (await db`SELECT name, sector, city, source, signal_value, first_seen FROM mi_companies WHERE first_seen >= ${cutoff} AND details LIKE '{%' AND (details::jsonb ->> 'consolidated') IS DISTINCT FROM 'true' ORDER BY first_seen DESC LIMIT 400`) as unknown as Record<string, unknown>[];
-  const groupKeys: string[] = [];
-  const groups = new Map<string, Record<string, unknown>[]>();
-  for (const r of compRows) {
-    const kind = String(r.source).includes("ROC") ? "license" : "business";
-    const key = kind;
-    if (!groups.has(key)) groupKeys.push(key);
-    const list = groups.get(key) ?? [];
-    list.push(r);
-    groups.set(key, list);
-  }
-  for (const key of groupKeys) {
-    const list = groups.get(key) ?? [];
-    const kind = key as UpdateItem["kind"];
-    const top = list[0];
+  // Counts come from COUNT(*) aggregates — the old code counted a
+  // LIMIT 400 sample, so the card silently capped at +400 whenever
+  // more than 400 rows were new (e.g. after the Oct 9 rebuild).
+  const compAgg = (await db`
+    SELECT (CASE WHEN source LIKE '%ROC%' THEN 'license' ELSE 'business' END) AS kind,
+           COUNT(*)::int AS n, MAX(first_seen) AS latest
+    FROM mi_companies
+    WHERE first_seen >= ${cutoff} AND details LIKE '{%' AND (details::jsonb ->> 'consolidated') IS DISTINCT FROM 'true'
+    GROUP BY 1 ORDER BY latest DESC`) as unknown as Record<string, unknown>[];
+  const compLatest = (await db`
+    SELECT DISTINCT ON ((CASE WHEN source LIKE '%ROC%' THEN 'license' ELSE 'business' END))
+           (CASE WHEN source LIKE '%ROC%' THEN 'license' ELSE 'business' END) AS kind,
+           name, sector, city, first_seen
+    FROM mi_companies
+    WHERE first_seen >= ${cutoff} AND details LIKE '{%' AND (details::jsonb ->> 'consolidated') IS DISTINCT FROM 'true'
+    ORDER BY 1, first_seen DESC`) as unknown as Record<string, unknown>[];
+  for (const agg of compAgg) {
+    const kind = String(agg.kind) as UpdateItem["kind"];
+    const top = compLatest.find((r) => String(r.kind) === kind);
+    if (!top) continue;
     items.push({
       kind,
-      title: `+${list.length} new ${kind === "license" ? "licensed contractors" : "companies"}`,
+      title: `+${Number(agg.n)} new ${kind === "license" ? "licensed contractors" : "companies"}`,
       detail: `Latest: ${String(top.name)}${top.city ? ` · ${String(top.city)}` : ""} · ${String(top.sector)}`,
-      ts: String(top.first_seen),
+      ts: String(agg.latest ?? top.first_seen),
     });
   }
   const listAgg = (await db`SELECT COUNT(*)::int AS n, MAX(first_seen) AS latest FROM mi_listings WHERE first_seen >= ${cutoff}`) as unknown as Record<string, unknown>[];
@@ -556,16 +561,23 @@ export async function getUpdates(): Promise<UpdateItem[]> {
       ts: String(listAgg[0]?.latest ?? cutoff),
     });
   }
-  const acqAgg = (await db`SELECT COUNT(*)::int AS n, MAX(created_at) AS latest FROM mi_acquisitions WHERE event_type = 'acquisition' AND created_at >= ${cutoff}`) as unknown as Record<string, unknown>[];
+  // Count exactly what the Acquisitions tab shows: announced in
+  // the last 7 days, not dismissed, Arizona place in the
+  // headline/target/location. (Oct 11, 2026 fix — this used to
+  // count created_at, so every re-ingested old story counted as
+  // new: the card claimed +20 while the tab showed 1.)
+  const cutoffDate = cutoff.slice(0, 10);
+  const AZ_PLACE = "\\y(arizona|phoenix|scottsdale|tempe|mesa|tucson|chandler|gilbert|glendale|peoria|surprise|flagstaff|yuma|prescott|avondale|goodyear|buckeye|queen creek|maricopa|pinal|sedona|lake havasu)\\y";
+  const acqAgg = (await db`SELECT COUNT(*)::int AS n, MAX(announced_date) AS latest FROM mi_acquisitions WHERE event_type = 'acquisition' AND status <> 'dismissed' AND announced_date >= ${cutoffDate} AND (COALESCE(headline, '') || ' ' || COALESCE(target, '') || ' ' || COALESCE(target_location, '')) ~* ${AZ_PLACE}`) as unknown as Record<string, unknown>[];
   const acqCount = Number(acqAgg[0]?.n ?? 0);
   if (acqCount > 0) {
-    const acqLatest = (await db`SELECT headline, target FROM mi_acquisitions WHERE event_type = 'acquisition' AND created_at >= ${cutoff} ORDER BY created_at DESC LIMIT 1`) as unknown as Record<string, unknown>[];
+    const acqLatest = (await db`SELECT headline, target FROM mi_acquisitions WHERE event_type = 'acquisition' AND status <> 'dismissed' AND announced_date >= ${cutoffDate} AND (COALESCE(headline, '') || ' ' || COALESCE(target, '') || ' ' || COALESCE(target_location, '')) ~* ${AZ_PLACE} ORDER BY announced_date DESC LIMIT 1`) as unknown as Record<string, unknown>[];
     const latestLabel = String(acqLatest[0]?.headline || acqLatest[0]?.target || "");
     items.push({
       kind: "acquisition",
       title: `+${acqCount} local acquisitions`,
       detail: latestLabel ? `Latest: ${latestLabel}` : "Announced in the last 7 days",
-      ts: String(acqAgg[0]?.latest ?? cutoff),
+      ts: String(acqAgg[0]?.latest ?? cutoffDate),
     });
   }
   const multRows = (await db`SELECT industry, size_band, period, ev_ebitda_median, ev_revenue_median, created_at FROM mi_multiples ORDER BY industry ASC, size_band ASC, period ASC`) as unknown as Record<string, unknown>[];
