@@ -149,6 +149,34 @@ function filterSince<T extends { date: string }>(rows: T[], cutoff: string): T[]
   return rows.filter((r) => r.date >= cutoff);
 }
 
+function primeStats(
+  obs: MiIndicatorObs[]
+): { latest: number; date: string; m1: number | null; y1: number | null } | null {
+  const rows = obs
+    .filter((o) => o.seriesId === "DPRIME" && o.value !== null)
+    .slice()
+    .sort((a, b) => (a.obsDate < b.obsDate ? -1 : 1));
+  if (!rows.length) return null;
+  const last = rows[rows.length - 1];
+  const at = (days: number) => {
+    const t = new Date(new Date(last.obsDate).getTime() - days * 86400000).toISOString().slice(0, 10);
+    let best: MiIndicatorObs | null = null;
+    for (const r of rows) {
+      if (r.obsDate <= t) best = r;
+      else break;
+    }
+    return best;
+  };
+  const m = at(30);
+  const y = at(365);
+  return {
+    latest: last.value!,
+    date: last.obsDate,
+    m1: m && m.value !== null && last.value !== null ? last.value - m.value : null,
+    y1: y && y.value !== null && last.value !== null ? last.value - y.value : null,
+  };
+}
+
 function yoyChange(obs: MiIndicatorObs[], seriesId: string): number | null {
   const s = obs.filter((o) => o.seriesId === seriesId && o.value !== null).sort((a, b) => (a.obsDate < b.obsDate ? -1 : 1));
   if (s.length < 13) return null;
@@ -289,10 +317,31 @@ export default function MarketIntelPage() {
   const rateRows = useMemo(() => {
     const d = new Date();
     d.setFullYear(d.getFullYear() - 3);
-    return filterSince(
+    const rows = filterSince(
       seriesToRows(obs.filter((o) => ["DPRIME", "DGS10", "SOFR"].includes(o.seriesId)), ["DPRIME", "DGS10", "SOFR"]),
       d.toISOString().slice(0, 10)
     );
+    // SBA 7(a) max for loans over $350K rides on prime (+3.00%).
+    return rows.map((r) =>
+      typeof r.DPRIME === "number" ? { ...r, SBA_MAX: Math.round((r.DPRIME + 3) * 100) / 100 } : r
+    );
+  }, [obs]);
+  const sbaRows = useMemo(() => {
+    const p = primeStats(obs);
+    if (!p) return [];
+    const bands = [
+      { band: "over $350K", spread: 3 },
+      { band: "$250–350K", spread: 4.5 },
+      { band: "$50–250K", spread: 6 },
+      { band: "$50K or less", spread: 6.5 },
+    ];
+    return bands.map((b) => ({
+      ...b,
+      value: Math.round((p.latest + b.spread) * 100) / 100,
+      date: p.date,
+      m1: p.m1,
+      y1: p.y1,
+    }));
   }, [obs]);
   const rateStats = useMemo(() => {
     const defs = [
@@ -1451,7 +1500,7 @@ export default function MarketIntelPage() {
           </SubSection>
           <SubSection title="Market Rates">
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-              The rates the pipeline valuation model prices against — FRED, refreshed daily with the other indicators. The 10-year is cross-checked against CBOE ^TNX on every ingest (rates-xcheck in the sync log).
+              The benchmarks are FRED, refreshed daily with the other indicators; the 10-year is cross-checked against CBOE ^TNX on every ingest (rates-xcheck in the sync log). The SBA 7(a) maximums are prime plus the SBA's published spreads (SOP 50 10), so they move with the prime rate tracked here — and the over-$350K SBA rate is the discount rate the pipeline valuation model prices deal paper against.
             </p>
             <div className={tableWrap}>
               <table className="w-full">
@@ -1470,6 +1519,15 @@ export default function MarketIntelPage() {
                       <td className={td}>{r.name}</td>
                       <td className={td}>{r.latest !== null ? `${r.latest.toFixed(2)}%` : "—"}</td>
                       <td className={td}>{r.date || "—"}</td>
+                      <td className={td}>{r.m1 !== null ? `${r.m1 >= 0 ? "+" : ""}${Math.round(r.m1 * 100)} bps` : "—"}</td>
+                      <td className={td}>{r.y1 !== null ? `${r.y1 >= 0 ? "+" : ""}${Math.round(r.y1 * 100)} bps` : "—"}</td>
+                    </tr>
+                  ))}
+                  {sbaRows.map((r) => (
+                    <tr key={r.band} className="border-b border-slate-100 last:border-0 dark:border-white/5">
+                      <td className={td}>SBA 7(a) max — loans {r.band} (prime + {r.spread.toFixed(2)}%)</td>
+                      <td className={td}>{r.value.toFixed(2)}%</td>
+                      <td className={td}>{r.date}</td>
                       <td className={td}>{r.m1 !== null ? `${r.m1 >= 0 ? "+" : ""}${Math.round(r.m1 * 100)} bps` : "—"}</td>
                       <td className={td}>{r.y1 !== null ? `${r.y1 >= 0 ? "+" : ""}${Math.round(r.y1 * 100)} bps` : "—"}</td>
                     </tr>
@@ -1503,6 +1561,7 @@ export default function MarketIntelPage() {
                     <Line type="monotone" dataKey="DPRIME" name="Prime" stroke={gold} strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="DGS10" name="10-Yr Treasury" stroke={blue} strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="SOFR" name="SOFR" stroke={green} strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="SBA_MAX" name="SBA 7(a) max >$350K" stroke={orange} strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
