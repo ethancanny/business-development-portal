@@ -207,7 +207,7 @@ export default function MarketIntelPage() {
   const [latest, setLatest] = useState<LatestMap>({});
   const [obs, setObs] = useState<MiIndicatorObs[]>([]);
   const [tab, setTab] = useState<Tab>("acquisitions");
-  const [bottomTab, setBottomTab] = useState<"deals" | "econ">("deals");
+  const [bottomTab, setBottomTab] = useState<"deals" | "econ">("econ");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [acquisitions, setAcquisitions] = useState<MiAcquisition[]>([]);
   const [filings, setFilings] = useState<MiFiling[]>([]);
@@ -1371,11 +1371,11 @@ export default function MarketIntelPage() {
           </div>
         </FullSection>
 
-        {/* Bottom reference block — tabbed: Acquisitions & Filings (default) | Arizona Economic Data */}
+        {/* Bottom reference block — tabbed: Arizona Economic Data (default, left) | Acquisitions & Filings */}
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white/60 p-3 dark:border-white/10 dark:bg-[#132847]/30 sm:p-4">
           <div className="mb-2 flex flex-wrap items-center gap-2 border-b-2 border-[#b8975a]/50 pb-3">
-            <button onClick={() => setBottomTab("deals")} className={tabBtn(bottomTab === "deals")}>Acquisitions &amp; Filings</button>
             <button onClick={() => setBottomTab("econ")} className={tabBtn(bottomTab === "econ")}>Arizona Economic Data</button>
+            <button onClick={() => setBottomTab("deals")} className={tabBtn(bottomTab === "deals")}>Acquisitions &amp; Filings</button>
             <span className="ml-auto hidden text-xs text-slate-400 dark:text-white/40 sm:block">
               {bottomTab === "deals" ? "AZ acquisitions and SEC filings · last 7 days only" : "State indicators, budget, demographics, permitting & WARN"}
             </span>
