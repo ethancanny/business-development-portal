@@ -134,7 +134,7 @@ export default function DealTable({
                   const est = estOf(d);
                   if (!est) return <span className="text-slate-400">—</span>;
                   return (
-                    <span title={`${est.baseBasis}. Effective ${est.effLow.toFixed(1)}–${est.effHigh.toFixed(1)}× after discounting the headline (${est.headlineSource}) for expected payout + time value. Our estimate: ${est.cashEqLow.toFixed(1)}–${est.cashEqHigh.toFixed(1)}× cash-equivalent.`}>
+                    <span title={`${est.baseBasis}. Effective ${est.effLow.toFixed(1)}–${est.effHigh.toFixed(1)}× after discounting the headline (${est.headlineSource}) for expected payout + time value. Our estimate: ${est.cashEqLow.toFixed(1)}–${est.cashEqHigh.toFixed(1)}× cash-equivalent. Effective sits ${est.gapX >= 0 ? "+" : "−"}${Math.abs(est.gapX).toFixed(2)}× vs our estimate.`}>
                       <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">
                         {est.headlineLow.toFixed(1) === est.headlineHigh.toFixed(1)
                           ? `${est.headlineLow.toFixed(1)}×`
@@ -143,7 +143,7 @@ export default function DealTable({
                       <span className="block text-[11px] text-slate-400 dark:text-white/40">
                         headline · eff. {est.effLow.toFixed(1) === est.effHigh.toFixed(1)
                           ? `${est.effLow.toFixed(1)}×`
-                          : `${est.effLow.toFixed(1)}–${est.effHigh.toFixed(1)}×`}{est.structureAssumed ? " · typ. structure" : ""}
+                          : `${est.effLow.toFixed(1)}–${est.effHigh.toFixed(1)}×`}{est.structureAssumed ? " · typ. structure" : ""} · {est.gapX >= 0 ? "+" : "−"}{Math.abs(est.gapX).toFixed(1)} vs est
                       </span>
                     </span>
                   );

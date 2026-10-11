@@ -218,6 +218,21 @@ export interface MultipleEstimate {
   /** Growth-outlook adjustment (its own layer, from growthPct). */
   growthAdj: number;
   growthNote: string | null;
+  /** Our estimate midpoint (base + drivers + growth) — the
+   * cash-equivalent multiple we would underwrite. */
+  ourMid: number;
+  /** Effective multiple midpoint (headline × structure factor). */
+  effMid: number;
+  /** effMid − ourMid: how far the stated deal's effective
+   * multiple sits above (+) or below (−) our estimate — the
+   * reconciliation between the market, headline and effective
+   * multiples. gapDollars is the same gap in EV dollars. */
+  gapX: number;
+  gapDollars: number | null;
+  /** True when the headline is a stated price (structure
+   * amounts or asking price); false when it is derived from our
+   * estimate at the structure mix (so it tracks our estimate). */
+  headlineLocked: boolean;
   driverNotes: string[];
   /** Estimated cash-equivalent multiple range (base + drivers) —
    * what we'd estimate the business is worth, before any stated price. */
@@ -433,6 +448,10 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
   const headlineHigh =
     statedEvHigh !== null && deal.ebitda ? statedEvHigh / deal.ebitda : cashEqHigh / structureFactor;
   const effLow = headlineLow * structureFactor;
+  const effMid = ((headlineLow + headlineHigh) / 2) * structureFactor;
+  const gapX = effMid - mid;
+  const gapDollars = deal.ebitda ? gapX * deal.ebitda : null;
+  const headlineLocked = headlineSource !== "derived from the estimate at the structure mix";
   const effHigh = headlineHigh * structureFactor;
   const effEvLow = deal.ebitda ? effLow * deal.ebitda : null;
   const effEvHigh = deal.ebitda ? effHigh * deal.ebitda : null;
@@ -445,6 +464,11 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
     driverAdj,
     growthAdj,
     growthNote,
+    ourMid: mid,
+    effMid,
+    gapX,
+    gapDollars,
+    headlineLocked,
     driverNotes,
     cashEqLow,
     cashEqHigh,
