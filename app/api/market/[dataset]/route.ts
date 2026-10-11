@@ -33,6 +33,7 @@ const DATASETS = [
   "companies",
   "updates",
   "multiples",
+  "rates",
   "acquisitions",
   "filings",
   "warn",
@@ -77,6 +78,23 @@ export async function GET(
       }
       case "multiples":
         return NextResponse.json(await getMultiples());
+      case "rates": {
+        const rows = await getIndicatorSeries(["DPRIME", "SOFR", "DGS10", "DGS2", "DFF"]);
+        const latest = (id: string) => {
+          const r = rows
+            .filter((o) => o.seriesId === id && o.value !== null)
+            .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+          const l = r[r.length - 1];
+          return l ? { value: l.value, date: l.obsDate } : null;
+        };
+        return NextResponse.json({
+          prime: latest("DPRIME"),
+          sofr: latest("SOFR"),
+          treasury10y: latest("DGS10"),
+          treasury2y: latest("DGS2"),
+          fedFunds: latest("DFF"),
+        });
+      }
       case "acquisitions":
         return NextResponse.json(await getAcquisitions(sp.get("status") ?? undefined));
       case "filings":

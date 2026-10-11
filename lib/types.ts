@@ -39,6 +39,11 @@ export interface DealStructureInput {
   sellerAmt?: number | null;
   earnoutAmt?: number | null;
   rolloverAmt?: number | null;
+  /** Seller note terms, when known — the note is then priced off its
+   * actual rate/term against the market prime rate instead of the
+   * flat 95¢ default. */
+  sellerRatePct?: number | null;
+  sellerTermYrs?: number | null;
   cashPct?: number | null;
   sellerPct?: number | null;
   earnoutPct?: number | null;
