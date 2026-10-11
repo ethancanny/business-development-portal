@@ -143,7 +143,9 @@ export async function ingestIndicators(): Promise<number> {
     });
     const yj = (await yres.json()) as { chart?: { result?: { meta?: { regularMarketPrice?: number } }[] } };
     const tnxRaw = yj?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    const tnx = typeof tnxRaw === "number" ? tnxRaw / 10 : null;
+    // ^TNX is usually quoted ×10 (42.5 = 4.25%) but some feeds return
+    // the plain yield — normalize by magnitude.
+    const tnx = typeof tnxRaw === "number" ? (tnxRaw > 20 ? tnxRaw / 10 : tnxRaw) : null;
     if (last10 && last10.value !== null && tnx !== null) {
       const diff = Math.abs(tnx - last10.value);
       await logSync(
