@@ -1312,6 +1312,10 @@ export default function MarketIntelPage() {
           </div>
         )}
 
+        <FullSection kicker="Consolidated targets" title="★ Fit Targets" sub="Every company that passes Canny’s fit rules, across all focus industries — switch industries, expand a row, and convert a fit straight into the pipeline">
+          <FitTargets />
+        </FullSection>
+
         {/* Combined Industries & Multiples (Oct 10, 2026 redo) + consolidated Fit Targets */}
         <FullSection kicker="Start here — the valuation yardstick" title="Industries & Multiples" sub="One home for industries and their multiples — switch industries at the top for multiples by subindustry and the typical deal structure in each; best guesses are flagged est where no multiple is published">
           <div className="rounded-2xl border border-[#b8975a]/40 bg-gradient-to-br from-[#e6edf6] via-white to-[#f7f1e3] p-3 shadow-sm dark:from-[#132847] dark:via-[#0d1f3c] dark:to-[#1a3358] sm:p-4">
@@ -1323,10 +1327,6 @@ export default function MarketIntelPage() {
               extras={sectorExtras}
             />
           </div>
-        </FullSection>
-
-        <FullSection kicker="Consolidated targets" title="★ Fit Targets" sub="Every company that passes Canny’s fit rules, across all focus industries — switch industries, expand a row, and convert a fit straight into the pipeline">
-          <FitTargets />
         </FullSection>
 
         {/* Bottom reference block — tabbed: Acquisitions & Filings (default) | Arizona Economic Data */}
