@@ -16,13 +16,13 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
           {est.headlineLow.toFixed(1)}–{est.headlineHigh.toFixed(1)}× EBITDA
         </span>
         <span className="text-slate-500 dark:text-white/50">
-          {" "}headline at this structure · cash-equivalent {est.cashEqLow.toFixed(1)}–{est.cashEqHigh.toFixed(1)}×
+          {" "}headline at this structure · effective {est.cashEqLow.toFixed(1)}–{est.cashEqHigh.toFixed(1)}× (cash-equivalent)
         </span>
       </p>
       {est.evLow !== null && est.evHigh !== null && est.statedEvLow !== null && est.statedEvHigh !== null && (
         <p className="text-slate-600 dark:text-[#c8bfa8]">
           Stated price ≈ {fmtMoney(Math.round(est.statedEvLow))} – {fmtMoney(Math.round(est.statedEvHigh))}
-          {" · "}cash-equivalent value ≈ {fmtMoney(Math.round(est.evLow))} – {fmtMoney(Math.round(est.evHigh))}
+          {" · "}effective value ≈ {fmtMoney(Math.round(est.evLow))} – {fmtMoney(Math.round(est.evHigh))}
         </p>
       )}
       <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
@@ -35,7 +35,7 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
         Structure{est.structureAssumed ? " (industry-typical, assumed)" : ""}: {est.structure.cash}% cash ·{" "}
         {est.structure.seller}% seller note · {est.structure.earnout}% earnout · {est.structure.rollover}% rollover
         → the deferred/contingent pieces lift the headline multiple ~{(est.structureUplift * 100).toFixed(0)}% above
-        cash-equivalent (each stated dollar is worth ~{(est.structureFactor * 100).toFixed(0)}¢ in cash terms).
+        the effective multiple (each stated dollar is worth ~{(est.structureFactor * 100).toFixed(0)}¢ in cash terms).
       </p>
     </div>
   );
