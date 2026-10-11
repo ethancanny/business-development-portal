@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import MultiplesPanel from "@/components/MultiplesPanel";
+import { SubSection } from "@/components/market-sections";
 import type { MiMultiple } from "@/lib/types";
 
 /** Combined Industries & Multiples explorer (Ethan, Oct 10, 2026 —
@@ -379,7 +380,7 @@ export default function IndustryExplorer({
                 key={sub}
                 onMouseEnter={() => setHovRow(`${group}:${sub}`)}
                 onMouseLeave={() => setHovRow("")}
-                style={rowStyle(`${group}:${sub}`, group === "Aerospace & Defense")}
+                style={rowStyle(`${group}:${sub}`)}
                 className="border-b border-slate-100 dark:border-white/5"
               >
                 <td className={`${td} font-medium`}>{sub}</td>
@@ -485,7 +486,7 @@ export default function IndustryExplorer({
                         onClick={() => setOpenGroup(openGroup === g ? null : g)}
                         onMouseEnter={() => setHovRow(`overall:${g}`)}
                         onMouseLeave={() => setHovRow("")}
-                        style={rowStyle(`overall:${g}`, g === "Aerospace & Defense")}
+                        style={rowStyle(`overall:${g}`)}
                         className="cursor-pointer border-b border-slate-100 dark:border-white/5"
                       >
                         <td className={`${td} font-medium`}>{FOCUS.includes(g) ? "★ " : ""}{g}</td>
@@ -514,8 +515,10 @@ export default function IndustryExplorer({
             </div>
           </div>
 
-          <div className="mt-4">
-            <MultiplesPanel multiples={multiples} dark={dark} onAdded={onMultiplesAdded} />
+          <div className="mt-5 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0">
+            <SubSection title="Multiples log & full list">
+              <MultiplesPanel multiples={multiples} dark={dark} onAdded={onMultiplesAdded} />
+            </SubSection>
           </div>
         </div>
       )}

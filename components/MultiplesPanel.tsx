@@ -85,10 +85,10 @@ export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples
           </tr></thead>
           <tbody>
             {multiples.map((m) => (
-              <tr key={m.id} {...rowProps(`mult:${m.id}`, /aerospace|defense/i.test(m.industry || ""))}>
+              <tr key={m.id} {...rowProps(`mult:${m.id}`)}>
                 <td className="px-3 py-2 text-sm font-medium text-slate-700 dark:text-white/80">{m.sourceReport}{m.sizeBand && <span className="block text-xs text-slate-400">{m.sizeBand}</span>}</td>
                 <td className="px-3 py-2 text-sm text-slate-700 dark:text-white/80">{m.period}</td>
-                <td className="px-3 py-2 text-sm text-slate-700 dark:text-white/80">{m.industry || "—"}{/aerospace|defense/i.test(m.industry || "") && <span className="ml-2 rounded bg-[#b8975a] px-1.5 py-0.5 text-[10px] font-bold text-white">★ A&D</span>}</td>
+                <td className="px-3 py-2 text-sm text-slate-700 dark:text-white/80">{m.industry || "—"}</td>
                 <td className="px-3 py-2 text-sm text-slate-700 dark:text-white/80">
                   {m.evEbitdaMedian ? `${m.evEbitdaMedian}x` : m.evEbitdaLow && m.evEbitdaHigh ? `${m.evEbitdaLow}–${m.evEbitdaHigh}x` : "—"}
                 </td>
