@@ -173,20 +173,6 @@ const JUNK =
 const MARKET_POLICY =
   /\b(budget|spending|tax|funding|funds|bond|incentive|appropriation|infrastructure|water|housing|economic|business|jobs|tariff|zoning|permit|development|revenue|fiscal|subsid|grant|loan|credit|semiconductor|energy|broadband)\b/i;
 
-/** Color the change figure inside an anomaly headline (▲ green, ▼ red). */
-function renderAnomalyValue(value: string) {
-  const m = value.match(/^(.*?)([▲▼][\d.]+(?:%|pp))(.*)$/);
-  if (!m) return value;
-  const up = m[2].startsWith("▲");
-  return (
-    <>
-      {m[1]}
-      <span className={up ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>{m[2]}</span>
-      {m[3]}
-    </>
-  );
-}
-
 export default function MarketIntelPage() {
   const { theme } = useTheme();
   const dark = theme === "dark";
@@ -563,113 +549,76 @@ export default function MarketIntelPage() {
         : null;
     const permitChg =
       pLast && avg12 ? (((pLast.value || 0) - avg12) / avg12) * 100 : null;
-    // 🔎 Top Anomaly — scan every source for the reading that "usually
-    // doesn't happen" and surface the single biggest deviation.
-    type Cand = { score: number; headline: string; detail: string };
-    const cands: Cand[] = [];
+    // ⭐ Top Market Event — the single biggest Arizona story of the
+    // last 2 days, scored the way Major Events ranks marquee stories
+    // (money first, then scale, acquisition/IPO, focus-industry fit;
+    // bankruptcies count too — Ethan never wants to learn about one
+    // late). Replaces the old Top Anomaly card (Oct 10, 2026).
     const now = Date.now();
-    const d90 = 90 * 864e5;
-    const sumWin = (from: number, to: number) =>
-      warn
-        .filter((w) => {
-          if (!w.noticeDate || !w.headcount) return false;
-          const t = new Date(w.noticeDate).getTime();
-          return t >= from && t < to;
-        })
-        .reduce((s, w) => s + (w.headcount || 0), 0);
-    const layNow = sumWin(now - d90, now + 1);
-    const layPrev = sumWin(now - 2 * d90, now - d90);
-    // Layoffs only qualify as an anomaly on a MASSIVE increase (Ethan's
-    // rule) — a drop in layoffs, or a small uptick, is not anomaly-worthy.
-    if (layPrev > 0 && layNow >= 500) {
-      const chg = ((layNow - layPrev) / layPrev) * 100;
-      if (chg >= 50) {
-        cands.push({
-          score: Math.abs(chg),
-          headline: `Layoffs ▲${Math.round(chg)}%`,
-          detail: `${layNow.toLocaleString()} workers in 90 days vs ${layPrev.toLocaleString()} prior · WARN`,
-        });
-      }
-    }
-    if (permitChg !== null && pLast && avg12) {
-      cands.push({
-        score: Math.abs(permitChg),
-        headline: `Permits ${permitChg >= 0 ? "▲" : "▼"}${Math.abs(Math.round(permitChg))}%`,
-        detail: `${Math.round(pLast.value || 0).toLocaleString()} permits in ${pLast.obsDate.slice(0, 7)} vs ${Math.round(avg12).toLocaleString()} 1-yr avg · FRED`,
-      });
-    }
-    // Defense candidate = trailing-12-month change. Monthly obligations are
-    // far too lumpy for single-month or calendar-YTD readings (a few giant
-    // awards land in single months — the old YTD framing showed +70% while
-    // the TTM figure was +39%); trailing zero months are unposted
-    // USASpending data, not real zeros.
-    const dodObs = obs
-      .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.value !== null)
-      .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
-    while (dodObs.length > 0 && dodObs[dodObs.length - 1].value === 0) dodObs.pop();
-    if (dodObs.length >= 24) {
-      const ttm = dodObs.slice(-12).reduce((s, o) => s + (o.value || 0), 0);
-      const ttmPrev = dodObs.slice(-24, -12).reduce((s, o) => s + (o.value || 0), 0);
-      if (ttmPrev > 0) {
-        const chg = ((ttm - ttmPrev) / ttmPrev) * 100;
-        const fmtB = (v: number) => (v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : `$${Math.round(v / 1e6)}M`);
-        cands.push({
-          score: Math.abs(chg),
-          headline: `Defense $ ${chg >= 0 ? "▲" : "▼"}${Math.abs(Math.round(chg))}% TTM`,
-          detail: `${fmtB(ttm)} obligated in AZ, 12 mo thru ${dodObs[dodObs.length - 1].obsDate.slice(0, 7)} vs ${fmtB(ttmPrev)} prior 12 mo · USASpending`,
-        });
-      }
-    }
-    const urObs = obs
-      .filter((o) => o.seriesId === "AZUR" && o.value !== null)
-      .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
-    const urLast = urObs[urObs.length - 1];
-    const urPrev = urObs[urObs.length - 4];
-    if (urLast && urPrev) {
-      const dpp = (urLast.value || 0) - (urPrev.value || 0);
-      if (Math.abs(dpp) >= 0.2) {
-        cands.push({
-          score: Math.abs(dpp) * 30,
-          headline: `Jobless ${dpp >= 0 ? "▲" : "▼"}${Math.abs(dpp).toFixed(1)}pp`,
-          detail: `AZ unemployment ${urLast.value}% vs ${urPrev.value}% three months ago · BLS`,
-        });
-      }
-    }
-    const bkCutoff = new Date(now - 30 * 864e5).toISOString().slice(0, 10);
-    const bk = acquisitions.filter(
-      (a) => a.eventType === "bankruptcy" && a.status !== "dismissed" && a.announcedDate >= bkCutoff
+    const evtCutoff = new Date(now - 1 * 864e5).toISOString().slice(0, 10);
+    const evtScore = (a: MiAcquisition): number => {
+      let s = 0;
+      const dv = a.dealValue ?? null;
+      if (dv) s += dv >= 1e8 ? 100 : dv >= 2.5e7 ? 60 : dv >= 5e6 ? 30 : 15;
+      const text = `${a.headline || ""} ${a.summary || ""}`;
+      if (!dv && /\$\s?\d/.test(text)) s += 10;
+      if (/\d[\d,]*\s*(jobs|employees|square|sq\.?\s?ft|acres)/i.test(text)) s += 15;
+      if (a.eventType === "acquisition" || a.eventType === "ipo") s += 10;
+      if (["Aerospace & Defense", "Healthcare", "Advanced Manufacturing", "Specialty Trades & Construction"].includes(a.industry)) s += 10;
+      if (a.eventType === "bankruptcy") s += 20;
+      return s;
+    };
+    const evtPool = acquisitions.filter(
+      (a) => a.status !== "dismissed" && a.announcedDate && a.announcedDate >= evtCutoff
     );
-    if (bk.length >= 2) {
-      cands.push({
-        score: bk.length * 12,
-        headline: `${bk.length} bankruptcies / 30 days`,
-        detail: bk.slice(0, 3).map((a) => a.target).join(" · "),
-      });
-    }
-    cands.sort((a, b) => b.score - a.score);
-    const anomalyCard = cands[0]
+    const topEvt = evtPool
+      .slice()
+      .sort((x, y) => evtScore(y) - evtScore(x) || (y.announcedDate || "").localeCompare(x.announcedDate || ""))[0];
+    const EVT_KIND: Record<string, string> = {
+      acquisition: "Acquisition",
+      bankruptcy: "Bankruptcy",
+      expansion: "Expansion",
+      contract: "Contract award",
+      relocation: "Relocation",
+      ipo: "IPO",
+      investment: "New investment",
+      layoffs: "Layoffs",
+      policy: "Market policy",
+    };
+    const topEventCard = topEvt
       ? {
-          label: "🔎 Top Anomaly",
-          value: cands[0].headline,
-          date: cands[0].detail,
+          label: "⭐ Top Market Event",
+          value: topEvt.headline || topEvt.target || "—",
+          date: `${EVT_KIND[topEvt.eventType] ?? topEvt.eventType} · ${topEvt.announcedDate ?? ""}${
+            topEvt.dealValue
+              ? ` · $${topEvt.dealValue >= 1e7 ? Math.round(topEvt.dealValue / 1e6) : (topEvt.dealValue / 1e6).toFixed(1)}M`
+              : ""
+          } · see Major Events below`,
           chg: null,
           chgLabel: undefined,
           invert: false,
         }
       : null;
-    // Acquisition-search cards: live deal flow awaiting triage, the size
-    // of the focus-sector target universe, and distress signals.
-    const forSale = dealFlow.filter((i) => i.kind === "business_for_sale" && i.status === "new");
-    const weekAgo = now - 7 * 864e5;
-    const newThisWeek = forSale.filter(
-      (i) => i.createdAt && new Date(i.createdAt).getTime() >= weekAgo
-    ).length;
-    const saleCard = {
-      label: "🏷 Businesses For Sale",
-      value: forSale.length.toLocaleString(),
-      date: `awaiting triage in Activity${newThisWeek ? ` · ${newThisWeek} new this week` : ""}`,
-      chg: null,
+    // 📈 Market Rates — latest FRED rate observations (daily ingest).
+    // Replaces the Businesses For Sale card (Oct 10, 2026); listings
+    // still surface in the Updates strip and Activity.
+    const rateLatest = (id: string) => {
+      const r = obs
+        .filter((o) => o.seriesId === id && o.value !== null)
+        .sort((x, y) => x.obsDate.localeCompare(y.obsDate));
+      return r[r.length - 1];
     };
+    const primeO = rateLatest("DPRIME");
+    const sofrO = rateLatest("SOFR");
+    const t10O = rateLatest("DGS10");
+    const ratesCard = primeO
+      ? {
+          label: "📈 Market Rates",
+          value: `Prime ${primeO.value?.toFixed(2)}%`,
+          date: `${sofrO ? `SOFR ${sofrO.value?.toFixed(2)}% · ` : ""}${t10O ? `10-Yr Treasury ${t10O.value?.toFixed(2)}% · ` : ""}FRED · as of ${primeO.obsDate}`,
+          chg: null,
+        }
+      : null;
     const focusSlugs = ["3364", "62", "3133", "23"];
     const focusRows = sectorRows.filter((r) => focusSlugs.includes(r.slug));
     const focusTotal = focusRows.reduce((s, r) => s + r.estab, 0);
@@ -688,7 +637,7 @@ export default function MarketIntelPage() {
       date: "acquisition fits across A&D · healthcare · manufacturing · trades",
       chg: null,
     };
-    return [saleCard, focusCard, fitCard, anomalyCard].filter(Boolean) as {
+    return [ratesCard, focusCard, fitCard, topEventCard].filter(Boolean) as {
       label: string;
       value: string;
       date: string;
@@ -1187,24 +1136,24 @@ export default function MarketIntelPage() {
         {/* Stat cards */}
         <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {statCards.map((c) => {
-            const isAnomaly = c.label.includes("Top Anomaly");
+            const isEvent = c.label.includes("Top Market Event");
             return (
               <div
                 key={c.label}
                 className={
-                  isAnomaly
+                  isEvent
                     ? "rounded-xl border-2 border-[#b8975a] bg-gradient-to-br from-[#b8975a]/20 via-white to-white p-4 shadow-[0_0_28px_rgba(184,151,90,0.35)] dark:via-[#132847]/70 dark:to-[#132847]/70"
                     : "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60"
                 }
               >
                 <p
                   className={
-                    isAnomaly
+                    isEvent
                       ? "flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#8a6d3b] dark:text-[#d9bc7a]"
                       : "text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-white/50"
                   }
                 >
-                  {isAnomaly && (
+                  {isEvent && (
                     <span className="relative flex h-2 w-2 shrink-0">
                       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#b8975a] opacity-60" />
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-[#b8975a]" />
@@ -1212,7 +1161,7 @@ export default function MarketIntelPage() {
                   )}
                   {c.label}
                 </p>
-                <p className="mt-1 text-2xl font-bold text-[#0d1f3c] dark:text-white">{isAnomaly ? renderAnomalyValue(c.value) : c.value}</p>
+                <p className={isEvent ? "mt-1 text-base font-semibold leading-snug text-[#0d1f3c] dark:text-white" : "mt-1 text-2xl font-bold text-[#0d1f3c] dark:text-white"}>{c.value}</p>
                 <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
                   {c.date}
                   {c.chg !== null && (
