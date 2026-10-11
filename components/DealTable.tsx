@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Deal, Executive, MiMultiple } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
-import { estimateMultiple } from "@/lib/valuation";
+import { estimateMultiple, type MarketRates } from "@/lib/valuation";
 
 type SortKey = "companyName" | "industry" | "stage" | "dealValue" | "ebitda" | "estMultiple" | "owner" | "updatedAt";
 
@@ -24,16 +24,18 @@ export default function DealTable({
   execs,
   onSelect,
   multiples = [],
+  rates = {},
 }: {
   deals: Deal[];
   execs: Executive[];
   onSelect: (d: Deal) => void;
   multiples?: MiMultiple[];
+  rates?: MarketRates;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
 
-  const estOf = (d: Deal) => estimateMultiple(d, multiples);
+  const estOf = (d: Deal) => estimateMultiple(d, multiples, rates);
 
   const sorted = useMemo(() => {
     const arr = [...deals];
@@ -57,7 +59,7 @@ export default function DealTable({
     });
     return arr;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deals, sortKey, sortDir, multiples]);
+  }, [deals, sortKey, sortDir, multiples, rates]);
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 1 ? -1 : 1));

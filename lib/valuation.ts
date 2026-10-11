@@ -89,10 +89,45 @@ const TYPICAL_STRUCTURE: Record<string, { cash: number; seller: number; earnout:
 };
 const DEFAULT_STRUCTURE = { cash: 85, seller: 8, earnout: 7, rollover: 0 };
 
-/** Present value of $1 of each structure piece, roughly: cash is cash;
- * a market-rate seller note is near par; rollover equity is real but
- * illiquid; an earnout is contingent and deferred. */
+/** Present value of $1 of each structure piece at the DEFAULT
+ * assumptions (Ethan approved these, Oct 10, 2026): cash is cash; a
+ * seller note is near par; rollover equity is real but illiquid; an
+ * earnout is contingent and deferred. Where the deal records actual
+ * note terms, or market rates are available, pieceValues() refines
+ * the note and earnout figures off the prime rate. */
 const PIECE_VALUE = { cash: 1.0, seller: 0.95, rollover: 0.9, earnout: 0.6 };
+
+/** Market rates used to price structure pieces (percent, e.g. 7.75). */
+export interface MarketRates {
+  prime?: number | null;
+}
+
+function pieceValues(
+  deal: Deal,
+  rates?: MarketRates
+): { cash: number; seller: number; rollover: number; earnout: number; primePct: number | null } {
+  const primePct = rates?.prime && rates.prime > 0 ? rates.prime : null;
+  const prime = primePct !== null ? primePct / 100 : null;
+  let seller = PIECE_VALUE.seller;
+  const st = deal.structure ?? {};
+  // Seller note with known terms: present value of its payments
+  // discounted at prime. A note priced at prime is worth par; a
+  // below-prime note is worth less, mechanically.
+  if (prime !== null && st.sellerRatePct != null && st.sellerTermYrs != null && st.sellerTermYrs > 0) {
+    const r = Math.max(0, st.sellerRatePct) / 100;
+    const n = st.sellerTermYrs;
+    const pmt = r > 0 ? r / (1 - Math.pow(1 + r, -n)) : 1 / n;
+    const pv = (pmt * (1 - Math.pow(1 + prime, -n))) / prime;
+    seller = Math.max(0.7, Math.min(1, pv));
+  }
+  // Earnout: ~70% expected payout, discounted two years at prime.
+  // At prime 7.75% that is ≈ 60¢, matching the flat default.
+  let earnout = PIECE_VALUE.earnout;
+  if (prime !== null) {
+    earnout = Math.max(0.4, Math.min(0.75, 0.7 / Math.pow(1 + prime, 2)));
+  }
+  return { cash: PIECE_VALUE.cash, seller, rollover: PIECE_VALUE.rollover, earnout, primePct };
+}
 
 const BANDS = ["EV < $5M", "EV $5–25M", "EV $25–100M", "EV $100–500M", "EV > $500M"];
 
@@ -152,6 +187,11 @@ export interface MultipleEstimate {
   structureAssumed: boolean;
   /** Present-value factor of the structure mix (≤ 1). */
   structureFactor: number;
+  /** Per-piece values used (cents on the dollar), after any
+   * rate-based refinement. */
+  pieces: { cash: number; seller: number; rollover: number; earnout: number };
+  /** Prime rate used for the refinement, when available. */
+  primePct: number | null;
   /** How much the structure inflates the headline over cash-equivalent. */
   structureUplift: number;
   /** Estimated cash-equivalent value range (base + drivers). */
@@ -230,7 +270,7 @@ export function resolveStructure(
   };
 }
 
-export function estimateMultiple(deal: Deal, multiples: MiMultiple[]): MultipleEstimate | null {
+export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: MarketRates): MultipleEstimate | null {
   const evRows = multiples.filter((m) => m.sourceReport.includes("ExitValue"));
   if (!evRows.length) return null;
   const group = matchGroup(deal.industry);
@@ -293,11 +333,13 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[]): MultipleE
   // The effective multiple discounts the headline back down, piece
   // by piece, for expected payout and time value.
   const { mix, assumed, amountsTotal } = resolveStructure(deal, group);
+  const pv = pieceValues(deal, rates);
+  const pieces = { cash: pv.cash, seller: pv.seller, rollover: pv.rollover, earnout: pv.earnout };
   const structureFactor =
-    (mix.cash * PIECE_VALUE.cash +
-      mix.seller * PIECE_VALUE.seller +
-      mix.rollover * PIECE_VALUE.rollover +
-      mix.earnout * PIECE_VALUE.earnout) /
+    (mix.cash * pieces.cash +
+      mix.seller * pieces.seller +
+      mix.rollover * pieces.rollover +
+      mix.earnout * pieces.earnout) /
     100;
 
   const evLow = deal.ebitda ? cashEqLow * deal.ebitda : null;
@@ -345,6 +387,8 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[]): MultipleE
     structure: mix,
     structureAssumed: assumed,
     structureFactor,
+    pieces,
+    primePct: pv.primePct,
     structureUplift: structureFactor > 0 ? 1 / structureFactor - 1 : 0,
     evLow,
     evHigh,

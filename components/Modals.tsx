@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { DEAL_STAGES, EXEC_STAGES, PARTNER_NAMES, type Deal, type DealDrivers, type Executive, type MiMultiple } from "@/lib/types";
 import { fmtMoney, fmtDate } from "@/lib/format";
-import { DRIVER_DEFS, estimateMultiple, type MultipleEstimate } from "@/lib/valuation";
+import { DRIVER_DEFS, estimateMultiple, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
 
 function fmtMultRange(lo: number, hi: number): string {
   return lo.toFixed(1) === hi.toFixed(1)
@@ -53,9 +53,10 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
       <p className="text-xs text-slate-400 dark:text-white/40">
         Structure{est.structureAssumed ? " (industry-typical, assumed)" : ""}: {est.structure.cash}% cash ·{" "}
         {est.structure.seller}% seller note · {est.structure.earnout}% earnout · {est.structure.rollover}% rollover
-        → discounting for expected payout + time value, each stated dollar is worth ~
-        {(est.structureFactor * 100).toFixed(0)}¢, so the effective multiple sits ~
-        {((1 - est.structureFactor) * 100).toFixed(0)}% below the headline.
+        → each stated dollar is worth ~{(est.structureFactor * 100).toFixed(0)}¢ after expected payout + time value
+        (note {(est.pieces.seller * 100).toFixed(0)}¢{est.primePct !== null ? ` vs prime ${est.primePct.toFixed(2)}%` : ""} ·
+        earnout {(est.pieces.earnout * 100).toFixed(0)}¢ · rollover {(est.pieces.rollover * 100).toFixed(0)}¢),
+        so the effective multiple sits ~{((1 - est.structureFactor) * 100).toFixed(0)}% below the headline.
       </p>
     </div>
   );
@@ -187,6 +188,8 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     sellerAmt: deal?.structure?.sellerAmt != null ? String(deal.structure.sellerAmt) : "",
     earnoutAmt: deal?.structure?.earnoutAmt != null ? String(deal.structure.earnoutAmt) : "",
     rolloverAmt: deal?.structure?.rolloverAmt != null ? String(deal.structure.rolloverAmt) : "",
+    sellerRatePct: deal?.structure?.sellerRatePct != null ? String(deal.structure.sellerRatePct) : "",
+    sellerTermYrs: deal?.structure?.sellerTermYrs != null ? String(deal.structure.sellerTermYrs) : "",
   });
 
   const setLink = (i: number, k: "label" | "url", v: string) =>
@@ -216,10 +219,15 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
   // Valuation estimate: multiples come from Market Intel; the estimate
   // recomputes live as financials, drivers and structure are recorded.
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
+  const [rates, setRates] = useState<MarketRates>({});
   useEffect(() => {
     fetch("/api/market/multiples")
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setMultiples(Array.isArray(d) ? d : []))
+      .catch(() => {});
+    fetch("/api/market/rates")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setRates({ prime: d?.prime?.value ?? null }))
       .catch(() => {});
   }, []);
 
@@ -231,6 +239,8 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     sellerAmt: form.sellerAmt.trim() === "" ? null : Number(form.sellerAmt),
     earnoutAmt: form.earnoutAmt.trim() === "" ? null : Number(form.earnoutAmt),
     rolloverAmt: form.rolloverAmt.trim() === "" ? null : Number(form.rolloverAmt),
+    sellerRatePct: form.sellerRatePct.trim() === "" ? null : Number(form.sellerRatePct),
+    sellerTermYrs: form.sellerTermYrs.trim() === "" ? null : Number(form.sellerTermYrs),
     // Preserve any percent-based structure already on record.
     cashPct: deal?.structure?.cashPct ?? null,
     sellerPct: deal?.structure?.sellerPct ?? null,
@@ -263,8 +273,8 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     createdAt: deal?.createdAt ?? "",
     updatedAt: deal?.updatedAt ?? "",
   };
-  const est = estimateMultiple(formDeal, multiples);
-  const viewEst = deal ? estimateMultiple(deal, multiples) : null;
+  const est = estimateMultiple(formDeal, multiples, rates);
+  const viewEst = deal ? estimateMultiple(deal, multiples, rates) : null;
 
   const save = async () => {
     if (!form.companyName.trim()) {
@@ -517,8 +527,16 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
                 <input type="number" min="0" className={inputCls} value={form.rolloverAmt} onChange={set("rolloverAmt")} placeholder="—" />
               </Field>
             </div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <Field label="Seller note rate % (if known)">
+                <input type="number" min="0" step="0.1" className={inputCls} value={form.sellerRatePct} onChange={set("sellerRatePct")} placeholder="—" />
+              </Field>
+              <Field label="Seller note term, years">
+                <input type="number" min="0" step="0.5" className={inputCls} value={form.sellerTermYrs} onChange={set("sellerTermYrs")} placeholder="—" />
+              </Field>
+            </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
-              The headline is the stated total — add $100K of earnout and the headline rises $100K. The effective multiple discounts it back down, piece by piece, for expected payout and time value: cash at face value, a seller note ~95¢, rollover ~90¢, an earnout ~60¢ on the dollar.
+              The headline is the stated total — add $100K of earnout and the headline rises $100K. The effective multiple discounts it back down, piece by piece, for expected payout and time value: cash at face value, rollover ~90¢, an earnout ~60¢. A seller note defaults to ~95¢ — but record its rate and term and it&apos;s priced properly against the market prime rate from Market Intel.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">

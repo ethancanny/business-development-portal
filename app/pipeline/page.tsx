@@ -24,13 +24,15 @@ export default function Dashboard() {
   const [dealModal, setDealModal] = useState<{ deal: Deal | null } | null>(null);
   const [execModal, setExecModal] = useState<{ exec: Executive | null } | null>(null);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
+  const [primeRate, setPrimeRate] = useState<number | null>(null);
 
   const load = async () => {
     try {
-      const [dealsRes, execsRes, multRes] = await Promise.all([
+      const [dealsRes, execsRes, multRes, ratesRes] = await Promise.all([
         fetch("/api/deals"),
         fetch("/api/executives"),
         fetch("/api/market/multiples"),
+        fetch("/api/market/rates"),
       ]);
       if (dealsRes.status === 401 || execsRes.status === 401) {
         router.replace("/login");
@@ -39,6 +41,10 @@ export default function Dashboard() {
       if (dealsRes.ok) setDeals(await dealsRes.json());
       if (execsRes.ok) setExecs(await execsRes.json());
       if (multRes.ok) setMultiples(await multRes.json());
+      if (ratesRes.ok) {
+        const rd = await ratesRes.json().catch(() => null);
+        setPrimeRate(rd?.prime?.value ?? null);
+      }
     } finally {
       setLoading(false);
     }
@@ -262,6 +268,7 @@ export default function Dashboard() {
               execs={execs}
               onSelect={(d) => setDealModal({ deal: d })}
               multiples={multiples}
+              rates={{ prime: primeRate }}
             />
           ) : (
           <KanbanBoard<Deal>
