@@ -134,7 +134,7 @@ export default function DealTable({
                   const est = estOf(d);
                   if (!est) return <span className="text-slate-400">—</span>;
                   return (
-                    <span title={`${est.baseBasis}. Effective ${est.effLow.toFixed(1)}–${est.effHigh.toFixed(1)}× after discounting the headline (${est.headlineSource}) for expected payout + time value. Our estimate: ${est.cashEqLow.toFixed(1)}–${est.cashEqHigh.toFixed(1)}× cash-equivalent. Effective sits ${est.gapX >= 0 ? "+" : "−"}${Math.abs(est.gapX).toFixed(2)}× vs our estimate.`}>
+                    <span title={`${est.baseBasis}. Effective ${est.effLow.toFixed(1)}–${est.effHigh.toFixed(1)}× after discounting the headline (${est.headlineSource}) for expected payout + time value. Market multiple ${est.marketMid.toFixed(1)}× after drivers/growth; market effective estimate ${est.estimateEffMid.toFixed(1)}× at the usual structure. Actual effective ${est.effMid.toFixed(1)}× — ${est.gapEffectiveX >= 0 ? "+" : "−"}${Math.abs(est.gapEffectiveX).toFixed(2)}× vs the market estimate.`}>
                       <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">
                         {est.headlineLow.toFixed(1) === est.headlineHigh.toFixed(1)
                           ? `${est.headlineLow.toFixed(1)}×`
@@ -143,7 +143,7 @@ export default function DealTable({
                       <span className="block text-[11px] text-slate-400 dark:text-white/40">
                         headline · eff. {est.effLow.toFixed(1) === est.effHigh.toFixed(1)
                           ? `${est.effLow.toFixed(1)}×`
-                          : `${est.effLow.toFixed(1)}–${est.effHigh.toFixed(1)}×`}{est.structureAssumed ? " · typ. structure" : ""} · {est.gapX >= 0 ? "+" : "−"}{Math.abs(est.gapX).toFixed(1)} vs est
+                          : `${est.effLow.toFixed(1)}–${est.effHigh.toFixed(1)}×`}{est.structureAssumed ? " · typ. structure" : ""} · {est.gapEffectiveX >= 0 ? "+" : "−"}{Math.abs(est.gapEffectiveX).toFixed(1)} vs mkt est
                       </span>
                     </span>
                   );

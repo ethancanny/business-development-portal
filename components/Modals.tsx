@@ -28,32 +28,46 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
     <div className="text-sm">
       <div className="space-y-1 rounded-lg bg-slate-50 p-3 dark:bg-white/5">
         <div className="flex items-baseline justify-between gap-3">
-          <span className="text-xs text-slate-500 dark:text-white/50">Market multiple — {est.group ?? "all industries"} · {est.band}</span>
+          <span className="text-xs text-slate-500 dark:text-white/50">Market — {est.group ?? "all industries"} · {est.band} (unadjusted)</span>
           <span className="text-sm font-semibold text-slate-900 dark:text-white">{est.base.toFixed(2)}×</span>
         </div>
         <div className="flex items-baseline justify-between gap-3">
-          <span className="text-xs text-slate-500 dark:text-white/50">Our estimate — market after drivers &amp; growth</span>
+          <span className="text-xs text-slate-500 dark:text-white/50">Market multiple — after drivers &amp; growth, for this business</span>
           <span className="text-sm font-semibold text-slate-900 dark:text-white">
-            {est.ourMid.toFixed(2)}×{" "}
+            {est.marketMid.toFixed(2)}×{" "}
             <span className="text-xs font-normal text-slate-400 dark:text-white/40">
               ({fmtMultRange(est.cashEqLow, est.cashEqHigh)}{est.evLow !== null && est.evHigh !== null ? ` ≈ ${fmtMoneyRange(est.evLow, est.evHigh)}` : ""})
             </span>
           </span>
         </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-xs text-slate-500 dark:text-white/50">Market estimate (effective) — market × usual structure {est.typicalFactor.toFixed(2)}</span>
+          <span className="text-sm font-semibold text-slate-900 dark:text-white">
+            {est.estimateEffMid.toFixed(2)}×{" "}
+            <span className="text-xs font-normal text-slate-400 dark:text-white/40">({fmtMultRange(est.estimateEffLow, est.estimateEffHigh)})</span>
+          </span>
+        </div>
         <div className="flex items-baseline justify-between gap-3 border-t border-slate-200 pt-1.5 dark:border-white/10">
           <span className="text-xs text-slate-500 dark:text-white/50">
-            Headline — {est.headlineSource}{est.headlineLocked ? "" : " · tracks our estimate"}
+            Actual headline — {est.headlineSource}
           </span>
           <span className="text-sm font-semibold text-slate-900 dark:text-white">{fmtMultRange(est.headlineLow, est.headlineHigh)}</span>
         </div>
         <div className="flex items-baseline justify-between gap-3">
-          <span className="text-xs text-slate-500 dark:text-white/50">Effective — headline × {est.structureFactor.toFixed(2)} structure value</span>
+          <span className="text-xs text-slate-500 dark:text-white/50">Actual effective — headline × {est.structureFactor.toFixed(2)} structure value</span>
           <span className="text-sm font-semibold text-slate-900 dark:text-white">{fmtMultRange(est.effLow, est.effHigh)}</span>
         </div>
-        <p className={`pt-1 text-xs font-medium ${Math.abs(est.gapX) < 0.1 ? "text-slate-500 dark:text-white/50" : est.gapX > 0 ? "text-amber-600 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300"}`}>
-          {Math.abs(est.gapX) < 0.1
-            ? "Reconciles: the effective multiple lands right at our estimate."
-            : `Reconciliation: effective sits ${est.gapX > 0 ? "+" : "−"}${Math.abs(est.gapX).toFixed(2)}× ${est.gapX > 0 ? "above" : "below"} our estimate${est.gapDollars !== null ? ` — about ${fmtMoney(Math.abs(Math.round(est.gapDollars)))} ${est.gapX > 0 ? "more" : "less"} than our number on this EBITDA` : ""}.`}
+        <p className={`pt-1 text-xs font-medium ${!est.headlineLocked || Math.abs(est.gapHeadlineX) < 0.05 ? "text-slate-500 dark:text-white/50" : est.gapHeadlineX > 0 ? "text-amber-600 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300"}`}>
+          {!est.headlineLocked
+            ? "No price recorded — the headline is shown at the market multiple."
+            : Math.abs(est.gapHeadlineX) < 0.05
+              ? "The ask sits right at the market multiple."
+              : `Headline sits ${est.gapHeadlineX > 0 ? "+" : "−"}${Math.abs(est.gapHeadlineX).toFixed(2)}× ${est.gapHeadlineX > 0 ? "above" : "below"} the market multiple.`}
+        </p>
+        <p className={`text-xs font-medium ${Math.abs(est.gapEffectiveX) < 0.05 ? "text-slate-500 dark:text-white/50" : est.gapEffectiveX > 0 ? "text-amber-600 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300"}`}>
+          {Math.abs(est.gapEffectiveX) < 0.05
+            ? "Effective pricing matches the market's effective pricing."
+            : `Effective sits ${est.gapEffectiveX > 0 ? "+" : "−"}${Math.abs(est.gapEffectiveX).toFixed(2)}× ${est.gapEffectiveX > 0 ? "above" : "below"} the market's effective pricing${est.gapEffectiveDollars !== null ? ` — about ${fmtMoney(Math.abs(Math.round(est.gapEffectiveDollars)))} ${est.gapEffectiveX > 0 ? "more" : "less"} on this EBITDA` : ""}.`}
         </p>
       </div>
       {est.statedEvLow !== null && est.statedEvHigh !== null && (

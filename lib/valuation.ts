@@ -218,20 +218,32 @@ export interface MultipleEstimate {
   /** Growth-outlook adjustment (its own layer, from growthPct). */
   growthAdj: number;
   growthNote: string | null;
-  /** Our estimate midpoint (base + drivers + growth) — the
-   * cash-equivalent multiple we would underwrite. */
-  ourMid: number;
-  /** Effective multiple midpoint (headline × structure factor). */
+  /** The market multiple for THIS business (Ethan's model,
+   * Oct 11, 2026): the Market Intel base adjusted for quality
+   * (drivers) and growth — the headline multiple the market
+   * would price this business at. */
+  marketMid: number;
+  /** The market estimate: marketMid run through the USUAL deal
+   * structure at today's piece values — the effective multiple
+   * the market is actually pricing. */
+  estimateEffMid: number;
+  estimateEffLow: number;
+  estimateEffHigh: number;
+  /** Structure factor of the industry-typical mix at default
+   * piece values (the estimate's discount). */
+  typicalFactor: number;
+  /** Effective multiple midpoint of the ACTUAL deal. */
   effMid: number;
-  /** effMid − ourMid: how far the stated deal's effective
-   * multiple sits above (+) or below (−) our estimate — the
-   * reconciliation between the market, headline and effective
-   * multiples. gapDollars is the same gap in EV dollars. */
-  gapX: number;
-  gapDollars: number | null;
+  /** Actual headline midpoint minus the market multiple. */
+  gapHeadlineX: number;
+  /** Actual effective minus the market estimate — the
+   * like-for-like PV gap against market pricing, in turns and
+   * (gapEffectiveDollars) in EV dollars. */
+  gapEffectiveX: number;
+  gapEffectiveDollars: number | null;
   /** True when the headline is a stated price (structure
-   * amounts or asking price); false when it is derived from our
-   * estimate at the structure mix (so it tracks our estimate). */
+   * amounts or asking price); false when no price is recorded
+   * and the headline is shown at the market multiple. */
   headlineLocked: boolean;
   driverNotes: string[];
   /** Estimated cash-equivalent multiple range (base + drivers) —
@@ -409,11 +421,13 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
   const cashEqLow = Math.max(1, mid - 0.5);
   const cashEqHigh = mid + 0.5;
 
-  // Structure: the headline is the fixed stated price — the sum of
-  // the recorded structure amounts, else the asking price, else
-  // derived from the cash-equivalent estimate at the structure mix.
-  // The effective multiple discounts the headline back down, piece
-  // by piece, for expected payout and time value.
+  // Structure: the headline is the fixed stated price — the sum
+  // of the recorded structure amounts, else the asking price.
+  // The effective multiple discounts the headline back down,
+  // piece by piece, for expected payout and time value. The
+  // market multiple (base + drivers + growth) is the benchmark:
+  // the market estimate discounts IT by the usual structure, and
+  // an unpriced deal's headline is shown at the market multiple.
   const { mix, assumed, amountsTotal } = resolveStructure(deal, group);
   const pv = pieceValues(deal, rates);
   const pieces = { cash: pv.cash, seller: pv.seller, rollover: pv.rollover, earnout: pv.earnout };
@@ -427,32 +441,57 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
   const evLow = deal.ebitda ? cashEqLow * deal.ebitda : null;
   const evHigh = deal.ebitda ? cashEqHigh * deal.ebitda : null;
 
+  // The market estimate (effective): the market multiple run
+  // through the USUAL deal structure at today's piece values,
+  // using default terms — not this deal's — so it stays a pure
+  // market benchmark.
+  const typicalMix = (group ? TYPICAL_STRUCTURE[group] : undefined) ?? DEFAULT_STRUCTURE;
+  const pvDefault = pieceValues({ ...deal, structure: {} }, rates);
+  const typicalFactor =
+    (typicalMix.cash * pvDefault.cash +
+      typicalMix.seller * pvDefault.seller +
+      typicalMix.rollover * pvDefault.rollover +
+      typicalMix.earnout * pvDefault.earnout) /
+    100;
+  const estimateEffMid = mid * typicalFactor;
+  const estimateEffLow = cashEqLow * typicalFactor;
+  const estimateEffHigh = cashEqHigh * typicalFactor;
+
+  // The actual deal: the headline is the stated price when one
+  // is recorded; with no price, the headline is shown at the
+  // market multiple and the effective follows from the deal's
+  // (or the typical) structure.
   let statedEvLow: number | null = null;
   let statedEvHigh: number | null = null;
-  let headlineSource = "derived from the estimate at the structure mix";
+  let headlineSource = "no price recorded — shown at the market multiple";
+  let headlineLow = mid;
+  let headlineHigh = mid;
   if (amountsTotal !== null && amountsTotal > 0) {
     statedEvLow = amountsTotal;
     statedEvHigh = amountsTotal;
     headlineSource = "sum of the structure amounts";
+    if (deal.ebitda) {
+      headlineLow = amountsTotal / deal.ebitda;
+      headlineHigh = headlineLow;
+    }
   } else if (deal.askingPrice && deal.askingPrice > 0) {
     statedEvLow = deal.askingPrice;
     statedEvHigh = deal.askingPrice;
     headlineSource = "asking price";
-  } else if (evLow !== null && evHigh !== null && structureFactor > 0) {
-    statedEvLow = evLow / structureFactor;
-    statedEvHigh = evHigh / structureFactor;
+    if (deal.ebitda) {
+      headlineLow = deal.askingPrice / deal.ebitda;
+      headlineHigh = headlineLow;
+    }
   }
+  const headlineLocked =
+    (amountsTotal !== null && amountsTotal > 0) || (deal.askingPrice ?? 0) > 0;
 
-  const headlineLow =
-    statedEvLow !== null && deal.ebitda ? statedEvLow / deal.ebitda : cashEqLow / structureFactor;
-  const headlineHigh =
-    statedEvHigh !== null && deal.ebitda ? statedEvHigh / deal.ebitda : cashEqHigh / structureFactor;
   const effLow = headlineLow * structureFactor;
-  const effMid = ((headlineLow + headlineHigh) / 2) * structureFactor;
-  const gapX = effMid - mid;
-  const gapDollars = deal.ebitda ? gapX * deal.ebitda : null;
-  const headlineLocked = headlineSource !== "derived from the estimate at the structure mix";
   const effHigh = headlineHigh * structureFactor;
+  const effMid = ((headlineLow + headlineHigh) / 2) * structureFactor;
+  const gapHeadlineX = (headlineLow + headlineHigh) / 2 - mid;
+  const gapEffectiveX = effMid - estimateEffMid;
+  const gapEffectiveDollars = deal.ebitda ? gapEffectiveX * deal.ebitda : null;
   const effEvLow = deal.ebitda ? effLow * deal.ebitda : null;
   const effEvHigh = deal.ebitda ? effHigh * deal.ebitda : null;
 
@@ -464,10 +503,15 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
     driverAdj,
     growthAdj,
     growthNote,
-    ourMid: mid,
+    marketMid: mid,
+    estimateEffMid,
+    estimateEffLow,
+    estimateEffHigh,
+    typicalFactor,
     effMid,
-    gapX,
-    gapDollars,
+    gapHeadlineX,
+    gapEffectiveX,
+    gapEffectiveDollars,
     headlineLocked,
     driverNotes,
     cashEqLow,
