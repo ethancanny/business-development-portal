@@ -50,6 +50,9 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
       {est.driverNotes.map((n, i) => (
         <p key={i} className="text-xs text-slate-500 dark:text-white/50">{n}</p>
       ))}
+      {est.pieceNotes.map((n, i) => (
+        <p key={`pn-${i}`} className="text-xs text-slate-500 dark:text-white/50">{n}</p>
+      ))}
       <p className="text-xs text-slate-400 dark:text-white/40">
         Structure{est.structureAssumed ? " (industry-typical, assumed)" : ""}: {est.structure.cash}% cash ·{" "}
         {est.structure.seller}% seller note · {est.structure.earnout}% earnout · {est.structure.rollover}% rollover
@@ -190,6 +193,11 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     rolloverAmt: deal?.structure?.rolloverAmt != null ? String(deal.structure.rolloverAmt) : "",
     sellerRatePct: deal?.structure?.sellerRatePct != null ? String(deal.structure.sellerRatePct) : "",
     sellerTermYrs: deal?.structure?.sellerTermYrs != null ? String(deal.structure.sellerTermYrs) : "",
+    earnoutMetric: deal?.structure?.earnoutMetric ?? "",
+    earnoutPeriodYrs: deal?.structure?.earnoutPeriodYrs != null ? String(deal.structure.earnoutPeriodYrs) : "",
+    earnoutProbPct: deal?.structure?.earnoutProbPct != null ? String(deal.structure.earnoutProbPct) : "",
+    rolloverVestYrs: deal?.structure?.rolloverVestYrs != null ? String(deal.structure.rolloverVestYrs) : "",
+    rolloverProbPct: deal?.structure?.rolloverProbPct != null ? String(deal.structure.rolloverProbPct) : "",
   });
 
   const setLink = (i: number, k: "label" | "url", v: string) =>
@@ -241,6 +249,11 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     rolloverAmt: form.rolloverAmt.trim() === "" ? null : Number(form.rolloverAmt),
     sellerRatePct: form.sellerRatePct.trim() === "" ? null : Number(form.sellerRatePct),
     sellerTermYrs: form.sellerTermYrs.trim() === "" ? null : Number(form.sellerTermYrs),
+    earnoutMetric: form.earnoutMetric || undefined,
+    earnoutPeriodYrs: form.earnoutPeriodYrs.trim() === "" ? null : Number(form.earnoutPeriodYrs),
+    earnoutProbPct: form.earnoutProbPct.trim() === "" ? null : Number(form.earnoutProbPct),
+    rolloverVestYrs: form.rolloverVestYrs.trim() === "" ? null : Number(form.rolloverVestYrs),
+    rolloverProbPct: form.rolloverProbPct.trim() === "" ? null : Number(form.rolloverProbPct),
     // Preserve any percent-based structure already on record.
     cashPct: deal?.structure?.cashPct ?? null,
     sellerPct: deal?.structure?.sellerPct ?? null,
@@ -535,8 +548,34 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
                 <input type="number" min="0" step="0.5" className={inputCls} value={form.sellerTermYrs} onChange={set("sellerTermYrs")} placeholder="—" />
               </Field>
             </div>
+            <p className="mt-3 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
+              Earnout & rollover terms — accounting style (probability-weighted, discounted at prime)
+            </p>
+            <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <Field label="Earnout metric">
+                <select className={inputCls} value={form.earnoutMetric} onChange={set("earnoutMetric")}>
+                  <option value="">—</option>
+                  <option value="EBITDA">EBITDA</option>
+                  <option value="Revenue">Revenue</option>
+                  <option value="Gross profit">Gross profit</option>
+                  <option value="Other">Other</option>
+                </select>
+              </Field>
+              <Field label="Earnout period (yrs)">
+                <input type="number" min="0" step="0.5" className={inputCls} value={form.earnoutPeriodYrs} onChange={set("earnoutPeriodYrs")} placeholder="2" />
+              </Field>
+              <Field label="Expected payout %">
+                <input type="number" min="0" max="100" className={inputCls} value={form.earnoutProbPct} onChange={set("earnoutProbPct")} placeholder="70" />
+              </Field>
+              <Field label="Rollover vesting (yrs)">
+                <input type="number" min="0" step="0.5" className={inputCls} value={form.rolloverVestYrs} onChange={set("rolloverVestYrs")} placeholder="—" />
+              </Field>
+              <Field label="Rollover retention %">
+                <input type="number" min="0" max="100" className={inputCls} value={form.rolloverProbPct} onChange={set("rolloverProbPct")} placeholder="100" />
+              </Field>
+            </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
-              The headline is the stated total — add $100K of earnout and the headline rises $100K. The effective multiple discounts it back down, piece by piece, for expected payout and time value: cash at face value, rollover ~90¢, an earnout ~60¢. A seller note defaults to ~95¢ — but record its rate and term and it&apos;s priced properly against the market prime rate from Market Intel.
+              The headline is the stated total — add $100K of earnout and the headline rises $100K. The effective multiple discounts it back down, piece by piece, for expected payout and time value: cash at face value, rollover ~90¢, an earnout ~60¢. A seller note defaults to ~95¢ — but record its rate and term and it&apos;s priced properly against the market prime rate from Market Intel. Earnouts are valued the accounting way (contingent consideration): expected payout % × the amount, discounted at prime over the earnout period.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">

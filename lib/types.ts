@@ -44,6 +44,18 @@ export interface DealStructureInput {
    * flat 95¢ default. */
   sellerRatePct?: number | null;
   sellerTermYrs?: number | null;
+  /** Earnout (contingent consideration) terms, accounting-style:
+   * the key metric it pays on, its measurement/vesting period, and
+   * the probability-weighted expected payout %. The earnout is
+   * valued at expected payout discounted at prime over the period.
+   * Defaults when blank: 70% expected payout over 2 years. */
+  earnoutMetric?: string;
+  earnoutPeriodYrs?: number | null;
+  earnoutProbPct?: number | null;
+  /** Rollover terms: vesting period and the probability it fully
+   * vests / is retained. Adjusts the flat 90¢ illiquidity value. */
+  rolloverVestYrs?: number | null;
+  rolloverProbPct?: number | null;
   cashPct?: number | null;
   sellerPct?: number | null;
   earnoutPct?: number | null;

@@ -40,6 +40,17 @@ function parseStructure(body: unknown): DealStructureInput {
     const n = Number(v);
     if (isFinite(n)) out[k] = Math.max(0, Math.min(40, n));
   }
+  const probKeys = ["earnoutPeriodYrs", "earnoutProbPct", "rolloverVestYrs", "rolloverProbPct"] as const;
+  for (const k of probKeys) {
+    const v = (body as Record<string, unknown>)[k];
+    if (v === null || v === undefined || v === "") continue;
+    const n = Number(v);
+    if (isFinite(n)) out[k] = Math.max(0, Math.min(100, n));
+  }
+  const metric = (body as Record<string, unknown>)["earnoutMetric"];
+  if (typeof metric === "string" && ["EBITDA", "Revenue", "Gross profit", "Other"].includes(metric)) {
+    out.earnoutMetric = metric;
+  }
   return out;
 }
 

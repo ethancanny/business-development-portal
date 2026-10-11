@@ -105,28 +105,67 @@ export interface MarketRates {
 function pieceValues(
   deal: Deal,
   rates?: MarketRates
-): { cash: number; seller: number; rollover: number; earnout: number; primePct: number | null } {
+): {
+  cash: number;
+  seller: number;
+  rollover: number;
+  earnout: number;
+  primePct: number | null;
+  notes: string[];
+} {
   const primePct = rates?.prime && rates.prime > 0 ? rates.prime : null;
   const prime = primePct !== null ? primePct / 100 : null;
-  let seller = PIECE_VALUE.seller;
   const st = deal.structure ?? {};
+  const notes: string[] = [];
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
   // Seller note with known terms: present value of its payments
   // discounted at prime. A note priced at prime is worth par; a
   // below-prime note is worth less, mechanically.
+  let seller = PIECE_VALUE.seller;
   if (prime !== null && st.sellerRatePct != null && st.sellerTermYrs != null && st.sellerTermYrs > 0) {
     const r = Math.max(0, st.sellerRatePct) / 100;
     const n = st.sellerTermYrs;
     const pmt = r > 0 ? r / (1 - Math.pow(1 + r, -n)) : 1 / n;
     const pv = (pmt * (1 - Math.pow(1 + prime, -n))) / prime;
-    seller = Math.max(0.7, Math.min(1, pv));
+    seller = clamp(pv, 0.7, 1);
+    notes.push(
+      `Seller note at ${(seller * 100).toFixed(0)}¢ — ${st.sellerRatePct}% over ${st.sellerTermYrs} yrs, discounted at prime ${primePct!.toFixed(2)}%`
+    );
   }
-  // Earnout: ~70% expected payout, discounted two years at prime.
-  // At prime 7.75% that is ≈ 60¢, matching the flat default.
-  let earnout = PIECE_VALUE.earnout;
-  if (prime !== null) {
-    earnout = Math.max(0.4, Math.min(0.75, 0.7 / Math.pow(1 + prime, 2)));
+
+  // Earnout (contingent consideration, ASC 805 style): the
+  // probability-weighted expected payout, discounted at prime over
+  // the earnout's period. Defaults: 70% expected payout, 2 years —
+  // at prime 7% that is ≈ 61¢, matching the flat default.
+  const eProb = st.earnoutProbPct != null ? clamp(st.earnoutProbPct / 100, 0, 1) : 0.7;
+  const eYrs = st.earnoutPeriodYrs != null && st.earnoutPeriodYrs > 0 ? st.earnoutPeriodYrs : 2;
+  let earnout: number;
+  if (prime !== null) earnout = clamp(eProb / Math.pow(1 + prime, eYrs), 0.05, 1);
+  else earnout = st.earnoutProbPct != null ? clamp(eProb * 0.87, 0.05, 1) : PIECE_VALUE.earnout;
+  if (st.earnoutProbPct != null || st.earnoutPeriodYrs != null || st.earnoutMetric) {
+    notes.push(
+      `Earnout at ${(earnout * 100).toFixed(0)}¢ — ${(eProb * 100).toFixed(0)}% expected payout${
+        st.earnoutMetric ? ` on ${st.earnoutMetric}` : ""
+      } over ${eYrs} yrs${prime !== null ? `, discounted at prime ${primePct!.toFixed(2)}%` : ""}`
+    );
   }
-  return { cash: PIECE_VALUE.cash, seller, rollover: PIECE_VALUE.rollover, earnout, primePct };
+
+  // Rollover: 90¢ illiquidity base. With vesting terms recorded,
+  // adjust for the retention probability and the average time to
+  // liquidity (half the vest, discounted at prime).
+  let rollover = PIECE_VALUE.rollover;
+  if (st.rolloverVestYrs != null || st.rolloverProbPct != null) {
+    const rp = st.rolloverProbPct != null ? clamp(st.rolloverProbPct / 100, 0, 1) : 1;
+    const rv = st.rolloverVestYrs != null && st.rolloverVestYrs > 0 ? st.rolloverVestYrs : 0;
+    const df = prime !== null && rv > 0 ? 1 / Math.pow(1 + prime, rv / 2) : 1;
+    rollover = clamp(0.9 * rp * df, 0.4, 1);
+    notes.push(
+      `Rollover at ${(rollover * 100).toFixed(0)}¢ — ${rv ? `${rv}-yr vesting, ` : ""}${(rp * 100).toFixed(0)}% retention, 90¢ illiquidity base`
+    );
+  }
+
+  return { cash: PIECE_VALUE.cash, seller, rollover, earnout, primePct, notes };
 }
 
 const BANDS = ["EV < $5M", "EV $5–25M", "EV $25–100M", "EV $100–500M", "EV > $500M"];
@@ -192,6 +231,9 @@ export interface MultipleEstimate {
   pieces: { cash: number; seller: number; rollover: number; earnout: number };
   /** Prime rate used for the refinement, when available. */
   primePct: number | null;
+  /** Per-piece explanations when actual terms are on record
+   * (e.g. "Earnout at 49¢ — 60% expected payout on EBITDA…"). */
+  pieceNotes: string[];
   /** How much the structure inflates the headline over cash-equivalent. */
   structureUplift: number;
   /** Estimated cash-equivalent value range (base + drivers). */
@@ -389,6 +431,7 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
     structureFactor,
     pieces,
     primePct: pv.primePct,
+    pieceNotes: pv.notes,
     structureUplift: structureFactor > 0 ? 1 / structureFactor - 1 : 0,
     evLow,
     evHigh,
