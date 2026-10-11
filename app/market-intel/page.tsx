@@ -1027,7 +1027,7 @@ export default function MarketIntelPage() {
   // Toggle/tab buttons: the selected state is a LIGHT tint, never a dark
   // fill. (Ethan, Oct 9, 2026: "make sure the row doesn't turn dark when selected")
   const tabBtn = (active: boolean) =>
-    `rounded-lg px-3 py-1.5 text-sm font-medium ${active ? "bg-[#d7e1f0] font-semibold text-[#0d1f3c] dark:bg-[#b8975a]/30 dark:text-[#e8cf9a]" : "text-slate-600 hover:bg-[#f0f4fa] dark:text-white/60 dark:hover:bg-white/5"}`;
+    `rounded-lg px-3 py-1.5 text-sm font-medium ${active ? "font-semibold text-[#0d1f3c] ring-1 ring-inset ring-[#b8975a] dark:text-[#e8cf9a]" : "text-slate-600 hover:bg-[#f0f4fa] dark:text-white/60 dark:hover:bg-white/5"}`;
 
   const overviewNode = (
     <EventStrip items={acqEvents} onDismiss={dismissEvent} />
