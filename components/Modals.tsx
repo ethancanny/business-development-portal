@@ -274,6 +274,10 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     ebitda: deal?.ebitda != null ? String(deal.ebitda) : "",
     askingPrice: deal?.askingPrice != null ? String(deal.askingPrice) : "",
     growthPct: deal?.growthPct != null ? String(deal.growthPct) : "",
+    topCustomerPct: deal?.metrics?.topCustomerPct != null ? String(deal.metrics.topCustomerPct) : "",
+    top3Pct: deal?.metrics?.top3Pct != null ? String(deal.metrics.top3Pct) : "",
+    recurringPct: deal?.metrics?.recurringPct != null ? String(deal.metrics.recurringPct) : "",
+    ownerHoursPerWeek: deal?.metrics?.ownerHoursPerWeek != null ? String(deal.metrics.ownerHoursPerWeek) : "",
     broker: deal?.broker ?? "",
     source: deal?.source ?? "",
     links: (deal?.links ?? [])
@@ -354,6 +358,13 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     rolloverPct: deal?.structure?.rolloverPct ?? null,
   });
 
+  const metricsFromForm = () => ({
+    topCustomerPct: form.topCustomerPct.trim() === "" ? null : Number(form.topCustomerPct),
+    top3Pct: form.top3Pct.trim() === "" ? null : Number(form.top3Pct),
+    recurringPct: form.recurringPct.trim() === "" ? null : Number(form.recurringPct),
+    ownerHoursPerWeek: form.ownerHoursPerWeek.trim() === "" ? null : Number(form.ownerHoursPerWeek),
+  });
+
   const formDeal: Deal = {
     id: deal?.id ?? "new",
     companyName: form.companyName,
@@ -377,6 +388,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     operatorIds: form.operatorIds,
     drivers: form.drivers,
     structure: structureFromForm(),
+    metrics: metricsFromForm(),
     createdAt: deal?.createdAt ?? "",
     updatedAt: deal?.updatedAt ?? "",
   };
@@ -402,6 +414,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
       growthPct: form.growthPct.trim() === "" ? null : Number(form.growthPct),
       drivers: form.drivers,
       structure: structureFromForm(),
+      metrics: metricsFromForm(),
     };
     const res = await fetch(isNew ? "/api/deals" : `/api/deals/${deal!.id}`, {
       method: isNew ? "POST" : "PUT",
@@ -511,6 +524,14 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
                 Estimated multiple (rough — sharpens as more is recorded)
               </p>
               <EstimateBody est={viewEst} />
+            </div>
+          )}
+          {deal.synthesis && (
+            <div className="mult-bubble mb-3 rounded-2xl border border-[#b8975a]/40 bg-[#b8975a]/5 px-4 py-3 dark:bg-[#b8975a]/10">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8a6f3c] dark:text-[#d4b37a]">
+                Synthesis{deal.synthesis.author ? ` — ${deal.synthesis.author}` : ""} · {fmtDate(deal.synthesis.updatedAt)}
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700 dark:text-[#e8dfc8]">{deal.synthesis.text}</p>
             </div>
           )}
           <div className="flex gap-2 pt-4">
@@ -627,6 +648,23 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
               <p className="pb-2 text-xs text-slate-500 dark:text-white/50">
                 Growth gets its own adjustment, separate from the drivers above: about +0.5× per 10 points of projected growth, −0.5× per 10 points of decline (clamped at ±1.25×).
               </p>
+            </div>
+            <p className="mt-3 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
+              Measured metrics — from the CIM / diligence. Each one replaces its dropdown above with a continuous adjustment that scales with the actual number and the deal's size.
+            </p>
+            <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Field label="Top customer % of revenue">
+                <input type="number" min="0" max="100" className={inputCls} value={form.topCustomerPct} onChange={set("topCustomerPct")} placeholder="—" />
+              </Field>
+              <Field label="Top 3 customers %">
+                <input type="number" min="0" max="100" className={inputCls} value={form.top3Pct} onChange={set("top3Pct")} placeholder="—" />
+              </Field>
+              <Field label="Recurring / contracted %">
+                <input type="number" min="0" max="100" className={inputCls} value={form.recurringPct} onChange={set("recurringPct")} placeholder="—" />
+              </Field>
+              <Field label="Owner hours / week">
+                <input type="number" min="0" max="80" className={inputCls} value={form.ownerHoursPerWeek} onChange={set("ownerHoursPerWeek")} placeholder="—" />
+              </Field>
             </div>
             <p className="mt-3 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
               Deal structure — stated amounts ($) — the headline price is their sum; leave all blank to assume the industry-typical mix
