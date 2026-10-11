@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [execModal, setExecModal] = useState<{ exec: Executive | null } | null>(null);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [primeRate, setPrimeRate] = useState<number | null>(null);
+  const [sbaRate, setSbaRate] = useState<number | null>(null);
 
   const load = async () => {
     try {
@@ -44,6 +45,7 @@ export default function Dashboard() {
       if (ratesRes.ok) {
         const rd = await ratesRes.json().catch(() => null);
         setPrimeRate(rd?.prime?.value ?? null);
+        setSbaRate(rd?.sba?.value ?? null);
       }
     } finally {
       setLoading(false);
@@ -268,7 +270,7 @@ export default function Dashboard() {
               execs={execs}
               onSelect={(d) => setDealModal({ deal: d })}
               multiples={multiples}
-              rates={{ prime: primeRate }}
+              rates={{ prime: primeRate, sba: sbaRate }}
             />
           ) : (
           <KanbanBoard<Deal>

@@ -60,7 +60,7 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
         Structure{est.structureAssumed ? " (industry-typical, assumed)" : ""}: {est.structure.cash}% cash ·{" "}
         {est.structure.seller}% seller note · {est.structure.earnout}% earnout · {est.structure.rollover}% rollover
         → each stated dollar is worth ~{(est.structureFactor * 100).toFixed(0)}¢ after expected payout + time value
-        (note {(est.pieces.seller * 100).toFixed(0)}¢{est.primePct !== null ? ` vs prime ${est.primePct.toFixed(2)}%` : ""} ·
+        (note {(est.pieces.seller * 100).toFixed(0)}¢{est.sbaPct !== null ? ` at SBA ${est.sbaPct.toFixed(2)}%` : ""} ·
         earnout {(est.pieces.earnout * 100).toFixed(0)}¢ · rollover {(est.pieces.rollover * 100).toFixed(0)}¢),
         so the effective multiple sits ~{((1 - est.structureFactor) * 100).toFixed(0)}% below the headline.
       </p>
@@ -239,7 +239,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
       .catch(() => {});
     fetch("/api/market/rates")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setRates({ prime: d?.prime?.value ?? null }))
+      .then((d) => setRates({ prime: d?.prime?.value ?? null, sba: d?.sba?.value ?? null }))
       .catch(() => {});
   }, []);
 
@@ -565,7 +565,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
               </Field>
             </div>
             <p className="mt-3 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
-              Earnout & rollover terms — accounting style (probability-weighted, discounted at prime)
+              Earnout & rollover terms — accounting style (probability-weighted, discounted at the SBA rate)
             </p>
             <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-3">
               <Field label="Earnout metric">
@@ -591,7 +591,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
               </Field>
             </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
-              The headline is the stated total — add $100K of earnout and the headline rises $100K. The effective multiple discounts it back down, piece by piece, for expected payout and time value: cash at face value, rollover ~90¢, an earnout ~60¢. A seller note defaults to ~95¢ — but record its rate and term and it&apos;s priced properly against the market prime rate from Market Intel. Earnouts are valued the accounting way (contingent consideration): expected payout % × the amount, discounted at prime over the earnout period.
+              The headline is the stated total — add $100K of earnout and the headline rises $100K. The effective multiple discounts it back down, piece by piece, for expected payout and time value: cash at face value, rollover ~90¢, an earnout ~60¢. A seller note defaults to ~95¢ — but record its rate and term and it&apos;s priced properly against the SBA rate from Market Intel (prime + 3.00% — what LMM buyers actually pay). Earnouts are valued the accounting way (contingent consideration): expected payout % × the amount, discounted at the SBA rate over the earnout period.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">

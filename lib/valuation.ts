@@ -99,6 +99,8 @@ const PIECE_VALUE = { cash: 1.0, seller: 0.95, rollover: 0.9, earnout: 0.6 };
 /** Market rates used to price structure pieces (percent, e.g. 7.75). */
 export interface MarketRates {
   prime?: number | null;
+  /** SBA 7(a) max rate for loans > $350K (prime + 3.00%). */
+  sba?: number | null;
 }
 
 function pieceValues(
@@ -110,10 +112,19 @@ function pieceValues(
   rollover: number;
   earnout: number;
   primePct: number | null;
+  sbaPct: number | null;
   notes: string[];
 } {
   const primePct = rates?.prime && rates.prime > 0 ? rates.prime : null;
-  const prime = primePct !== null ? primePct / 100 : null;
+  // Discount basis: the SBA 7(a) rate — prime + 3.00%, the SBA
+  // maximum spread for loans over $350K and roughly what LMM
+  // buyers actually pay for senior debt. Prime alone is a
+  // wholesale benchmark nobody in this market borrows at, and
+  // deal paper is junior to that SBA loan, so the SBA rate is
+  // the right floor for pricing it. (Ethan, Oct 11, 2026.)
+  const sbaPct =
+    rates?.sba && rates.sba > 0 ? rates.sba : primePct !== null ? primePct + 3 : null;
+  const prime = sbaPct !== null ? sbaPct / 100 : null;
   const st = deal.structure ?? {};
   const notes: string[] = [];
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -129,7 +140,7 @@ function pieceValues(
     const pv = (pmt * (1 - Math.pow(1 + prime, -n))) / prime;
     seller = clamp(pv, 0.7, 1);
     notes.push(
-      `Seller note at ${(seller * 100).toFixed(0)}¢ — ${st.sellerRatePct}% over ${st.sellerTermYrs} yrs, discounted at prime ${primePct!.toFixed(2)}%`
+      `Seller note at ${(seller * 100).toFixed(0)}¢ — ${st.sellerRatePct}% over ${st.sellerTermYrs} yrs, discounted at the SBA rate ${sbaPct!.toFixed(2)}% (prime + 3.00%)`
     );
   }
 
@@ -146,7 +157,7 @@ function pieceValues(
     notes.push(
       `Earnout at ${(earnout * 100).toFixed(0)}¢ — ${(eProb * 100).toFixed(0)}% expected payout${
         st.earnoutMetric ? ` on ${st.earnoutMetric}` : ""
-      } over ${eYrs} yrs${prime !== null ? `, discounted at prime ${primePct!.toFixed(2)}%` : ""}`
+      } over ${eYrs} yrs${prime !== null ? `, discounted at the SBA rate ${sbaPct!.toFixed(2)}%` : ""}`
     );
   }
 
@@ -164,7 +175,7 @@ function pieceValues(
     );
   }
 
-  return { cash: PIECE_VALUE.cash, seller, rollover, earnout, primePct, notes };
+  return { cash: PIECE_VALUE.cash, seller, rollover, earnout, primePct, sbaPct, notes };
 }
 
 const BANDS = ["EV < $5M", "EV $5–25M", "EV $25–100M", "EV $100–500M", "EV > $500M"];
@@ -233,6 +244,8 @@ export interface MultipleEstimate {
   pieces: { cash: number; seller: number; rollover: number; earnout: number };
   /** Prime rate used for the refinement, when available. */
   primePct: number | null;
+  /** SBA discount rate actually applied (prime + 3.00%). */
+  sbaPct: number | null;
   /** Per-piece explanations when actual terms are on record
    * (e.g. "Earnout at 49¢ — 60% expected payout on EBITDA…"). */
   pieceNotes: string[];
@@ -445,6 +458,7 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
     structureFactor,
     pieces,
     primePct: pv.primePct,
+    sbaPct: pv.sbaPct,
     pieceNotes: pv.notes,
     structureUplift: structureFactor > 0 ? 1 / structureFactor - 1 : 0,
     evLow,

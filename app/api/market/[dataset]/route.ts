@@ -87,8 +87,18 @@ export async function GET(
           const l = r[r.length - 1];
           return l ? { value: l.value, date: l.obsDate } : null;
         };
+        const primeLatest = latest("DPRIME");
+        const primeVal = primeLatest?.value ?? null;
         return NextResponse.json({
-          prime: latest("DPRIME"),
+          prime: primeLatest,
+          sba: primeLatest && primeVal !== null
+            ? {
+                value: Math.round((primeVal + 3) * 100) / 100,
+                date: primeLatest.date,
+                spread: 3,
+                basis: "Prime + 3.00% — SBA 7(a) max, loans over $350K",
+              }
+            : null,
           sofr: latest("SOFR"),
           treasury10y: latest("DGS10"),
           treasury2y: latest("DGS2"),
