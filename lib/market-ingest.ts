@@ -469,7 +469,14 @@ const SCALE_SIGNAL =
 export async function ingestNews(): Promise<number> {
   let total = 0;
   const seen = new Set<string>();
-  for (const q of NEWS_QUERIES) {
+  // Each query runs twice: the 30-day window for breadth, and a
+  // 2-day window so fresh stories are not buried under a month of
+  // relevance-ranked results (Google News RSS ranks by relevance,
+  // not date — a story from this morning competes with all 30
+  // days). Dedupe makes the overlap harmless. (Oct 11, 2026 —
+  // diagnosed after three days with no storable events.)
+  const queries = NEWS_QUERIES.flatMap((q) => [q, q.replace("when:30d", "when:2d")]);
+  for (const q of queries) {
     const url =
       `https://news.google.com/rss/search?q=${encodeURIComponent(q)}` + `&hl=en-US&gl=US&ceid=US:en`;
     let xml = "";
@@ -507,7 +514,7 @@ export async function ingestNews(): Promise<number> {
     }
     total += await upsertAcquisitions(rows);
     // be polite to Google News
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 700));
   }
   await logSync("news", "ok", total, `Google News: ${NEWS_QUERIES.length} queries`);
   return total;
@@ -589,7 +596,11 @@ function parseEventSubject(headline: string, verbs: RegExp): string {
 export async function ingestEconomicEvents(): Promise<number> {
   let total = 0;
   const seen = new Set<string>();
-  for (const { eventType, q, verbs } of ECONOMIC_EVENT_QUERIES) {
+  const econQueries = ECONOMIC_EVENT_QUERIES.flatMap((e) => [
+    e,
+    { ...e, q: e.q.replace("when:30d", "when:2d") },
+  ]);
+  for (const { eventType, q, verbs } of econQueries) {
     const url =
       `https://news.google.com/rss/search?q=${encodeURIComponent(q)}` + `&hl=en-US&gl=US&ceid=US:en`;
     let xml = "";
@@ -633,7 +644,7 @@ export async function ingestEconomicEvents(): Promise<number> {
       });
     }
     total += await upsertAcquisitions(rows);
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 700));
   }
   await logSync("econ_events", "ok", total, `Google News: ${ECONOMIC_EVENT_QUERIES.length} economic-event queries`);
   return total;
@@ -657,7 +668,11 @@ export async function ingestBankruptcyNews(): Promise<number> {
   const cleared = await clearNewBankruptcyNews().catch(() => 0);
   let total = 0;
   const seen = new Set<string>();
-  for (const q of BANKRUPTCY_NEWS_QUERIES) {
+  const bankruptcyQueries = BANKRUPTCY_NEWS_QUERIES.flatMap((q) => [
+    q,
+    q.replace("when:30d", "when:2d"),
+  ]);
+  for (const q of bankruptcyQueries) {
     const url =
       `https://news.google.com/rss/search?q=${encodeURIComponent(q)}` + `&hl=en-US&gl=US&ceid=US:en`;
     let xml = "";
@@ -693,7 +708,7 @@ export async function ingestBankruptcyNews(): Promise<number> {
       });
     }
     total += await upsertAcquisitions(rows);
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 700));
   }
   await logSync("bankruptcy_news", "ok", total, `Google News: ${BANKRUPTCY_NEWS_QUERIES.length} bankruptcy queries${cleared ? ` (cleared ${cleared} loose rows)` : ""}`);
   return total;
