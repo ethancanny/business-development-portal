@@ -15,12 +15,39 @@ export interface DealLink {
   url: string;
 }
 
+/** Qualitative valuation drivers recorded on a deal (Oct 10, 2026).
+ * Each moves the estimated multiple: "pos" raises it, "neg" lowers it.
+ * Set them as diligence learns more — the estimate updates with them. */
+export type DriverLevel = "neg" | "neu" | "pos";
+export interface DealDrivers {
+  concentration?: DriverLevel | "";
+  recurring?: DriverLevel | "";
+  ownerDependence?: DriverLevel | "";
+  growth?: DriverLevel | "";
+  margins?: DriverLevel | "";
+  management?: DriverLevel | "";
+  financials?: DriverLevel | "";
+}
+
+/** Expected deal structure, in % of total value (Oct 10, 2026).
+ * Blank fields = assume the industry-typical structure. Structure
+ * changes the *effective* multiple: contingent pieces are worth less
+ * than cash at close. */
+export interface DealStructureInput {
+  cashPct?: number | null;
+  sellerPct?: number | null;
+  earnoutPct?: number | null;
+  rolloverPct?: number | null;
+}
+
 export interface Deal {
   id: string;
   companyName: string;
   industry: string;
   stage: DealStage;
   dealValue: number;
+  drivers?: DealDrivers;
+  structure?: DealStructureInput;
   /** Annual revenue, if known. */
   revenue: number | null;
   /** Annual EBITDA, if known. */

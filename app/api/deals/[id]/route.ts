@@ -2,7 +2,32 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDeals, saveDeals, getExecutives, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { geocodeCity } from "@/lib/geo";
-import { DEAL_STAGES, type Deal, type DealLink } from "@/lib/types";
+import { DEAL_STAGES, type Deal, type DealDrivers, type DealLink, type DealStructureInput } from "@/lib/types";
+
+const DRIVER_KEYS = ["concentration", "recurring", "ownerDependence", "growth", "margins", "management", "financials"] as const;
+
+function parseDrivers(body: unknown): DealDrivers {
+  if (!body || typeof body !== "object") return {};
+  const out: DealDrivers = {};
+  for (const k of DRIVER_KEYS) {
+    const v = (body as Record<string, unknown>)[k];
+    if (v === "neg" || v === "neu" || v === "pos") out[k] = v;
+  }
+  return out;
+}
+
+function parseStructure(body: unknown): DealStructureInput {
+  if (!body || typeof body !== "object") return {};
+  const out: DealStructureInput = {};
+  const keys = ["cashPct", "sellerPct", "earnoutPct", "rolloverPct"] as const;
+  for (const k of keys) {
+    const v = (body as Record<string, unknown>)[k];
+    if (v === null || v === undefined || v === "") continue;
+    const n = Number(v);
+    if (isFinite(n)) out[k] = Math.max(0, Math.min(100, n));
+  }
+  return out;
+}
 
 function parseIdList(body: unknown): string[] {
   if (!Array.isArray(body)) return [];
@@ -110,6 +135,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
       body.broker !== undefined ? String(body.broker).trim() : prev.broker ?? "",
     source:
       body.source !== undefined ? String(body.source).trim() : prev.source ?? "",
+    drivers:
+      body.drivers !== undefined ? parseDrivers(body.drivers) : prev.drivers ?? {},
+    structure:
+      body.structure !== undefined
+        ? parseStructure(body.structure)
+        : prev.structure ?? {},
     updatedAt: new Date().toISOString(),
   };
 

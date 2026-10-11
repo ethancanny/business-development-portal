@@ -146,6 +146,10 @@ export function ensureSchema(): Promise<void> {
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS broker TEXT NOT NULL DEFAULT ''`;
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS drivers JSONB NOT NULL DEFAULT '{}'`;
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS structure JSONB NOT NULL DEFAULT '{}'`;
       /* ---- Market Intel tables ---- */
       await db`
         CREATE TABLE IF NOT EXISTS mi_indicators (
@@ -344,6 +348,14 @@ function rowToDeal(r: Record<string, unknown>): Deal {
         : Number(r.asking_price),
     broker: String(r.broker ?? ""),
     source: String(r.source ?? ""),
+    drivers:
+      r.drivers && typeof r.drivers === "object"
+        ? (r.drivers as Deal["drivers"])
+        : {},
+    structure:
+      r.structure && typeof r.structure === "object"
+        ? (r.structure as Deal["structure"])
+        : {},
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
@@ -365,7 +377,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
         INSERT INTO deals (
           id, company_name, industry, stage, deal_value, contact_name,
           contact_email, notes, owner, city, lat, lng, links, operator_ids,
-          revenue, ebitda, asking_price, broker, source,
+          revenue, ebitda, asking_price, broker, source, drivers, structure,
           created_at, updated_at
         ) VALUES (
           ${d.id}, ${d.companyName}, ${d.industry}, ${d.stage},
@@ -375,6 +387,8 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           ${JSON.stringify(d.operatorIds ?? [])},
           ${d.revenue}, ${d.ebitda}, ${d.askingPrice},
           ${d.broker ?? ""}, ${d.source ?? ""},
+          ${JSON.stringify(d.drivers ?? {})},
+          ${JSON.stringify(d.structure ?? {})},
           ${d.createdAt}, ${d.updatedAt}
         )`
     ),
