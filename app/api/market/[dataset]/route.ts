@@ -11,6 +11,7 @@ import {
   getCompanies,
   countCompanies,
   countFits,
+  countUnscored,
   getUpdates,
   setCompanyStatus,
   getMultiples,
@@ -66,12 +67,13 @@ export async function GET(
       case "companies": {
         const sector = sp.get("sector") ?? undefined;
         const off = Number(sp.get("offset") ?? 0);
-        const [companies, total, fitTotal] = await Promise.all([
+        const [companies, total, fitTotal, unscoredTotal] = await Promise.all([
           getCompanies(sector, Number(sp.get("limit") ?? 600), off),
           countCompanies(sector),
           countFits(sector),
+          countUnscored(sector),
         ]);
-        return NextResponse.json({ companies, total, fitTotal, offset: off });
+        return NextResponse.json({ companies, total, fitTotal, unscoredTotal, offset: off });
       }
       case "updates": {
         return NextResponse.json(await getUpdates());

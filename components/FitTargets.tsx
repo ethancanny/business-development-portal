@@ -23,14 +23,18 @@ const pill = (active: boolean) =>
 export default function FitTargets() {
   const [tab, setTab] = useState<string>("All");
   const [counts, setCounts] = useState<Record<string, number | null>>({});
+  const [unscored, setUnscored] = useState<Record<string, number | null>>({});
 
   useEffect(() => {
     let live = true;
     for (const s of SECTORS) {
       fetch(`/api/market/companies?sector=${encodeURIComponent(s)}&limit=1`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((d: { fitTotal?: number } | null) => {
-          if (live && d) setCounts((c) => ({ ...c, [s]: d.fitTotal ?? 0 }));
+        .then((d: { fitTotal?: number; unscoredTotal?: number } | null) => {
+          if (live && d) {
+            setCounts((c) => ({ ...c, [s]: d.fitTotal ?? 0 }));
+            setUnscored((c) => ({ ...c, [s]: d.unscoredTotal ?? 0 }));
+          }
         })
         .catch(() => undefined);
     }
@@ -53,6 +57,11 @@ export default function FitTargets() {
           </button>
         ))}
       </div>
+      {(tab === "All" || tab === "Healthcare") && (unscored["Healthcare"] ?? 0) > 0 && (
+        <p className="mb-2 text-xs text-slate-500 dark:text-white/50">
+          Healthcare: {(unscored["Healthcare"] ?? 0).toLocaleString()} companies are <span className="font-semibold">unscored</span> — no revenue estimate can be derived yet, so they are held out of fits until SBA loan / ADHS licensing data scores them. A healthcare fit now requires estimated revenue of at least $1M.
+        </p>
+      )}
       <CompanyTargets
         key={tab}
         sectors={tab === "All" ? SECTORS : [tab]}

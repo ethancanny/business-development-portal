@@ -211,7 +211,7 @@ export interface CompanyInput {
  * weekly refresh) gets it for free. A "fit" is an established, right-sized
  * target — not a startup, not a whale. The reasoning is stored on the row
  * (details.fitWhy) and the UI highlights fit rows in gold. */
-function computeFit(r: CompanyInput): { fit: boolean; why: string } {
+function computeFit(r: CompanyInput): { fit: boolean; why: string; unscored?: boolean; estRevenue?: number | null } {
   let details: Record<string, unknown> = {};
   try {
     details = r.details ? (JSON.parse(r.details) as Record<string, unknown>) : {};
@@ -270,8 +270,33 @@ function computeFit(r: CompanyInput): { fit: boolean; why: string } {
     };
   }
   if (src.includes("NPPES")) {
-    const fit = age !== null && age >= 5;
-    return { fit, why: fit ? `Operating since ${yr} · ${r.subsector || "healthcare provider"}${locBit}${evBit}` : "" };
+    // Healthcare fit (Ethan, Oct 14, 2026): a fit REQUIRES estimated revenue
+    // of at least $1M. Estimate derivation, in precedence order:
+    //   1. recorded revenueEstimate (enrichment, e.g. Cortera)
+    //   2. employees × specialty revenue-per-employee (model rates below)
+    //   3. SBA loan jobs-reported (details.sbaJobs, Phase 3 join) × rate
+    //   4. ADHS licensed capacity (details.adhsUnits, Phase 3) × $58K/unit
+    // No derivable estimate → the company is UNSCORED: held out of fits
+    // (details.fitUnscored) until SBA/ADHS data scores it. ADHS facility
+    // licensing is the primary healthcare source going forward; NPPES rows
+    // remain until the ADHS spine replaces them.
+    const sub = (r.subsector ?? "").toLowerCase();
+    const rate =
+      sub.includes("behavioral") || sub.includes("mental") ? 130_000 :
+      sub.includes("home health") ? 115_000 :
+      sub.includes("hospice") ? 160_000 :
+      sub.includes("assisted") || sub.includes("nursing") ? 150_000 : 180_000;
+    let est: number | null = rev;
+    if (est === null && emp !== null) est = Math.round(emp * rate);
+    if (est === null && typeof details.sbaJobs === "number" && details.sbaJobs > 0) est = Math.round(details.sbaJobs * rate);
+    if (est === null && typeof details.adhsUnits === "number" && details.adhsUnits > 0) est = Math.round(details.adhsUnits * 58_000);
+    if (est === null) return { fit: false, why: "", unscored: true, estRevenue: null };
+    const fit = est >= 1_000_000;
+    return {
+      fit,
+      estRevenue: est,
+      why: fit ? `Est. revenue ${money(est)} · ${r.subsector || "healthcare provider"}${yr ? ` · operating since ${yr}` : ""}${locBit}` : "",
+    };
   }
   if (src.includes("ROC")) {
     const n = typeof details.licenseCount === "number" ? details.licenseCount : 1;
@@ -298,7 +323,7 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
   }
   const clean = keyOrder.map((k) => byKey[k]);
   for (const r of clean) {
-    const { fit, why } = computeFit(r);
+    const { fit, why, unscored, estRevenue } = computeFit(r);
     try {
       const d = r.details ? (JSON.parse(r.details) as Record<string, unknown>) : {};
       if (fit) {
@@ -308,6 +333,11 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
         delete d.fit;
         delete d.fitWhy;
       }
+      if (unscored) d.fitUnscored = true;
+      else delete d.fitUnscored;
+      if (typeof estRevenue === "number") d.estRevenue = estRevenue;
+      else if (estRevenue === null) delete d.estRevenue;
+      else if (typeof d.revenueEstimate === "number") d.estRevenue = d.revenueEstimate;
       r.details = JSON.stringify(d);
     } catch {
       // Details that claim to be a JSON object but do not parse (e.g. a
@@ -497,6 +527,62 @@ export async function countFits(sector?: string): Promise<number> {
   const rows = sector
     ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND details LIKE '{%' AND (details::jsonb ->> 'fit') = 'true'`
     : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE details LIKE '{%' AND (details::jsonb ->> 'fit') = 'true'`;
+  return Number((rows as unknown as { c: number }[])[0]?.c ?? 0);
+}
+
+/** Re-run the fit rules over EXISTING rows (paged, resumable) after a rule
+ * change, without waiting for the weekly spine rebuild. Only the fit
+ * stamps inside details are touched — fit / fitWhy / fitUnscored /
+ * estRevenue; every other details key (consolidation, members, enrichment)
+ * is preserved. Returns the next offset, or -1 when the sector is done. */
+export async function rescoreCompanies(sector: string | undefined, offset: number, pageSize = 1500): Promise<{ processed: number; changed: number; nextOffset: number }> {
+  await ensureSchema();
+  const db = sql();
+  const rows = sector
+    ? await db`SELECT * FROM mi_companies WHERE sector = ${sector} ORDER BY id LIMIT ${pageSize} OFFSET ${offset}`
+    : await db`SELECT * FROM mi_companies ORDER BY id LIMIT ${pageSize} OFFSET ${offset}`;
+  let changed = 0;
+  for (const r of rows) {
+    const input: CompanyInput = {
+      dedupKey: str(r.dedup_key), name: str(r.name), sector: str(r.sector),
+      subsector: str(r.subsector), naics: str(r.naics), city: str(r.city),
+      state: str(r.state), address: str(r.address), zip: str(r.zip),
+      contactName: str(r.contact_name), contactTitle: str(r.contact_title),
+      phone: str(r.phone), website: str(r.website), formedDate: str(r.formed_date),
+      employees: numOrNull(r.employees), signalValue: numOrNull(r.signal_value),
+      signalLabel: str(r.signal_label), source: str(r.source), sourceUrl: str(r.source_url),
+      details: str(r.details),
+    };
+    const { fit, why, unscored, estRevenue } = computeFit(input);
+    let d: Record<string, unknown> = {};
+    try {
+      d = input.details ? (JSON.parse(input.details) as Record<string, unknown>) : {};
+    } catch {
+      continue; // non-JSON details pass through untouched, as at import
+    }
+    const before = JSON.stringify({ f: d.fit, w: d.fitWhy, u: d.fitUnscored, e: d.estRevenue });
+    if (fit) { d.fit = true; d.fitWhy = why; } else { delete d.fit; delete d.fitWhy; }
+    if (unscored) d.fitUnscored = true; else delete d.fitUnscored;
+    if (typeof estRevenue === "number") d.estRevenue = estRevenue;
+    else if (estRevenue === null) delete d.estRevenue;
+    else if (typeof d.revenueEstimate === "number") d.estRevenue = d.revenueEstimate;
+    const after = JSON.stringify({ f: d.fit, w: d.fitWhy, u: d.fitUnscored, e: d.estRevenue });
+    if (before !== after) {
+      await db`UPDATE mi_companies SET details = ${JSON.stringify(d)} WHERE id = ${r.id}`;
+      changed++;
+    }
+  }
+  return { processed: rows.length, changed, nextOffset: rows.length < pageSize ? -1 : offset + rows.length };
+}
+
+/** Companies held in the "unscored" bucket (no derivable revenue estimate —
+ * see the healthcare branch of computeFit). */
+export async function countUnscored(sector?: string): Promise<number> {
+  await ensureSchema();
+  const db = sql();
+  const rows = sector
+    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND details LIKE '{%' AND (details::jsonb ->> 'fitUnscored') = 'true'`
+    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE details LIKE '{%' AND (details::jsonb ->> 'fitUnscored') = 'true'`;
   return Number((rows as unknown as { c: number }[])[0]?.c ?? 0);
 }
 
