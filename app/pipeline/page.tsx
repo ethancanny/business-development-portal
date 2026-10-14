@@ -160,7 +160,7 @@ export default function Dashboard() {
       <PageHero
         eyebrow="Canny Capital Partners"
         title={tab === "deals" ? "Acquisition Pipeline" : tab === "execs" ? "Executive Sourcing" : "Paired Operators"}
-        subtitle="Arizona private equity"
+        subtitle="Arizona market activity"
       />
 
       <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">

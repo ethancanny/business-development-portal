@@ -526,18 +526,22 @@ export async function getUpdates(): Promise<UpdateItem[]> {
   // Counts come from COUNT(*) aggregates — the old code counted a
   // LIMIT 400 sample, so the card silently capped at +400 whenever
   // more than 400 rows were new (e.g. after the Oct 9 rebuild).
+  // Focus-sector counts only (Ethan, Oct 14, 2026): new companies and
+  // new licenses count only in A&D, healthcare, advanced manufacturing,
+  // specialty trades & construction, and hospitality — no all-sector totals.
+  const FOCUS_SECTORS = ["Aerospace & Defense", "Healthcare", "Advanced Manufacturing", "Specialty Trades & Construction", "Hospitality"];
   const compAgg = (await db`
     SELECT (CASE WHEN source LIKE '%ROC%' THEN 'license' ELSE 'business' END) AS kind,
            COUNT(*)::int AS n, MAX(first_seen) AS latest
     FROM mi_companies
-    WHERE first_seen >= ${cutoff} AND details LIKE '{%' AND (details::jsonb ->> 'consolidated') IS DISTINCT FROM 'true'
+    WHERE first_seen >= ${cutoff} AND sector = ANY(${FOCUS_SECTORS}) AND details LIKE '{%' AND (details::jsonb ->> 'consolidated') IS DISTINCT FROM 'true'
     GROUP BY 1 ORDER BY latest DESC`) as unknown as Record<string, unknown>[];
   const compLatest = (await db`
     SELECT DISTINCT ON ((CASE WHEN source LIKE '%ROC%' THEN 'license' ELSE 'business' END))
            (CASE WHEN source LIKE '%ROC%' THEN 'license' ELSE 'business' END) AS kind,
            name, sector, city, first_seen
     FROM mi_companies
-    WHERE first_seen >= ${cutoff} AND details LIKE '{%' AND (details::jsonb ->> 'consolidated') IS DISTINCT FROM 'true'
+    WHERE first_seen >= ${cutoff} AND sector = ANY(${FOCUS_SECTORS}) AND details LIKE '{%' AND (details::jsonb ->> 'consolidated') IS DISTINCT FROM 'true'
     ORDER BY 1, first_seen DESC`) as unknown as Record<string, unknown>[];
   for (const agg of compAgg) {
     const kind = String(agg.kind) as UpdateItem["kind"];

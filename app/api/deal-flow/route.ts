@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDealFlow, saveDealFlow, newId, logActivity } from "@/lib/db";
+import { shouldAutoDismiss } from "@/lib/az-location";
 import { getSessionUser } from "@/lib/auth";
 import type { DealFlowItem, DealFlowKind } from "@/lib/types";
 
@@ -13,7 +14,18 @@ export async function GET() {
   if (!getSessionUser()) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  return NextResponse.json(await getDealFlow());
+  const items = await getDealFlow();
+  // One-pass cleanup: dismiss any still-open non-Arizona listings.
+  let changed = false;
+  for (const it of items) {
+    if (it.status === "new" && shouldAutoDismiss(it.kind, it.location || "")) {
+      it.status = "dismissed";
+      it.updatedAt = new Date().toISOString();
+      changed = true;
+    }
+  }
+  if (changed) await saveDealFlow(items);
+  return NextResponse.json(items);
 }
 
 export async function POST(req: NextRequest) {
@@ -36,7 +48,7 @@ export async function POST(req: NextRequest) {
     why: String(body.why ?? ""),
     industry: String(body.industry ?? "").trim(),
     location: String(body.location ?? "").trim(),
-    status: "new",
+    status: shouldAutoDismiss(KINDS.includes(body.kind) ? body.kind : "business_for_sale", String(body.location ?? "").trim()) ? "dismissed" : "new",
     relatedDealId: null,
     relatedExecId: null,
     createdAt: now,
