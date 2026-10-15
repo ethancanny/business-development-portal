@@ -6,13 +6,14 @@ import { useRouter } from "next/navigation";
 import TaskList from "@/components/TaskList";
 import PageHero from "@/components/PageHero";
 import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
-import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiMultiple, type Task } from "@/lib/types";
+import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiCompany, type MiIndicatorObs, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
 import type { Investor } from "@/lib/investors-db";
 import { fmtMoney } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
-import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
-import { SectorLegend } from "@/components/SectorChip";
+import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, sectorIcon, stageColor } from "@/lib/sector-colors";
+import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
+import CompanyLogo from "@/components/CompanyLogo";
 
 /** Fit-target sectors — all five focus sectors (Oct 14, 2026: the
  * density view includes Hospitality even at 0; there is no
@@ -66,6 +67,16 @@ export default function Overview() {
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [rates, setRates] = useState<MarketRates>({});
   const [fitCounts, setFitCounts] = useState<Record<string, number | null>>({});
+  // Premium redesign Wave 1: market strip (latest + previous FRED
+  // observations per series) and Top Signals (newest high-signal fits).
+  const [rateStrip, setRateStrip] = useState<
+    { label: string; value: number; change: number | null; date: string }[]
+  >([]);
+  const [topSignals, setTopSignals] = useState<MiCompany[]>([]);
+  const [savedSignals, setSavedSignals] = useState<string[]>([]);
+  const [dismissedSignals, setDismissedSignals] = useState<string[]>([]);
+  const [addedSignalIds, setAddedSignalIds] = useState<string[]>([]);
+  const [addingSignalId, setAddingSignalId] = useState<string | null>(null);
   const [weekTab, setWeekTab] = useState<"this" | "last">("this");
   const [showOtherCal, setShowOtherCal] = useState(false);
   const [analyticsTab, setAnalyticsTab] = useState<"pipeline" | "sourcing" | "relationships">("pipeline");
@@ -75,7 +86,7 @@ export default function Overview() {
     try {
       const calFrom = new Date(Date.now() - 16 * 86400000).toISOString();
       const calTo = new Date(Date.now() + 28 * 86400000).toISOString();
-      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes, calRes, invRes, multRes, ratesRes] = await Promise.all([
+      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes, calRes, invRes, multRes, ratesRes, indRes] = await Promise.all([
         fetch("/api/auth/me"),
         fetch("/api/deals"),
         fetch("/api/executives"),
@@ -86,6 +97,7 @@ export default function Overview() {
         fetch("/api/investors"),
         fetch("/api/market/multiples"),
         fetch("/api/market/rates"),
+        fetch("/api/market/indicators?series=DPRIME,SOFR,DGS10,DGS2"),
       ]);
       if (
         meRes.status === 401 ||
@@ -120,6 +132,40 @@ export default function Overview() {
         const rd = await ratesRes.json().catch(() => null);
         setRates({ prime: rd?.prime?.value ?? null, sba: rd?.sba?.value ?? null });
       }
+      if (indRes.ok) {
+        // Market strip: latest observation per series plus the change
+        // vs the previous observation (the rates endpoint returns
+        // latest-only, so the strip reads the indicator series).
+        const obs = (await indRes.json().catch(() => [])) as MiIndicatorObs[];
+        if (Array.isArray(obs)) {
+          const defs = [
+            { id: "DPRIME", label: "Prime" },
+            { id: "SOFR", label: "SOFR" },
+            { id: "DGS10", label: "10-Yr Treasury" },
+            { id: "DGS2", label: "2-Yr Treasury" },
+          ];
+          const strip: { label: string; value: number; change: number | null; date: string }[] = [];
+          for (const def of defs) {
+            const rows = obs
+              .filter((o) => o.seriesId === def.id && o.value !== null)
+              .slice()
+              .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+            const last = rows[rows.length - 1];
+            if (!last || last.value === null) continue;
+            const prev = rows[rows.length - 2];
+            strip.push({
+              label: def.label,
+              value: last.value,
+              change:
+                prev && prev.value !== null
+                  ? Math.round((last.value - prev.value) * 100) / 100
+                  : null,
+              date: last.obsDate,
+            });
+          }
+          setRateStrip(strip);
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -138,6 +184,55 @@ export default function Overview() {
           if (live) setFitCounts((c) => ({ ...c, [s]: 0 }));
         });
     }
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // Top Signals (premium redesign Wave 1): the newest high-signal fit
+  // targets. The companies endpoint orders by signal_value desc, so
+  // its first page is the highest-signal slice; keep fits first seen
+  // in the last 14 days and take the top three. Save / Dismiss persist
+  // in localStorage across visits.
+  useEffect(() => {
+    try {
+      const s = window.localStorage.getItem("ccp-saved-signals");
+      if (s) setSavedSignals(JSON.parse(s) as string[]);
+      const d = window.localStorage.getItem("ccp-dismissed-signals");
+      if (d) setDismissedSignals(JSON.parse(d) as string[]);
+    } catch {
+      /* storage unavailable — saves/dismissals are session-only */
+    }
+    let live = true;
+    fetch("/api/market/companies?limit=250")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { companies?: MiCompany[] } | null) => {
+        if (!live || !d || !Array.isArray(d.companies)) return;
+        const cutoff = Date.now() - 14 * 86400000;
+        const picks = d.companies
+          .filter((c) => {
+            if (c.status === "dismissed") return false;
+            if (new Date(c.firstSeen).getTime() < cutoff) return false;
+            try {
+              return (
+                (JSON.parse(c.details || "{}") as Record<string, unknown>)
+                  .fit === true
+              );
+            } catch {
+              return false;
+            }
+          })
+          .sort(
+            (a, b) =>
+              (b.signalValue ?? -1) - (a.signalValue ?? -1) ||
+              b.firstSeen.localeCompare(a.firstSeen)
+          )
+          .slice(0, 3);
+        setTopSignals(picks);
+      })
+      .catch(() => {
+        /* the section simply renders nothing */
+      });
     return () => {
       live = false;
     };
@@ -215,12 +310,24 @@ export default function Overview() {
       })),
     [deals, multiples, rates]
   );
-  const maxStageValue = Math.max(1, ...valueByStage.map((s) => s.value));
-
   const unclaimed = useMemo(
     () => activeDeals.filter((d) => !d.owner),
     [activeDeals]
   );
+
+  // Pipeline card strip order: stage order first, then value desc.
+  const stripDeals = useMemo(() => {
+    const order = (s: string) =>
+      (DEAL_STAGES as readonly string[]).indexOf(s);
+    return [...scopedActiveDeals].sort((a, b) => {
+      const byStage = order(a.stage) - order(b.stage);
+      if (byStage !== 0) return byStage;
+      return (
+        (resolveDealValue(b, multiples, rates).value ?? 0) -
+        (resolveDealValue(a, multiples, rates).value ?? 0)
+      );
+    });
+  }, [scopedActiveDeals, multiples, rates]);
 
   // Deals with no logged touch in 30+ days (interactions fall back to last update).
   // Weekly summary windows (local time): this week = Monday 00:00 → now,
@@ -271,8 +378,8 @@ export default function Overview() {
   // Upcoming important dates for the weekly summary (Ethan, Oct 9, 2026):
   // the next 14 days of Outlook events mirrored into the portal. (The
   // earlier "Activity highlights" lines were removed at Ethan's request —
-  // the summary is counts + important dates, with Tasks & follow-ups
-  // directly below.)
+  // the summary is counts + important dates. Wave 1 reorder, Oct 14:
+  // Tasks & follow-ups now sit directly above this section.)
   // Oct 14, 2026: Important Dates shows only meetings linked to a
   // Directory contact or a deal — an attendee matching a deal contact
   // or an operator/investor, or the event title naming the company or
@@ -331,6 +438,103 @@ export default function Overview() {
       newThisWeek: execs.filter((e) => new Date(e.createdAt) >= monday).length,
     };
   }, [execs, deals]);
+
+  // --- Top Signals actions -------------------------------------------------
+  const signalKey = (c: MiCompany) => c.dedupKey || c.id;
+
+  const persistSignalList = (name: string, list: string[]) => {
+    try {
+      window.localStorage.setItem(name, JSON.stringify(list));
+    } catch {
+      /* storage unavailable — the in-state list still applies */
+    }
+  };
+
+  const dismissSignal = (c: MiCompany) => {
+    const next = [...dismissedSignals, signalKey(c)];
+    setDismissedSignals(next);
+    persistSignalList("ccp-dismissed-signals", next);
+  };
+
+  const toggleSaveSignal = (c: MiCompany) => {
+    const k = signalKey(c);
+    const next = savedSignals.includes(k)
+      ? savedSignals.filter((x) => x !== k)
+      : [...savedSignals, k];
+    setSavedSignals(next);
+    persistSignalList("ccp-saved-signals", next);
+  };
+
+  // Same conversion CompanyTargets performs: create the deal, then
+  // mark the company "added" so it leaves the triage surfaces.
+  const addSignalToPipeline = async (c: MiCompany) => {
+    setAddingSignalId(c.id);
+    try {
+      const notes = [
+        `Profile from ${c.source} (Market Intel company targets).`,
+        c.subsector
+          ? `Sub-sector: ${c.subsector}${c.naics ? ` (NAICS ${c.naics})` : ""}.`
+          : "",
+        c.signalValue
+          ? `${c.signalLabel || "Size signal"}: ${fmtMoney(c.signalValue)}.`
+          : "",
+        c.contactName
+          ? `Contact on file: ${c.contactName}${c.contactTitle ? `, ${c.contactTitle}` : ""}.`
+          : "",
+        c.formedDate ? `Registered/licensed since ${c.formedDate}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const res = await fetch("/api/deals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: c.name,
+          industry: c.sector || "",
+          city: c.city ? `${c.city}, AZ` : "",
+          contactName: c.contactName,
+          source: `Market Intel — ${c.source}`,
+          notes,
+        }),
+      });
+      if (res.ok) {
+        await fetch("/api/market/companies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: c.id, status: "added" }),
+        }).catch(() => null);
+        setAddedSignalIds((prev) => [...prev, c.id]);
+        load();
+      }
+    } finally {
+      setAddingSignalId(null);
+    }
+  };
+
+  // One-line "why it matters" for a signal card: the most recent
+  // recorded signal text, else the fit rationale, else the size
+  // signal label/value, else the sub-sector.
+  const signalWhy = (c: MiCompany): string => {
+    let d: Record<string, unknown> = {};
+    try {
+      d = JSON.parse(c.details || "{}") as Record<string, unknown>;
+    } catch {
+      d = {};
+    }
+    const sigs = Array.isArray(d.signals)
+      ? (d.signals as Record<string, unknown>[])
+      : [];
+    for (let i = sigs.length - 1; i >= 0; i--) {
+      const t = sigs[i]?.text;
+      if (typeof t === "string" && t.trim()) return t.trim();
+    }
+    if (typeof d.fitWhy === "string" && d.fitWhy.trim()) return d.fitWhy.trim();
+    if (c.signalLabel)
+      return c.signalValue
+        ? `${c.signalLabel}: ${fmtMoney(c.signalValue)}`
+        : c.signalLabel;
+    return c.subsector || "";
+  };
 
   const dismissEvent = async (eventId: string) => {
     setCalEvents((prev) => prev.filter((e) => e.eventId !== eventId));
@@ -607,10 +811,58 @@ export default function Overview() {
   );
   const showFullAnalytics = deals.length >= 10 && compLogCount >= 5;
 
+  // Morning Brief (premium redesign Wave 1): today's date, a one-line
+  // summary built ONLY from counts this page already loads (meetings
+  // today from the calendar mirror, follow-ups due today, overdue) —
+  // any component that can't be derived is omitted, never estimated.
+  const briefDate = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    timeZone: "America/Phoenix",
+  });
+  const phoenixDay = (iso: string) =>
+    new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Phoenix" });
+  const todayStr = phoenixDay(new Date().toISOString());
+  const meetingsToday = calEvents.filter(
+    (e) => phoenixDay(e.startsAt) === todayStr
+  ).length;
+  const dueTodayCount = openTasks.filter((t) => t.dueDate === todayStr).length;
+  const briefParts: string[] = [];
+  if (meetingsToday > 0)
+    briefParts.push(
+      `${meetingsToday} meeting${meetingsToday === 1 ? "" : "s"} today`
+    );
+  if (dueTodayCount > 0)
+    briefParts.push(
+      `${dueTodayCount} follow-up${dueTodayCount === 1 ? "" : "s"} due today`
+    );
+  if (overdueTasks.length > 0) briefParts.push(`${overdueTasks.length} overdue`);
+  const fitTotalReady = FIT_SECTORS.every(
+    (s) => fitCounts[s] !== undefined && fitCounts[s] !== null
+  );
+  const fitTotal = FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0);
+  const rateAsOf = rateStrip.length
+    ? rateStrip
+        .map((r) => r.date)
+        .sort()
+        .slice(-1)[0]
+    : "";
+  const visibleSignals = topSignals.filter(
+    (c) => !dismissedSignals.includes(signalKey(c))
+  );
+
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <p className="text-sm text-slate-500 dark:text-white/50">Loading overview…</p>
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6" aria-busy="true">
+        <div className="skel mb-6 h-44 w-full" />
+        <div className="mb-6 grid gap-3 sm:grid-cols-3">
+          <div className="skel h-48" />
+          <div className="skel h-48" />
+          <div className="skel h-48" />
+        </div>
+        <div className="skel h-64 w-full" />
+        <span className="sr-only">Loading overview…</span>
       </div>
     );
   }
@@ -620,41 +872,6 @@ export default function Overview() {
     day: "numeric",
     year: "numeric",
   });
-
-  const stats: {
-    label: string;
-    value: string;
-    alert?: boolean;
-    sub?: string;
-    note?: string;
-    accent: string;
-    href?: string;
-  }[] = [
-    {
-      label: "Active pipeline value",
-      value: pipelineValued.length === 0 ? "—" : fmtMoney(pipelineValue),
-      accent: "#b8975a",
-      href: "/pipeline",
-      note: "All sectors",
-    },
-    { label: "Active targets", value: String(activeDeals.length), accent: "#3B5B84", href: "/pipeline" },
-    {
-      label: "Deals & operators I've claimed",
-      value: String(myClaims),
-      accent: "#7D90B0",
-      href: "/pipeline",
-    },
-    {
-      label: "Open follow-ups",
-      value: String(openTasks.length),
-      accent: "#2F7F79",
-      alert: overdueTasks.length > 0,
-      sub:
-        overdueTasks.length > 0
-          ? `${overdueTasks.length} overdue`
-          : undefined,
-    },
-  ];
 
   return (
     <>
@@ -672,52 +889,396 @@ export default function Overview() {
         </div>
       )}
 
-      {/* Stat cards — thin accent top border per card (navy/gold/
-          sector tones; aging hues stay reserved for staleness). */}
-      <div className="mb-3 grid grid-cols-2 items-start gap-3 lg:grid-cols-4">
-        {stats.map((s) => {
-          const card = (
-            <>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-white/50">
-                {s.label}
-              </p>
-              <p
-                className="mt-1 text-2xl font-bold text-[#0d1f3c] dark:text-white"
-                style={s.alert ? { color: AGING_COLORS.bad } : undefined}
-              >
-                {s.value}
-              </p>
-              {s.sub && (
-                <p className="mt-0.5 text-xs" style={{ color: AGING_COLORS.bad }}>
-                  {s.sub}
-                </p>
-              )}
-              {s.note && (
-                <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">{s.note}</p>
-              )}
-            </>
-          );
-          const cls =
-            "rounded-xl border border-slate-200 bg-white p-3.5 dark:border-white/10 dark:bg-[#132847]";
-          const style = { borderTop: `3px solid ${s.accent}` };
-          return s.href ? (
-            <Link key={s.label} href={s.href} style={style} className={`${cls} block transition hover:border-[#b8975a]/60`}>
-              {card}
-            </Link>
-          ) : (
-            <div key={s.label} style={style} className={cls}>
-              {card}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Operators tile */}
-      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-white/50">
-            Operators
+      {/* Morning Brief (premium redesign Wave 1, Oct 14, 2026) —
+          replaces the stat-tile row: today's date, a one-line summary
+          from real counts only, and the key numbers as large serif
+          figures with small uppercase labels. Scope: ALL deals (the
+          count-all rule) — the old "All sectors." caption now rides
+          in the pipeline-value label line. */}
+      <section className="card-surface mb-6 p-5 sm:p-6">
+        <p className="font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">
+          {briefDate}
+        </p>
+        {briefParts.length > 0 && (
+          <p className="mt-1 text-sm text-slate-500 dark:text-white/60">
+            {briefParts.join(" · ")}
           </p>
+        )}
+        <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 lg:grid-cols-5">
+          <Link href="/pipeline" className="group block">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
+              Active pipeline value
+            </p>
+            <p className="tnum mt-1 font-display text-4xl font-semibold text-[#0d1f3c] transition group-hover:text-[#8a6f3c] dark:text-white dark:group-hover:text-[#d4b37a]">
+              {pipelineValued.length === 0 ? "—" : fmtMoney(pipelineValue)}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+              All sectors
+            </p>
+          </Link>
+          <Link href="/pipeline" className="group block">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
+              Active targets
+            </p>
+            <p className="tnum mt-1 font-display text-4xl font-semibold text-[#0d1f3c] transition group-hover:text-[#8a6f3c] dark:text-white dark:group-hover:text-[#d4b37a]">
+              {activeDeals.length}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+              In the pipeline now
+            </p>
+          </Link>
+          <Link href="/market-intel#fit-targets" className="group block">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
+              Fit targets
+            </p>
+            <p className="tnum mt-1 font-display text-4xl font-semibold text-[#0d1f3c] transition group-hover:text-[#8a6f3c] dark:text-white dark:group-hover:text-[#d4b37a]">
+              {fitTotalReady ? fitTotal.toLocaleString() : "…"}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+              Across the five focus sectors
+            </p>
+          </Link>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
+              Open follow-ups
+            </p>
+            <p
+              className="tnum mt-1 font-display text-4xl font-semibold text-[#0d1f3c] dark:text-white"
+              style={overdueTasks.length > 0 ? { color: AGING_COLORS.bad } : undefined}
+            >
+              {openTasks.length}
+            </p>
+            {overdueTasks.length > 0 ? (
+              <p className="mt-0.5 text-xs" style={{ color: AGING_COLORS.bad }}>
+                {overdueTasks.length} overdue
+              </p>
+            ) : (
+              <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+                None overdue
+              </p>
+            )}
+          </div>
+          <Link href="/pipeline" className="group block">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
+              Claimed by me
+            </p>
+            <p className="tnum mt-1 font-display text-4xl font-semibold text-[#0d1f3c] transition group-hover:text-[#8a6f3c] dark:text-white dark:group-hover:text-[#d4b37a]">
+              {myClaims}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+              Deals &amp; operators
+            </p>
+          </Link>
+        </div>
+        {showFullAnalytics && (
+          <div className="mt-5 border-t border-slate-100 pt-3 dark:border-white/10">
+            <Link
+              href="/analytics"
+              className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+            >
+              View full analytics →
+            </Link>
+          </div>
+        )}
+      </section>
+
+      {/* Top Signals — the newest high-signal fit targets. No
+          per-sector photography exists in the portal and unlicensed
+          images are off-limits, so the card header is the sector
+          color under the standard navy grade with the sector icon. */}
+      {visibleSignals.length > 0 && (
+        <section className="mb-6">
+          <div className="mb-3 flex items-baseline justify-between gap-2">
+            <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+              Top signals
+            </h2>
+            <Link
+              href="/market-intel#fit-targets"
+              className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+            >
+              All fit targets →
+            </Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {visibleSignals.map((c) => {
+              const key = signalKey(c);
+              const saved = savedSignals.includes(key);
+              const added =
+                c.status === "added" || addedSignalIds.includes(c.id);
+              const why = signalWhy(c);
+              return (
+                <article key={c.id} className="card-surface overflow-hidden">
+                  <div
+                    className="img-grade h-24"
+                    style={{
+                      background: `linear-gradient(135deg, ${sectorColor(c.sector)} 0%, #0d1f3c 130%)`,
+                    }}
+                  >
+                    <div className="flex h-full items-center justify-center">
+                      <span className="text-4xl text-white/85" aria-hidden>
+                        {sectorIcon(c.sector)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    <p className="truncate font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
+                      {c.name}
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                      <SectorChip sector={c.sector} />
+                      {(c.city || c.state) && (
+                        <span className="text-xs text-slate-400 dark:text-white/40">
+                          {[c.city, c.state].filter(Boolean).join(", ")}
+                        </span>
+                      )}
+                    </div>
+                    {why && (
+                      <p className="mt-2 line-clamp-2 text-sm text-slate-600 dark:text-white/70">
+                        {why}
+                      </p>
+                    )}
+                    <p className="mt-2 text-[11px] text-slate-400 dark:text-white/40">
+                      First seen{" "}
+                      {new Date(c.firstSeen).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                      {c.signalValue
+                        ? ` · ${c.signalLabel || "Signal"} ${fmtMoney(c.signalValue)}`
+                        : ""}
+                    </p>
+                    <div className="mt-3 flex items-center gap-2">
+                      {added ? (
+                        <span className="rounded-lg bg-[#b8975a]/15 px-3 py-1.5 text-xs font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">
+                          In pipeline ✓
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => addSignalToPipeline(c)}
+                          disabled={addingSignalId === c.id}
+                          className="rounded-lg bg-[#b8975a] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#a8874f] disabled:opacity-60"
+                        >
+                          {addingSignalId === c.id ? "Adding…" : "Add to pipeline"}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => toggleSaveSignal(c)}
+                        aria-pressed={saved}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                          saved
+                            ? "border-[#b8975a] text-[#8a6f3c] dark:text-[#d4b37a]"
+                            : "border-slate-200 text-slate-500 hover:border-[#b8975a]/60 dark:border-white/15 dark:text-white/60"
+                        }`}
+                      >
+                        {saved ? "Saved" : "Save"}
+                      </button>
+                      <button
+                        onClick={() => dismissSignal(c)}
+                        className="ml-auto px-1.5 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-600 dark:text-white/40 dark:hover:text-white/70"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Market strip — FRED reference rates only (Prime, SOFR,
+          10-Yr, 2-Yr) with the move vs the previous observation and
+          an as-of date. No sector ETF/reference quotes: no licensed
+          source exists, and unlabeled data is off-limits. */}
+      {rateStrip.length > 0 && (
+        <section className="card-surface mb-6 flex flex-wrap items-center gap-x-8 gap-y-3 px-5 py-3.5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
+            Markets
+          </p>
+          {rateStrip.map((r) => (
+            <div key={r.label} className="flex items-baseline gap-2">
+              <span className="text-xs font-medium text-slate-500 dark:text-white/60">
+                {r.label}
+              </span>
+              <span className="tnum font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
+                {r.value.toFixed(2)}%
+              </span>
+              {r.change !== null && r.change !== 0 && (
+                <span
+                  className={`tnum text-xs font-semibold ${
+                    r.change > 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-500 dark:text-rose-400"
+                  }`}
+                >
+                  {r.change > 0 ? "▲" : "▼"} {Math.abs(r.change).toFixed(2)}
+                </span>
+              )}
+            </div>
+          ))}
+          {rateAsOf && (
+            <p className="ml-auto text-[11px] text-slate-400 dark:text-white/40">
+              As of{" "}
+              {new Date(`${rateAsOf}T12:00:00`).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}{" "}
+              · FRED
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* Sector Overview — one tile per focus sector (fit counts from
+          the same per-sector fetches as the density view; the
+          tailwind score arrives with Phase 5 scoring and is omitted
+          until the data exists). The MI page takes no sector param,
+          so tiles link to the Fit Targets tab. */}
+      <section className="mb-6">
+        <div className="mb-3 flex items-baseline justify-between gap-2">
+          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+            Sector overview
+          </h2>
+          <Link
+            href="/market-intel#fit-targets"
+            className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+          >
+            Open Market Intel →
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+          {FIT_SECTORS.map((sector) => {
+            const count = fitCounts[sector];
+            return (
+              <Link
+                key={sector}
+                href="/market-intel#fit-targets"
+                className="card-surface group block overflow-hidden"
+              >
+                <div
+                  className="img-grade h-16 sm:h-20"
+                  style={{
+                    background: `linear-gradient(135deg, ${sectorColor(sector)} 0%, #0d1f3c 130%)`,
+                  }}
+                >
+                  <div className="flex h-full items-center justify-center">
+                    <span className="text-3xl text-white/85" aria-hidden>
+                      {sectorIcon(sector)}
+                    </span>
+                  </div>
+                </div>
+                <div className="p-3.5">
+                  <p className="font-display text-lg font-semibold leading-tight text-[#0d1f3c] dark:text-white">
+                    {sector}
+                  </p>
+                  {sector === "Hospitality" ? (
+                    <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
+                      No data source connected yet.
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-500 dark:text-white/60">
+                      <span className="tnum font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+                        {count === null || count === undefined
+                          ? "…"
+                          : count.toLocaleString()}
+                      </span>{" "}
+                      fit targets
+                    </p>
+                  )}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Pipeline card strip — replaces the by-stage bars: one card
+          per active deal (logo, stage, resolved value, days in
+          stage), with the per-stage count · value line the bars
+          carried kept above the strip. */}
+      <section className="mb-6">
+        <div className="mb-1 flex items-baseline justify-between gap-2">
+          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+            Pipeline
+          </h2>
+          <Link
+            href="/pipeline"
+            className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+          >
+            Open pipeline →
+          </Link>
+        </div>
+        <p className="tnum mb-3 text-xs text-slate-400 dark:text-white/40">
+          {valueByStage
+            .filter((s) => s.count > 0)
+            .map((s) => `${s.stage}: ${s.count} · ${fmtMoney(s.value)}`)
+            .join("  ·  ")}
+        </p>
+        {stripDeals.length > 0 ? (
+          <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2">
+            {stripDeals.map((d) => {
+              const v = resolveDealValue(d, multiples, rates).value;
+              const days = daysSince(d.updatedAt);
+              return (
+                <Link
+                  key={d.id}
+                  href="/pipeline"
+                  className="card-surface block w-[232px] shrink-0 snap-start p-4 transition hover:border-[#b8975a]/60"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <CompanyLogo
+                      name={d.companyName}
+                      sector={d.industry}
+                      size={30}
+                    />
+                    <p className="min-w-0 flex-1 truncate font-display text-lg font-semibold text-[#0d1f3c] dark:text-white">
+                      {d.companyName}
+                    </p>
+                  </div>
+                  <div className="mt-3">
+                    <StageChip stage={d.stage} />
+                  </div>
+                  <p className="tnum mt-2 font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+                    {v === null ? "—" : fmtMoney(v)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+                    {days === 0 ? "Updated today" : `${days}d in stage`}
+                  </p>
+                </Link>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400 dark:text-white/40">
+            No active deals right now.
+          </p>
+        )}
+        {unclaimed.length > 0 && (
+          <div className="mt-3 rounded-lg bg-[#b8975a]/10 px-3 py-2.5 dark:bg-[#b8975a]/15">
+            <p className="text-xs font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">
+              {unclaimed.length} unclaimed{" "}
+              {unclaimed.length === 1 ? "target" : "targets"}:{" "}
+              <span className="font-normal">
+                {unclaimed
+                  .slice(0, 3)
+                  .map((d) => d.companyName)
+                  .join(", ")}
+                {unclaimed.length > 3 && ` +${unclaimed.length - 3} more`}
+              </span>
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* Operators tile (restyled Wave 1: card surface + serif figures) */}
+      <section className="card-surface mb-6 p-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+            Operators
+          </h2>
           <Link
             href="/directory"
             className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
@@ -725,26 +1286,65 @@ export default function Overview() {
             Open Directory →
           </Link>
         </div>
-        <div className="mt-2 grid grid-cols-3 gap-3">
+        <div className="mt-3 grid grid-cols-3 gap-3">
           <div>
-            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{operatorStats.interviewing}</p>
+            <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{operatorStats.interviewing}</p>
             <p className="text-xs text-slate-500 dark:text-white/50">Interviewing</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{operatorStats.paired}</p>
+            <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{operatorStats.paired}</p>
             <p className="text-xs text-slate-500 dark:text-white/50">Paired to a deal</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{operatorStats.newThisWeek}</p>
+            <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{operatorStats.newThisWeek}</p>
             <p className="text-xs text-slate-500 dark:text-white/50">New candidates this week</p>
           </div>
         </div>
-      </div>
+      </section>
+
+      {/* Tasks & follow-ups (moved above the Weekly summary in the
+          Wave 1 reorder, Oct 14, 2026) */}
+      <section id="overview-tasks" className="card-surface mb-6 scroll-mt-4 p-5">
+        <h2 className="mb-4 font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+          Tasks &amp; follow-ups
+        </h2>
+        <TaskList
+          tasks={tasks}
+          deals={deals}
+          execs={execs}
+          onChanged={load}
+        />
+      </section>
+
+      {staleDeals.length > 0 && (
+        <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
+            ⚠ {staleDeals.length} {staleDeals.length === 1 ? "deal is" : "deals are"} going stale
+            <span className="font-normal"> — no touch in 30+ days: </span>
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {staleDeals.slice(0, 6).map((d) => (
+              <Link
+                key={d.id}
+                href={`/deals/${d.id}`}
+                className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-800 shadow-sm hover:underline dark:bg-white/10 dark:text-amber-200"
+              >
+                {d.companyName}
+              </Link>
+            ))}
+            {staleDeals.length > 6 && (
+              <span className="px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+                +{staleDeals.length - 6} more
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Weekly summary */}
-      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-white/10 dark:bg-[#132847]">
+      <div className="card-surface mb-6 p-4 sm:p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-base font-bold text-[#0d1f3c] dark:text-white">
+          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
             📅 Weekly summary
           </h2>
           <div className="flex items-center gap-2">
@@ -877,171 +1477,18 @@ export default function Overview() {
         )}
       </div>
 
-      {/* Tasks & follow-ups — directly below the Weekly summary's
-          Important dates (Ethan, Oct 9, 2026) */}
-      <section id="overview-tasks" className="mb-6 scroll-mt-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
-        <h2 className="mb-4 text-base font-bold text-[#0d1f3c] dark:text-white">
-          Tasks &amp; follow-ups
-        </h2>
-        <TaskList
-          tasks={tasks}
-          deals={deals}
-          execs={execs}
-          onChanged={load}
-        />
-      </section>
-
-      {staleDeals.length > 0 && (
-        <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
-          <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
-            ⚠ {staleDeals.length} {staleDeals.length === 1 ? "deal is" : "deals are"} going stale
-            <span className="font-normal"> — no touch in 30+ days: </span>
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {staleDeals.slice(0, 6).map((d) => (
-              <Link
-                key={d.id}
-                href={`/deals/${d.id}`}
-                className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-800 shadow-sm hover:underline dark:bg-white/10 dark:text-amber-200"
-              >
-                {d.companyName}
-              </Link>
-            ))}
-            {staleDeals.length > 6 && (
-              <span className="px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
-                +{staleDeals.length - 6} more
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Pipeline by stage */}
-        <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-base font-bold text-[#0d1f3c] dark:text-white">
-              Pipeline by stage
-            </h2>
-            <Link
-              href="/pipeline"
-              className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
-            >
-              Open pipeline →
-            </Link>
-          </div>
-          <div className="flex flex-col gap-2.5">
-            {valueByStage.map(({ stage, value, count }) => (
-              <div key={stage}>
-                <div className="mb-1 flex items-baseline justify-between text-xs">
-                  <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">{stage}</span>
-                  <span className="text-slate-500 dark:text-white/50">
-                    {count} · {fmtMoney(value)}
-                  </span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${(value / maxStageValue) * 100}%`,
-                      background: barGradient(stageColor(stage)),
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-          {unclaimed.length > 0 && (
-            <div className="mt-4 rounded-lg bg-[#b8975a]/10 px-3 py-2.5 dark:bg-[#b8975a]/15">
-              <p className="text-xs font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">
-                {unclaimed.length} unclaimed{" "}
-                {unclaimed.length === 1 ? "target" : "targets"}:{" "}
-                <span className="font-normal">
-                  {unclaimed
-                    .slice(0, 3)
-                    .map((d) => d.companyName)
-                    .join(", ")}
-                  {unclaimed.length > 3 &&
-                    ` +${unclaimed.length - 3} more`}
-                </span>
-              </p>
-            </div>
-          )}
-        </section>
-
-        {/* Fit-target density by sector (replaces the "Where we're
-            looking" map, Oct 14, 2026) */}
-        <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-base font-bold text-[#0d1f3c] dark:text-white">
-              Fit targets by sector
-            </h2>
-            <Link
-              href="/market-intel#fit-targets"
-              className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
-            >
-              Open Market Intel →
-            </Link>
-          </div>
-          <div className="mb-3">
-            <SectorLegend sectors={[...FIT_SECTORS]} />
-          </div>
-          <div className="flex flex-col gap-2.5">
-            {FIT_SECTORS.map((sector) => {
-              const count = fitCounts[sector];
-              const maxFit = Math.max(
-                1,
-                ...FIT_SECTORS.map((s) => fitCounts[s] ?? 0)
-              );
-              return (
-                <div key={sector}>
-                  <div className="mb-1 flex items-baseline justify-between text-xs">
-                    <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">{sector}</span>
-                    <span className="text-slate-500 dark:text-white/50">
-                      {count === null || count === undefined ? "…" : count.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${(((count ?? 0) / maxFit) * 100).toFixed(1)}%`,
-                        background: barGradient(sectorColor(sector)),
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <p className="mt-3 text-xs text-slate-400 dark:text-white/40">
-            {FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0).toLocaleString()} fit
-            targets across the five focus sectors — live from Market Intel
-            (Hospitality: no data source connected yet.){" "}
-            Data as of {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · n ={" "}
-            {FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0).toLocaleString()}
-          </p>
-        </section>
-      </div>
-
       {/* Analytics — tabbed (Oct 14, 2026 visual refresh): Pipeline |
           Sourcing | Relationships, one window selector, every chart
           footed with its data date and sample size. Scope: ALL deals
           (the non-focus toggle was removed later on Oct 14). */}
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
+      <section className="card-surface mt-6 p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-base font-bold text-[#0d1f3c] dark:text-white">
+          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
             Analytics
           </h2>
           <div className="flex items-center gap-2">
-            {showFullAnalytics && (
-              <Link
-                href="/analytics"
-                className="mr-1 text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
-              >
-                View full analytics →
-              </Link>
-            )}
+            {/* "View full analytics" moved under the Morning Brief in
+                Wave 1 — same gate (showFullAnalytics), one location. */}
             <div className="flex overflow-hidden rounded-lg border border-slate-200 dark:border-white/15">
               {(
                 [
@@ -1085,7 +1532,7 @@ export default function Overview() {
           <div>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <div>
-                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+                <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">
                   {analytics.addedWin}
                 </p>
                 <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
@@ -1093,7 +1540,7 @@ export default function Overview() {
                 </p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+                <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">
                   {analytics.avgValue === null ? "—" : fmtMoney(analytics.avgValue)}
                 </p>
                 <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
@@ -1104,7 +1551,7 @@ export default function Overview() {
                 </p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+                <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">
                   {analytics.ebitdaCount === 0 ? "—" : fmtMoney(analytics.ebitdaSum)}
                 </p>
                 <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
@@ -1115,7 +1562,7 @@ export default function Overview() {
                 </p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+                <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">
                   {analytics.winRate === null ? "—" : `${analytics.winRate}%`}
                 </p>
                 <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
@@ -1271,19 +1718,19 @@ export default function Overview() {
 
             <div className="mt-5 grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 sm:grid-cols-4 dark:border-white/10">
               <div>
-                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{sourcing.reviewed}</p>
+                <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{sourcing.reviewed}</p>
                 <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Listings reviewed ({winDays}d)</p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{sourcing.added}</p>
+                <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{sourcing.added}</p>
                 <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Added to pipeline</p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{sourcing.dismissed}</p>
+                <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{sourcing.dismissed}</p>
                 <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Dismissed</p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{sourcing.pending}</p>
+                <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{sourcing.pending}</p>
                 <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Still new</p>
               </div>
             </div>
