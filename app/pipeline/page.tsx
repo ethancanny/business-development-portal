@@ -10,7 +10,7 @@ import PairingTable, { type Pairing } from "@/components/PairingTable";
 import { DealModal, ExecutiveModal } from "@/components/Modals";
 import PageHero from "@/components/PageHero";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type Executive, type MiMultiple } from "@/lib/types";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, uniqueStrings } from "@/lib/format";
 import { dealFocusSector, resolveDealValue } from "@/lib/valuation";
 import CompanyLogo from "@/components/CompanyLogo";
 import PersonAvatar from "@/components/PersonAvatar";
@@ -345,7 +345,7 @@ export default function Dashboard() {
                 </div>
                 {d.operatorIds && d.operatorIds.length > 0 ? (
                   <div className="mt-1.5 flex flex-wrap gap-1">
-                    {d.operatorIds.map((oid) => (
+                    {uniqueStrings(d.operatorIds).map((oid) => (
                       <span
                         key={oid}
                         className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-500/20 dark:text-violet-200"

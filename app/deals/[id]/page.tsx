@@ -14,7 +14,7 @@ import type {
   Interaction,
   Task,
 } from "@/lib/types";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney, uniqueStrings } from "@/lib/format";
 import PageHero from "@/components/PageHero";
 import type { MiMultiple } from "@/lib/types";
 import { dealFocusSector, resolveDealValue, type MarketRates } from "@/lib/valuation";
@@ -304,7 +304,7 @@ export default function DealDetailPage() {
           </div>
           {deal.operatorIds && deal.operatorIds.length > 0 ? (
             <ul className="flex flex-col gap-2">
-              {deal.operatorIds.map((id) => {
+              {uniqueStrings(deal.operatorIds).map((id) => {
                 const op = execs.find((e) => e.id === id);
                 if (!op) return null;
                 return (
@@ -316,7 +316,7 @@ export default function DealDetailPage() {
                       {op.name}
                     </span>
                     <span className="flex gap-1">
-                      {(op.industries ?? []).map((ind) => (
+                      {uniqueStrings(op.industries ?? []).map((ind) => (
                         <span
                           key={ind}
                           className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-[11px] font-medium text-[#8a6f3c] dark:text-[#d4b37a]"
