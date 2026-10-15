@@ -1081,6 +1081,26 @@ export async function retireSecBankruptcyFilings(): Promise<void> {
     WHERE category = 'bankruptcy' AND status = 'new' AND form = '8-K'`;
 }
 
+/** Best company-spine match for a free-text company name (normalized
+ * exact / containment), or null. Used to sector bankruptcy debtors and
+ * other name-only records against the focus-sector spine. */
+export async function findCompanyMatchByName(name: string): Promise<{ sector: string; name: string } | null> {
+  await ensureSchema();
+  const db = sql();
+  const norm = normCompanyName(cleanFilerName(name));
+  if (!norm) return null;
+  const probe = norm.split(" ").filter((w) => w.length >= 5).sort((a, b) => b.length - a.length)[0] ?? norm.split(" ")[0];
+  if (!probe) return null;
+  const cands = (await db`SELECT name, sector FROM mi_companies WHERE name ILIKE ${"%" + probe + "%"} LIMIT 200`) as unknown as Record<string, unknown>[];
+  let hit = cands.find((c) => normCompanyName(str(c.name)) === norm);
+  if (!hit)
+    hit = cands.find((c) => {
+      const cn = normCompanyName(str(c.name));
+      return cn.length >= 4 && (cn.includes(norm) || norm.includes(cn));
+    });
+  return hit ? { sector: str(hit.sector), name: str(hit.name) } : null;
+}
+
 function normCompanyName(n: string): string {
   return n
     .toLowerCase()
