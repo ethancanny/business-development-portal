@@ -97,21 +97,15 @@ export default function SiteHeader() {
       <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between gap-2 px-4 py-3 sm:px-6 md:h-auto xl:gap-4">
         <div className="flex min-w-0 items-center gap-3 xl:gap-6">
           <Link href="/overview" className="flex shrink-0 items-center gap-3">
-            {/* Mobile brand (spec §2): a 32px gold-ringed "C" mark +
-                "Canny Capital" on one line. The hosted wordmark's
-                letter widths aren't fixed, so a cropped <img> would
-                show a sliver of the second letter — a serif C glyph
-                in a ring is the deliberate-looking mark. */}
-            <span className="flex items-center gap-2 md:hidden">
-              <span
-                aria-hidden
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-[#b8975a] font-serif text-lg font-bold leading-none text-white"
-              >
-                C
-              </span>
-              <span className="whitespace-nowrap text-sm font-bold text-white">
-                Canny Capital
-              </span>
+            {/* Mobile brand: the real wordmark (Ethan, Oct 14 — the
+                interim serif-C glyph mark was rejected: "put our logo
+                back at the top"). h-8 keeps the 56px row balanced. */}
+            <span className="flex items-center md:hidden">
+              <img
+                src="https://cannycapitalpartners.com/canny-logo-white.png"
+                alt="Canny Capital Partners"
+                className="h-8 w-auto"
+              />
             </span>
             {/* Desktop brand: full wordmark + portal title (unchanged). */}
             <span className="hidden items-center gap-3 md:flex">
