@@ -8,18 +8,10 @@ html,
 body {
   overflow-x: clip;
 }
-/* App background (Ethan, Oct 14 2026): purely the cacti / night-sky
-   photo behind everything — loading gaps, page margins, overscroll.
-   Content surfaces (cards, tables, modals) keep their own opaque
-   backgrounds; this paints only what would otherwise be flat color.
-   The layout's body bg-color classes remain as the pre-image paint. */
-body {
-  background-image: url("https://cannycapitalpartners.com/arizona-desert-landscape.jpg");
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;
-  background-repeat: no-repeat;
-}
+/* NOTE (Ethan, Oct 14 2026, correction): the cacti / night-sky photo
+   is the mobile app's SPLASH / loading image only — never the site
+   background. A body-backdrop rule shipped briefly and was reverted
+   the same night at his direction. Do not re-add. */
 * {
   -webkit-tap-highlight-color: transparent;
 }
