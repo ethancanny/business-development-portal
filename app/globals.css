@@ -61,21 +61,27 @@ html.kb-open .fab-root {
    gradients"): a soft navy-to-gold wash behind the table body and a
    navy gradient band across the header row. Add class "tbl-grad" to a
    <table>. Row hover tints are translucent, so the wash shows through. */
+/* Ethan (Oct 14, late): "i liked the old table look better" — the full
+   gradient wash + navy header band came off the tables the same night it
+   shipped. Tables are back to the clean look: light header, white rows,
+   hover tints only. The gradient BARS (barGradient in sector-colors)
+   stay — those are what he originally pointed at. The class name is kept
+   so all 19 table usages update from this one definition. */
 .tbl-grad {
-  background-image: linear-gradient(135deg, rgba(230, 237, 246, 0.85), rgba(255, 255, 255, 0.25) 45%, rgba(247, 241, 227, 0.85));
+  background-image: none;
 }
 .tbl-grad thead th {
-  background-image: linear-gradient(to bottom, #1c3560, #0d1f3c);
-  color: #f3ead8;
-  border-bottom: 2px solid #b8975a;
+  background-color: #eef2f7;
+  color: #33475f;
+  border-bottom: 1px solid #d7dee8;
 }
 .dark .tbl-grad {
-  background-image: linear-gradient(135deg, rgba(26, 51, 88, 0.5), rgba(13, 31, 60, 0.12) 50%, rgba(184, 151, 90, 0.12));
+  background-image: none;
 }
 .dark .tbl-grad thead th {
-  background-image: linear-gradient(to bottom, #24436f, #101f3a);
-  color: #f3ead8;
-  border-bottom: 2px solid rgba(184, 151, 90, 0.75);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #dbe4f0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 /* Premium redesign Wave 1 (Oct 14, 2026) — design-system utilities.
