@@ -16,7 +16,9 @@ function parseIndustries(body: unknown): string[] {
     : typeof body === "string"
       ? body.split(",")
       : [];
-  return list.map((v) => String(v).trim()).filter((v) => v !== "");
+  // Dedupe exact repeats ("Healthcare, Healthcare") so industry chips
+  // never print twice (Ethan, Oct 14, 2026).
+  return Array.from(new Set(list.map((v) => String(v).trim()).filter((v) => v !== "")));
 }
 
 export async function POST(req: NextRequest) {

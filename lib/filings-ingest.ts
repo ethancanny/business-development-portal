@@ -208,7 +208,13 @@ async function enrichFormDs(): Promise<number> {
       const persons: string[] = [];
       const personRe = /<relatedPerson>[\s\S]*?<firstName>([^<]*)<\/firstName>[\s\S]*?<lastName>([^<]*)<\/lastName>/g;
       let pm: RegExpExecArray | null;
-      while ((pm = personRe.exec(xml)) !== null && persons.length < 6) persons.push(`${pm[1]} ${pm[2]}`.trim());
+      // A Form D lists the same person once per role (officer AND
+      // director) — dedupe exact repeats so the Related line never
+      // prints a name twice (Ethan, Oct 14, 2026).
+      while ((pm = personRe.exec(xml)) !== null && persons.length < 6) {
+        const pname = `${pm[1]} ${pm[2]}`.trim();
+        if (pname && !persons.includes(pname)) persons.push(pname);
+      }
       const isFund = /pooled investment fund/i.test(industryGroup);
       const sector = formdSector(industryGroup);
       const tag = isFund ? "Competing capital" : sector ? "Operating company raise" : "Other";

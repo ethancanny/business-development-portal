@@ -370,12 +370,23 @@ export async function applyNewsAction(
   }
   const signals = Array.isArray(details.signals) ? (details.signals as unknown[]) : [];
   const published = item.published_at ? new Date(str(item.published_at)).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-  signals.push({
-    date: published,
-    source: "News",
-    text: `${str(item.headline)} — ${str(item.source_name)}`,
-    url: str(item.url),
+  // Dedupe on write (Ethan, Oct 14, 2026): linking the same story to the
+  // same company twice must not stack identical signals — identity is
+  // the signal text (headline — source) plus its URL.
+  const sigText = `${str(item.headline)} — ${str(item.source_name)}`;
+  const sigUrl = str(item.url);
+  const sigDupe = signals.some((sg) => {
+    const o = (sg ?? {}) as Record<string, unknown>;
+    return String(o.text ?? "") === sigText && String(o.url ?? "") === sigUrl;
   });
+  if (!sigDupe) {
+    signals.push({
+      date: published,
+      source: "News",
+      text: sigText,
+      url: sigUrl,
+    });
+  }
   details.signals = signals.slice(-20);
   await db`UPDATE mi_companies SET details = ${JSON.stringify(details).slice(0, 3900)} WHERE id = ${companyId}`;
   await db`UPDATE mi_news SET linked_company_id = ${companyId} WHERE id = ${id}`;

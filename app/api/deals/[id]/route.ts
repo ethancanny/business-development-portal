@@ -74,7 +74,9 @@ function parseMetrics(body: unknown): DealMetrics {
 
 function parseIdList(body: unknown): string[] {
   if (!Array.isArray(body)) return [];
-  return body.map((v) => String(v)).filter((v) => v !== "");
+  // Dedupe: a repeated operator id would render the same pairing chip
+  // twice on the deal (Ethan, Oct 14, 2026).
+  return Array.from(new Set(body.map((v) => String(v)).filter((v) => v !== "")));
 }
 
 function parseLinks(body: unknown): DealLink[] {
