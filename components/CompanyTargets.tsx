@@ -79,7 +79,20 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
 
   const th = "sticky top-0 bg-white px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-[#132847] dark:text-white/50";
   const td = "px-3 py-2 text-sm text-slate-700 dark:text-white/80";
-  const sources = Array.from(new Set(rows.map((r) => r.source))).join(" · ");
+  // Dedupe at the TOKEN level: a company's source is itself composite
+  // ("SAM.gov + USASpending"), so whole-string dedupe still printed
+  // "USASpending" once per distinct combination (Ethan, Oct 14).
+  const sourceTokens: string[] = [];
+  rows.forEach((r) => {
+    (r.source || "").split("+").forEach((t) => {
+      const tok = t.trim();
+      if (tok && sourceTokens.indexOf(tok) === -1) sourceTokens.push(tok);
+    });
+  });
+  const sources =
+    sourceTokens.length > 6
+      ? sourceTokens.slice(0, 6).join(" · ") + ` +${sourceTokens.length - 6} more`
+      : sourceTokens.join(" · ");
   const withSignal = rows.find((r) => r.signalLabel)?.signalLabel;
 
   const fmtMoney = (v: number) =>
