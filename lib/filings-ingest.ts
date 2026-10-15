@@ -24,6 +24,7 @@ import {
   updateFilingDetails,
   setFilingStatus,
   retireSecBankruptcyFilings,
+  findCompanyMatchByName,
   logSync,
   type FilingInput,
   type FilerProfile,
@@ -241,29 +242,49 @@ const BK_FOCUS = ["Aerospace & Defense", "Healthcare", "Advanced Manufacturing",
  * coverage (Ethan, Oct 14, 2026). Business Chapter 7 / 11 (incl.
  * Subchapter V) debtors in focus sectors only. */
 async function ingestCourtBankruptcies(): Promise<number> {
-  const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  // Routine window is short (new filings are the point; the tab's
+  // 30/90-day views accumulate from these runs). Up to 3 pages of 100
+  // covers ~a week of D. Arizona filings at current volume.
+  const since = new Date(Date.now() - 4 * 864e5).toISOString().slice(0, 10);
   try {
-    const res = await fetch(
-      `https://www.courtlistener.com/api/rest/v4/search/?type=r&court=arb&filed_after=${since}&order_by=dateFiled%20desc&page_size=100`,
-      { headers: { "User-Agent": "CannyCapitalPortal/1.0 (ethan@cannycapitalpartners.com)" }, signal: AbortSignal.timeout(25000) }
-    );
-    if (!res.ok) {
-      await logSync("bankruptcy-xcheck", "error", 0, `CourtListener HTTP ${res.status}`);
-      return 0;
+    let url: string | null =
+      `https://www.courtlistener.com/api/rest/v4/search/?type=r&court=arb&filed_after=${since}&order_by=dateFiled%20desc&page_size=100`;
+    let reported = 0;
+    const results: Record<string, unknown>[] = [];
+    for (let page = 0; page < 3 && url; page++) {
+      const res: Response = await fetch(url, {
+        headers: { "User-Agent": "CannyCapitalPortal/1.0 (ethan@cannycapitalpartners.com)" },
+        signal: AbortSignal.timeout(25000),
+      });
+      if (!res.ok) {
+        await logSync("bankruptcy-xcheck", "error", 0, `CourtListener HTTP ${res.status}`);
+        return 0;
+      }
+      const data = (await res.json()) as { count?: number; next?: string | null; results?: Record<string, unknown>[] };
+      if (page === 0) reported = data.count ?? 0;
+      results.push(...(data.results ?? []));
+      url = data.next ?? null;
     }
-    const data = (await res.json()) as { count?: number; results?: Record<string, unknown>[] };
-    const reported = data.count ?? 0;
     const rows: FilingInput[] = [];
-    for (const r of data.results ?? []) {
+    for (const r of results) {
       const chapter = String(r.chapter ?? "");
       if (chapter !== "7" && chapter !== "11") continue;
       const debtor = String(r.caseName ?? "").replace(/^In re:?\s*/i, "").trim();
       if (!debtor) continue;
       const entityLike = /\b(LLC|L\.L\.C\.|INC|CORP|COMPANY|CO\b|LP|LLP|LTD|DBA|GROUP|HOLDINGS|SERVICES|SYSTEMS|PROPERTIES|ENTERPRISES?|SOLUTIONS|MANAGEMENT)\b/i.test(debtor);
       if (!entityLike) continue;
-      const sectorRaw = classifyIndustry(debtor);
-      const sector = sectorRaw === "Hospitality & Leisure" ? "Hospitality" : sectorRaw;
-      if (!BK_FOCUS.includes(sector)) continue;
+      // Sector: the company spine is the fit-target profile match
+      // (Ethan) — a debtor already in our universe carries its sector.
+      // Fall back to industry keywords in the debtor's name.
+      let sector = "";
+      const match = await findCompanyMatchByName(debtor).catch(() => null);
+      if (match && BK_FOCUS.includes(match.sector)) sector = match.sector;
+      if (!sector) {
+        const sectorRaw = classifyIndustry(debtor);
+        const kw = sectorRaw === "Hospitality & Leisure" ? "Hospitality" : sectorRaw;
+        if (BK_FOCUS.includes(kw)) sector = kw;
+      }
+      if (!sector) continue;
       const subV = /subchapter\s*v/i.test(JSON.stringify(r));
       const filed = String(r.dateFiled ?? "");
       rows.push({
@@ -280,7 +301,7 @@ async function ingestCourtBankruptcies(): Promise<number> {
         sector,
         tag: "Distress / asset sale",
         why: "Distress / asset sale — possible asset purchase, or a stressed competitor or customer.",
-        details: JSON.stringify({ chapter, subV, court: "U.S. Bankruptcy Court, D. Arizona", docketNumber: String(r.docketNumber ?? "") }),
+        details: JSON.stringify({ chapter, subV, court: "U.S. Bankruptcy Court, D. Arizona", docketNumber: String(r.docketNumber ?? ""), spineMatch: match?.name ?? "" }),
       });
     }
     const added = await upsertFilings(rows);
@@ -288,7 +309,7 @@ async function ingestCourtBankruptcies(): Promise<number> {
       "bankruptcy-xcheck",
       "ok",
       added,
-      `CourtListener reports ${reported} D. Arizona bankruptcy dockets filed in the last 30d; kept ${rows.length} business Ch. 7/11 cases in focus sectors (${added} new)`
+      `CourtListener reports ${reported} D. Arizona bankruptcy dockets filed in the last 4d; kept ${rows.length} business Ch. 7/11 cases in focus sectors (${added} new)`
     );
     return added;
   } catch (e) {
@@ -324,6 +345,11 @@ export async function ingestFilings(): Promise<number> {
       const s = h._source ?? {};
       const form = (s.form ?? "").toUpperCase();
       if (form.includes("10-K") || form.includes("10-Q")) continue; // periodic reports: never
+      // Cheap pre-filter on EDGAR's own business-state index so the
+      // per-filer profile budget is spent on Arizona filers, not the
+      // national firehose. The submissions business address remains
+      // the authoritative AZ test at the full gate below.
+      if (!((s.biz_states ?? []).some((st) => st.toUpperCase() === "AZ"))) continue;
       if (q.category === "acquisition") {
         // M&A 8-Ks only: material agreement, completed acquisition /
         // disposition, or change in control. Routine-only 8-Ks (Items
