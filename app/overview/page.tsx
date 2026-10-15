@@ -5,21 +5,23 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import TaskList from "@/components/TaskList";
 import PageHero from "@/components/PageHero";
-import { DEAL_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiMultiple, type Task } from "@/lib/types";
+import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
 import type { Investor } from "@/lib/investors-db";
 import { fmtMoney } from "@/lib/format";
 import { isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
+import { AGING_COLORS, FOCUS_SECTOR_NAMES, sectorColor, stageColor } from "@/lib/sector-colors";
+import { SectorLegend } from "@/components/SectorChip";
 
-/** Fit-target spine sectors (same four as Market Intel's Fit Targets). */
-const FIT_SECTORS = [
-  "Aerospace & Defense",
-  "Healthcare",
-  "Advanced Manufacturing",
-  "Specialty Trades & Construction",
-];
+/** Fit-target sectors — all five focus sectors (Oct 14, 2026: the
+ * density view includes Hospitality even at 0; there is no
+ * hospitality spine yet, and 0 is the honest count). */
+const FIT_SECTORS: readonly string[] = FOCUS_SECTOR_NAMES;
 
 const TERMINAL_STAGES = ["Closed Won", "Passed"];
+
+const daysSince = (iso: string): number =>
+  Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
 
 const fmtWhen = (iso: string, allDay: boolean): string => {
   const d = new Date(iso);
@@ -66,6 +68,8 @@ export default function Overview() {
   const [weekTab, setWeekTab] = useState<"this" | "last">("this");
   const [includeNonFocus, setIncludeNonFocus] = useState(false);
   const [showOtherCal, setShowOtherCal] = useState(false);
+  const [analyticsTab, setAnalyticsTab] = useState<"pipeline" | "sourcing" | "relationships">("pipeline");
+  const [winDays, setWinDays] = useState<30 | 90 | 365>(30);
 
   const load = async () => {
     try {
@@ -128,9 +132,11 @@ export default function Overview() {
       fetch(`/api/market/companies?sector=${encodeURIComponent(s)}&limit=1`)
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { fitTotal?: number } | null) => {
-          if (live && d) setFitCounts((c) => ({ ...c, [s]: d.fitTotal ?? 0 }));
+          if (live) setFitCounts((c) => ({ ...c, [s]: d?.fitTotal ?? 0 }));
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (live) setFitCounts((c) => ({ ...c, [s]: 0 }));
+        });
     }
     return () => {
       live = false;
@@ -146,16 +152,34 @@ export default function Overview() {
     () => deals.filter((d) => !TERMINAL_STAGES.includes(d.stage)),
     [deals]
   );
-  // Active pipeline value (Oct 14, 2026): sum of resolved values —
-  // stated price, else the market-multiple estimate — over ACTIVE
-  // deals only (Passed / Closed Won excluded).
-  const pipelineValue = useMemo(
+  // ONE scope rule (Ethan, Oct 14, 2026): the "Include non-focus
+  // deals" toggle drives BOTH the Active Pipeline Value stat card and
+  // the analytics section. Default: focus sectors only.
+  const scopedDeals = useMemo(
+    () => (includeNonFocus ? deals : deals.filter((d) => isFocusDeal(d.industry))),
+    [deals, includeNonFocus]
+  );
+  const nonFocusCount = useMemo(
+    () => deals.filter((d) => !isFocusDeal(d.industry)).length,
+    [deals]
+  );
+  // Active pipeline value: sum of resolved values — stated price,
+  // else the market-multiple estimate — over ACTIVE deals in scope
+  // (Passed / Closed Won excluded). 0 of 0 qualifying deals → "—".
+  const scopedActiveDeals = useMemo(
+    () => scopedDeals.filter((d) => !TERMINAL_STAGES.includes(d.stage)),
+    [scopedDeals]
+  );
+  const pipelineValued = useMemo(
     () =>
-      activeDeals.reduce(
-        (s, d) => s + (resolveDealValue(d, multiples, rates).value ?? 0),
-        0
-      ),
-    [activeDeals, multiples, rates]
+      scopedActiveDeals
+        .map((d) => resolveDealValue(d, multiples, rates).value)
+        .filter((v): v is number => v !== null),
+    [scopedActiveDeals, multiples, rates]
+  );
+  const pipelineValue = useMemo(
+    () => pipelineValued.reduce((s, v) => s + v, 0),
+    [pipelineValued]
   );
   const myClaims = useMemo(
     () =>
@@ -347,25 +371,19 @@ export default function Overview() {
     });
   }, [activeDeals, interactions]);
 
-  // Pipeline analytics (reworked Oct 14, 2026). Scope: non-focus
-  // deals are excluded unless the toggle includes them. Avg deal
-  // value averages only deals that HAVE a value; pipeline EBITDA
-  // reports its coverage; the close rate stays "—" until at least 5
-  // deals have closed or been passed.
-  const scopedDeals = useMemo(
-    () => (includeNonFocus ? deals : deals.filter((d) => isFocusDeal(d.industry))),
-    [deals, includeNonFocus]
-  );
-  const nonFocusCount = useMemo(
-    () => deals.filter((d) => !isFocusDeal(d.industry)).length,
-    [deals]
+  // Pipeline analytics (reworked Oct 14, 2026; tabbed Oct 14 visual
+  // refresh). Scope comes from scopedDeals above — the one toggle
+  // rule. Avg deal value averages only deals that HAVE a value;
+  // pipeline EBITDA reports its coverage; the close rate stays "—"
+  // until at least 5 deals have closed or been passed.
+
+  const winCutoff = useMemo(
+    () => new Date(Date.now() - winDays * 86400000).toISOString(),
+    [winDays]
   );
 
   const analytics = useMemo(() => {
-    const thirty = new Date();
-    thirty.setDate(thirty.getDate() - 30);
-    const cutoff = thirty.toISOString();
-    const added30 = scopedDeals.filter((d) => d.createdAt >= cutoff).length;
+    const addedWin = scopedDeals.filter((d) => d.createdAt >= winCutoff).length;
     const scopedActive = scopedDeals.filter((d) => !TERMINAL_STAGES.includes(d.stage));
     const valued = scopedActive
       .map((d) => resolveDealValue(d, multiples, rates).value)
@@ -399,8 +417,24 @@ export default function Overview() {
       pct: reached[i] > 0 ? Math.round((reached[i + 1] / reached[i]) * 100) : null,
     }));
 
+    // Days in stage: no stage history is stored, so this is the age
+    // of each deal in its CURRENT stage (days since its last update) —
+    // labeled as such in the UI.
+    const daysInStage = ACTIVE_STAGES.map((stage) => {
+      const inStage = scopedDeals.filter((d) => d.stage === stage);
+      const ages = inStage.map((d) => daysSince(d.updatedAt));
+      return {
+        stage,
+        n: inStage.length,
+        avgDays: ages.length
+          ? Math.round(ages.reduce((a, b) => a + b, 0) / ages.length)
+          : null,
+      };
+    }).filter((r) => r.n > 0);
+
     // Pass reasons, categorized from the passed deals' own notes —
-    // there is no structured pass-reason field yet.
+    // there is no structured pass-reason field yet. Windowed by the
+    // pass (last update) date.
     const PASS_REASONS: { label: string; re: RegExp }[] = [
       { label: "Valuation / price", re: /price|pricing|valuation|expensive|asking|multiple/i },
       { label: "Margins / fit", re: /margin|fit|profile|thesis/i },
@@ -408,7 +442,9 @@ export default function Overview() {
       { label: "Timing / readiness", re: /timing|not ready|too early|later/i },
       { label: "Financials / diligence", re: /financial|records|diligence|quality of earnings|qoe/i },
     ];
-    const passedDeals = scopedDeals.filter((d) => d.stage === "Passed");
+    const passedDeals = scopedDeals.filter(
+      (d) => d.stage === "Passed" && d.updatedAt >= winCutoff
+    );
     const reasonCounts = new Map<string, number>();
     for (const d of passedDeals) {
       const hit = PASS_REASONS.find((r) => r.re.test(d.notes || ""));
@@ -420,7 +456,7 @@ export default function Overview() {
       .sort((a, b) => b.count - a.count);
 
     return {
-      added30,
+      addedWin,
       avgValue,
       valuedCount: valued.length,
       activeCount: scopedActive.length,
@@ -429,10 +465,135 @@ export default function Overview() {
       winRate,
       closedPassedCount: closedPassed.length,
       conversions,
+      daysInStage,
       passReasons,
       passedCount: passedDeals.length,
+      scopedCount: scopedDeals.length,
     };
-  }, [scopedDeals, multiples, rates]);
+  }, [scopedDeals, multiples, rates, winCutoff]);
+
+  // Sourcing tab: fit targets (fitCounts), Activity listings funnel,
+  // and source quality — deal_flow grouped by source, deals by broker.
+  const sourcing = useMemo(() => {
+    const listings = flow.filter(
+      (f) => f.kind === "business_for_sale" && f.createdAt >= winCutoff
+    );
+    const bySource = new Map<string, { sent: number; added: number; dismissed: number }>();
+    for (const f of flow) {
+      if (f.createdAt < winCutoff) continue;
+      const key = (f.source || "").trim() || "Unknown source";
+      const cur = bySource.get(key) ?? { sent: 0, added: 0, dismissed: 0 };
+      cur.sent++;
+      if (f.status === "added") cur.added++;
+      if (f.status === "dismissed") cur.dismissed++;
+      bySource.set(key, cur);
+    }
+    const sourceRows = Array.from(bySource.entries())
+      .map(([source, v]) => ({
+        source,
+        ...v,
+        fitRate: v.sent > 0 ? Math.round((v.added / v.sent) * 100) : null,
+      }))
+      .sort((a, b) => b.sent - a.sent);
+    const byBroker = new Map<string, { deals: number; advanced: number }>();
+    for (const d of deals) {
+      const key = (d.broker || "").trim();
+      if (!key) continue;
+      const cur = byBroker.get(key) ?? { deals: 0, advanced: 0 };
+      cur.deals++;
+      const idx = (DEAL_STAGES as readonly string[]).indexOf(d.stage);
+      if (idx > 0 && d.stage !== "Passed") cur.advanced++;
+      byBroker.set(key, cur);
+    }
+    const brokerRows = Array.from(byBroker.entries())
+      .map(([broker, v]) => ({
+        broker,
+        ...v,
+        advRate: v.deals > 0 ? Math.round((v.advanced / v.deals) * 100) : null,
+      }))
+      .sort((a, b) => b.deals - a.deals);
+    return {
+      reviewed: listings.length,
+      added: listings.filter((f) => f.status === "added").length,
+      dismissed: listings.filter((f) => f.status === "dismissed").length,
+      pending: listings.filter((f) => f.status === "new").length,
+      sourceRows,
+      brokerRows,
+    };
+  }, [flow, deals, winCutoff]);
+
+  // Relationships tab: operators by stage, intermediary activity,
+  // investors by last touch, and contacts going quiet. Decay uses
+  // AGING thresholds for no-touch: amber at 60 days, red at 90.
+  const relationships = useMemo(() => {
+    const opsByStage = EXEC_STAGES.map((stage) => ({
+      stage,
+      n: execs.filter((e) => e.stage === stage).length,
+    })).filter((r) => r.n > 0);
+    const act = new Map<string, number>();
+    for (const f of flow) {
+      const key = (f.source || "").trim() || "Unknown source";
+      act.set(key, (act.get(key) ?? 0) + 1);
+    }
+    for (const d of deals) {
+      const b = (d.broker || "").trim();
+      if (b) act.set(b, (act.get(b) ?? 0) + 1);
+    }
+    const intermediaryRows = Array.from(act.entries())
+      .map(([name, n]) => ({ name, n }))
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 8);
+    const invBuckets = [
+      { label: "Touched ≤ 30 days ago", n: 0 },
+      { label: "31–60 days", n: 0 },
+      { label: "61–90 days", n: 0 },
+      { label: "Over 90 days", n: 0 },
+    ];
+    for (const inv of investors) {
+      const days = daysSince(inv.updatedAt);
+      if (days <= 30) invBuckets[0].n++;
+      else if (days <= 60) invBuckets[1].n++;
+      else if (days <= 90) invBuckets[2].n++;
+      else invBuckets[3].n++;
+    }
+    const lastExecTouch = new Map<string, string>();
+    interactions.forEach((ix) => {
+      if (!ix.execId) return;
+      const cur = lastExecTouch.get(ix.execId);
+      if (!cur || ix.occurredAt > cur) lastExecTouch.set(ix.execId, ix.occurredAt);
+    });
+    const quiet = [
+      ...execs.map((e) => ({
+        name: e.name,
+        kind: "Operator",
+        days: daysSince(lastExecTouch.get(e.id) ?? e.updatedAt),
+      })),
+      ...investors.map((i) => ({
+        name: i.name,
+        kind: "Investor",
+        days: daysSince(i.updatedAt),
+      })),
+    ]
+      .filter((x) => x.days >= 45)
+      .sort((a, b) => b.days - a.days);
+    return {
+      opsByStage,
+      intermediaryRows,
+      invBuckets,
+      quiet: quiet.slice(0, 10),
+      quietTotal: quiet.length,
+      quiet60: quiet.filter((x) => x.days >= 60 && x.days < 90).length,
+      quiet90: quiet.filter((x) => x.days >= 90).length,
+    };
+  }, [execs, flow, deals, investors, interactions]);
+
+  // "View full analytics" unlocks at 10+ pipeline deals and 5+
+  // logged comps (Ethan, Oct 14, 2026).
+  const compLogCount = useMemo(
+    () => multiples.filter((m) => m.sourceReport === "Canny Comp Log").length,
+    [multiples]
+  );
+  const showFullAnalytics = deals.length >= 10 && compLogCount >= 5;
 
   if (loading) {
     return (
@@ -442,23 +603,39 @@ export default function Overview() {
     );
   }
 
+  const dataDate = new Date().toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
   const stats: {
     label: string;
     value: string;
     alert?: boolean;
     sub?: string;
+    note?: string;
+    accent: string;
     href?: string;
   }[] = [
-    { label: "Active pipeline value", value: fmtMoney(pipelineValue), href: "/pipeline" },
-    { label: "Active targets", value: String(activeDeals.length), href: "/pipeline" },
+    {
+      label: "Active pipeline value",
+      value: pipelineValued.length === 0 ? "—" : fmtMoney(pipelineValue),
+      accent: "#b8975a",
+      href: "/pipeline",
+      note: includeNonFocus ? "All sectors" : "Focus sectors only",
+    },
+    { label: "Active targets", value: String(activeDeals.length), accent: "#3B5B84", href: "/pipeline" },
     {
       label: "Deals & operators I've claimed",
       value: String(myClaims),
+      accent: "#7D90B0",
       href: "/pipeline",
     },
     {
       label: "Open follow-ups",
       value: String(openTasks.length),
+      accent: "#2F7F79",
       alert: overdueTasks.length > 0,
       sub:
         overdueTasks.length > 0
@@ -476,8 +653,9 @@ export default function Overview() {
       />
       <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
 
-      {/* Stat cards */}
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* Stat cards — thin accent top border per card (navy/gold/
+          sector tones; aging hues stay reserved for staleness). */}
+      <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map((s) => {
           const card = (
             <>
@@ -485,27 +663,56 @@ export default function Overview() {
                 {s.label}
               </p>
               <p
-                className={`mt-1 text-2xl font-bold ${
-                  s.alert ? "text-red-600 dark:text-red-400" : "text-[#0d1f3c] dark:text-white"
-                }`}
+                className="mt-1 text-2xl font-bold text-[#0d1f3c] dark:text-white"
+                style={s.alert ? { color: AGING_COLORS.bad } : undefined}
               >
                 {s.value}
               </p>
-              {s.sub && <p className="mt-0.5 text-xs text-red-500">{s.sub}</p>}
+              {s.sub && (
+                <p className="mt-0.5 text-xs" style={{ color: AGING_COLORS.bad }}>
+                  {s.sub}
+                </p>
+              )}
+              {s.note && (
+                <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">{s.note}</p>
+              )}
             </>
           );
           const cls =
             "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]";
+          const style = { borderTop: `3px solid ${s.accent}` };
           return s.href ? (
-            <Link key={s.label} href={s.href} className={`${cls} block transition hover:border-[#b8975a]/60`}>
+            <Link key={s.label} href={s.href} style={style} className={`${cls} block transition hover:border-[#b8975a]/60`}>
               {card}
             </Link>
           ) : (
-            <div key={s.label} className={cls}>
+            <div key={s.label} style={style} className={cls}>
               {card}
             </div>
           );
         })}
+      </div>
+
+      {/* The one scope toggle: drives Active Pipeline Value AND the
+          analytics section below. */}
+      <div className="mb-6 flex items-center justify-end gap-2 px-1">
+        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 dark:text-white/60">
+          <input
+            type="checkbox"
+            checked={includeNonFocus}
+            onChange={(e) => setIncludeNonFocus(e.target.checked)}
+            className="h-3.5 w-3.5 accent-[#b8975a]"
+          />
+          Include non-focus deals
+          {!includeNonFocus && nonFocusCount > 0 && (
+            <span className="text-slate-400 dark:text-white/40">
+              ({nonFocusCount} excluded)
+            </span>
+          )}
+        </label>
+        <span className="hidden text-[11px] text-slate-400 dark:text-white/40 sm:inline">
+          — applies to pipeline value + analytics
+        </span>
       </div>
 
       {/* Operators tile */}
@@ -737,8 +944,11 @@ export default function Overview() {
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-[#0d1f3c] to-[#b8975a]"
-                    style={{ width: `${(value / maxStageValue) * 100}%` }}
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${(value / maxStageValue) * 100}%`,
+                      backgroundColor: stageColor(stage),
+                    }}
                   />
                 </div>
               </div>
@@ -776,6 +986,9 @@ export default function Overview() {
               Open Market Intel →
             </Link>
           </div>
+          <div className="mb-3">
+            <SectorLegend sectors={[...FIT_SECTORS]} />
+          </div>
           <div className="flex flex-col gap-2.5">
             {FIT_SECTORS.map((sector) => {
               const count = fitCounts[sector];
@@ -793,8 +1006,11 @@ export default function Overview() {
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-[#0d1f3c] to-[#b8975a]"
-                      style={{ width: `${(((count ?? 0) / maxFit) * 100).toFixed(1)}%` }}
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${(((count ?? 0) / maxFit) * 100).toFixed(1)}%`,
+                        backgroundColor: sectorColor(sector),
+                      }}
                     />
                   </div>
                 </div>
@@ -803,122 +1019,469 @@ export default function Overview() {
           </div>
           <p className="mt-3 text-xs text-slate-400 dark:text-white/40">
             {FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0).toLocaleString()} fit
-            targets across the focus-sector spines — live from Market Intel.
+            targets across the five focus sectors — live from Market Intel
+            (Hospitality has no company spine yet, so its count is honestly 0).{" "}
+            Data as of {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · n ={" "}
+            {FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0).toLocaleString()}
           </p>
         </section>
       </div>
 
-      {/* Pipeline analytics */}
+      {/* Analytics — tabbed (Oct 14, 2026 visual refresh): Pipeline |
+          Sourcing | Relationships, one window selector, every chart
+          footed with its data date and sample size. Scope follows the
+          single non-focus toggle above. */}
       <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-bold text-[#0d1f3c] dark:text-white">
-            Pipeline analytics
+            Analytics
           </h2>
-          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 dark:text-white/60">
-            <input
-              type="checkbox"
-              checked={includeNonFocus}
-              onChange={(e) => setIncludeNonFocus(e.target.checked)}
-              className="h-3.5 w-3.5 accent-[#b8975a]"
-            />
-            Include non-focus deals
-            {!includeNonFocus && nonFocusCount > 0 && (
-              <span className="text-slate-400 dark:text-white/40">
-                ({nonFocusCount} excluded)
-              </span>
-            )}
-          </label>
-        </div>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div>
-            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
-              {analytics.added30}
-            </p>
-            <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
-              Added (30 days)
-            </p>
-          </div>
-          <div>
-            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
-              {analytics.avgValue === null ? "—" : fmtMoney(analytics.avgValue)}
-            </p>
-            <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
-              Avg deal value
-            </p>
-            <p className="mt-0.5 text-[11px] text-slate-400 dark:text-white/40">
-              {analytics.valuedCount} of {analytics.activeCount} active deals have a value
-            </p>
-          </div>
-          <div>
-            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
-              {fmtMoney(analytics.ebitdaSum)}
-            </p>
-            <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
-              Pipeline EBITDA
-            </p>
-            <p className="mt-0.5 text-[11px] text-slate-400 dark:text-white/40">
-              {analytics.ebitdaCount} of {analytics.activeCount} deals
-            </p>
-          </div>
-          <div>
-            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
-              {analytics.winRate === null ? "—" : `${analytics.winRate}%`}
-            </p>
-            <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
-              Close rate
-            </p>
-            {analytics.winRate === null && (
-              <p className="mt-0.5 text-[11px] text-slate-400 dark:text-white/40">
-                Needs 5+ closed or passed deals ({analytics.closedPassedCount} so far)
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Stage-to-stage conversion (funnel from current stages) */}
-        <div className="mt-5 border-t border-slate-100 pt-4 dark:border-white/10">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-            Stage-to-stage conversion
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {analytics.conversions.map((c) => (
-              <span
-                key={c.from}
-                className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
+          <div className="flex items-center gap-2">
+            {showFullAnalytics && (
+              <Link
+                href="/analytics"
+                className="mr-1 text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
               >
-                {c.from} → {c.to}:{" "}
-                <strong>{c.pct === null ? "—" : `${c.pct}%`}</strong>
-                <span className="text-slate-400 dark:text-white/40">
-                  {" "}({c.n} of {c.of})
-                </span>
-              </span>
-            ))}
-          </div>
-          <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
-            Funnel from current stages — a deal counts at every stage up to its own;
-            Closed Won counts at all stages, Passed sits outside the funnel.
-          </p>
-        </div>
-
-        {/* Pass reasons, categorized from the passed deals' notes */}
-        {analytics.passedCount > 0 && (
-          <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-              Pass reasons ({analytics.passedCount} passed)
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {analytics.passReasons.map((r) => (
-                <span
-                  key={r.label}
-                  className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                View full analytics →
+              </Link>
+            )}
+            <div className="flex overflow-hidden rounded-lg border border-slate-200 dark:border-white/15">
+              {(
+                [
+                  ["pipeline", "Pipeline"],
+                  ["sourcing", "Sourcing"],
+                  ["relationships", "Relationships"],
+                ] as const
+              ).map(([t, label]) => (
+                <button
+                  key={t}
+                  onClick={() => setAnalyticsTab(t)}
+                  className={`px-3 py-1.5 text-xs font-semibold transition ${
+                    analyticsTab === t
+                      ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                      : "text-slate-500 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/5"
+                  }`}
                 >
-                  {r.label} · {r.count}
-                </span>
+                  {label}
+                </button>
               ))}
             </div>
-            <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
-              Categorized from deal notes — no structured pass-reason field yet.
+            <div className="flex overflow-hidden rounded-lg border border-slate-200 dark:border-white/15">
+              {([30, 90, 365] as const).map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setWinDays(d)}
+                  className={`px-2.5 py-1.5 text-xs font-semibold transition ${
+                    winDays === d
+                      ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                      : "text-slate-500 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/5"
+                  }`}
+                >
+                  {d}d
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {analyticsTab === "pipeline" && (
+          <div>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div>
+                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+                  {analytics.addedWin}
+                </p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
+                  Added ({winDays} days)
+                </p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+                  {analytics.avgValue === null ? "—" : fmtMoney(analytics.avgValue)}
+                </p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
+                  Avg deal value
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-400 dark:text-white/40">
+                  {analytics.valuedCount} of {analytics.activeCount} active deals have a value
+                </p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+                  {analytics.ebitdaCount === 0 ? "—" : fmtMoney(analytics.ebitdaSum)}
+                </p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
+                  Pipeline EBITDA
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-400 dark:text-white/40">
+                  {analytics.ebitdaCount} of {analytics.activeCount} deals
+                </p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
+                  {analytics.winRate === null ? "—" : `${analytics.winRate}%`}
+                </p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
+                  Close rate
+                </p>
+                {analytics.winRate === null && (
+                  <p className="mt-0.5 text-[11px] text-slate-400 dark:text-white/40">
+                    Needs 5+ closed or passed deals ({analytics.closedPassedCount} so far)
+                  </p>
+                )}
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400 dark:text-white/40">
+              Data as of {dataDate} · n = {analytics.scopedCount} deals in scope
+              {includeNonFocus ? "" : " (focus sectors only)"}
             </p>
+
+            {analytics.closedPassedCount >= 5 ? (
+              <>
+                <div className="mt-5 border-t border-slate-100 pt-4 dark:border-white/10">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+                    Stage-to-stage conversion
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {analytics.conversions.map((c) => (
+                      <span
+                        key={c.from}
+                        className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
+                      >
+                        <span
+                          className="mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle"
+                          style={{ backgroundColor: stageColor(c.to) }}
+                        />
+                        {c.from} → {c.to}:{" "}
+                        <strong>{c.pct === null ? "—" : `${c.pct}%`}</strong>
+                        <span className="text-slate-400 dark:text-white/40">
+                          {" "}({c.n} of {c.of})
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+                    Funnel from current stages — a deal counts at every stage up to its own;
+                    Closed Won counts at all stages, Passed sits outside the funnel. n = {analytics.scopedCount}
+                  </p>
+                </div>
+
+                {analytics.passedCount > 0 && (
+                  <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+                      Pass reasons ({analytics.passedCount} passed in {winDays} days)
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {analytics.passReasons.map((r) => (
+                        <span
+                          key={r.label}
+                          className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
+                        >
+                          {r.label} · {r.count}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+                      Categorized from deal notes — no structured pass-reason field yet.
+                    </p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="mt-5 rounded-lg border border-dashed border-slate-200 px-4 py-3 dark:border-white/15">
+                <p className="text-sm font-medium text-slate-500 dark:text-white/60">
+                  Not enough data yet — {analytics.closedPassedCount} of 5 closed/passed deals.
+                </p>
+                <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+                  Stage conversion and pass-reason breakdowns appear once at least 5 deals
+                  have closed or been passed.
+                </p>
+              </div>
+            )}
+
+            {analytics.daysInStage.length > 0 && (
+              <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+                  Days in stage (average)
+                </p>
+                <div className="flex flex-col gap-2">
+                  {analytics.daysInStage.map((r) => {
+                    const maxD = Math.max(1, ...analytics.daysInStage.map((x) => x.avgDays ?? 0));
+                    return (
+                      <div key={r.stage}>
+                        <div className="mb-0.5 flex items-baseline justify-between text-xs">
+                          <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">{r.stage}</span>
+                          <span className="text-slate-500 dark:text-white/50">
+                            {r.avgDays === null ? "—" : `${r.avgDays}d`} · n = {r.n}
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${(((r.avgDays ?? 0) / maxD) * 100).toFixed(1)}%`,
+                              backgroundColor: stageColor(r.stage),
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+                  Age in current stage — no stage history is stored, so this is days since
+                  each deal's last update. Data as of {dataDate}.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {analyticsTab === "sourcing" && (
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+              Fit targets by sector
+            </p>
+            <div className="mb-1.5">
+              <SectorLegend sectors={[...FIT_SECTORS]} />
+            </div>
+            <div className="flex flex-col gap-2">
+              {FIT_SECTORS.map((sector) => {
+                const count = fitCounts[sector] ?? 0;
+                const maxFit = Math.max(1, ...FIT_SECTORS.map((s) => fitCounts[s] ?? 0));
+                return (
+                  <div key={sector}>
+                    <div className="mb-0.5 flex items-baseline justify-between text-xs">
+                      <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">{sector}</span>
+                      <span className="text-slate-500 dark:text-white/50">{count.toLocaleString()}</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${((count / maxFit) * 100).toFixed(1)}%`,
+                          backgroundColor: sectorColor(sector),
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+              Live fit-target counts from Market Intel. Data as of {dataDate} · n ={" "}
+              {FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0).toLocaleString()}
+            </p>
+
+            <div className="mt-5 grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 sm:grid-cols-4 dark:border-white/10">
+              <div>
+                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{sourcing.reviewed}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Listings reviewed ({winDays}d)</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{sourcing.added}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Added to pipeline</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{sourcing.dismissed}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Dismissed</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{sourcing.pending}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Still new</p>
+              </div>
+            </div>
+            <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+              Businesses-for-sale items in the Activity feed, by current status. Data as of {dataDate} · n = {sourcing.reviewed}
+            </p>
+
+            {sourcing.sourceRows.length > 0 && (
+              <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+                  Source quality — Activity feed
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs uppercase tracking-wide text-slate-400 dark:text-white/40">
+                        <th className="py-1 pr-3 font-semibold">Source</th>
+                        <th className="py-1 pr-3 font-semibold">Sent</th>
+                        <th className="py-1 pr-3 font-semibold">Added</th>
+                        <th className="py-1 pr-3 font-semibold">Dismissed</th>
+                        <th className="py-1 font-semibold">Fit rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sourcing.sourceRows.map((r) => (
+                        <tr key={r.source} className="border-t border-slate-100 dark:border-white/5">
+                          <td className="py-1.5 pr-3 font-medium text-slate-700 dark:text-[#e8dfc8]">{r.source}</td>
+                          <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.sent}</td>
+                          <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.added}</td>
+                          <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.dismissed}</td>
+                          <td className="py-1.5 text-slate-600 dark:text-white/70">{r.fitRate === null ? "—" : `${r.fitRate}%`}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+                  Fit rate = added ÷ sent, over the last {winDays} days, all Activity kinds.
+                </p>
+              </div>
+            )}
+
+            {sourcing.brokerRows.length > 0 && (
+              <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+                  Source quality — brokers on pipeline deals
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs uppercase tracking-wide text-slate-400 dark:text-white/40">
+                        <th className="py-1 pr-3 font-semibold">Broker</th>
+                        <th className="py-1 pr-3 font-semibold">Deals</th>
+                        <th className="py-1 pr-3 font-semibold">Past Sourcing</th>
+                        <th className="py-1 font-semibold">Advanced rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sourcing.brokerRows.map((r) => (
+                        <tr key={r.broker} className="border-t border-slate-100 dark:border-white/5">
+                          <td className="py-1.5 pr-3 font-medium text-slate-700 dark:text-[#e8dfc8]">{r.broker}</td>
+                          <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.deals}</td>
+                          <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.advanced}</td>
+                          <td className="py-1.5 text-slate-600 dark:text-white/70">{r.advRate === null ? "—" : `${r.advRate}%`}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+                  Advanced rate = the broker's deals that moved past Sourcing (and weren't
+                  passed) ÷ all their deals in the pipeline. All-time. n ={" "}
+                  {sourcing.brokerRows.reduce((s, r) => s + r.deals, 0)}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {analyticsTab === "relationships" && (
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+              Operators by stage
+            </p>
+            <div className="flex flex-col gap-2">
+              {relationships.opsByStage.map((r) => {
+                const maxN = Math.max(1, ...relationships.opsByStage.map((x) => x.n));
+                return (
+                  <div key={r.stage}>
+                    <div className="mb-0.5 flex items-baseline justify-between text-xs">
+                      <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">{r.stage}</span>
+                      <span className="text-slate-500 dark:text-white/50">{r.n}</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${((r.n / maxN) * 100).toFixed(1)}%`,
+                          backgroundColor: stageColor(r.stage),
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+              Data as of {dataDate} · n = {execs.length} operators
+            </p>
+
+            <div className="mt-5 border-t border-slate-100 pt-4 dark:border-white/10">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+                Intermediaries by activity
+              </p>
+              {relationships.intermediaryRows.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {relationships.intermediaryRows.map((r) => (
+                    <span
+                      key={r.name}
+                      className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
+                    >
+                      {r.name} · {r.n}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 dark:text-white/40">No intermediary activity recorded yet.</p>
+              )}
+              <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+                Activity-feed items plus the broker field on pipeline deals. A dedicated
+                Intermediaries directory arrives in a later phase.
+              </p>
+            </div>
+
+            <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+                Investors by last touch
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {relationships.invBuckets.map((b) => (
+                  <span
+                    key={b.label}
+                    className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
+                  >
+                    {b.label}: <strong>{b.n}</strong>
+                  </span>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+                Investors have no touch log — recency uses each record's last update.
+                Data as of {dataDate} · n = {investors.length}
+              </p>
+            </div>
+
+            <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+                Going quiet — no touch in 45+ days
+              </p>
+              {relationships.quiet.length > 0 ? (
+                <ul className="space-y-1">
+                  {relationships.quiet.map((x) => (
+                    <li
+                      key={`${x.kind}-${x.name}`}
+                      className="flex items-center gap-2 text-sm text-slate-700 dark:text-[#e8dfc8]"
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor:
+                            x.days >= 90
+                              ? AGING_COLORS.bad
+                              : x.days >= 60
+                                ? AGING_COLORS.warn
+                                : AGING_COLORS.ok,
+                        }}
+                      />
+                      <span className="font-medium">{x.name}</span>
+                      <span className="text-xs text-slate-400 dark:text-white/40">
+                        {x.kind} · {x.days} days
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-400 dark:text-white/40">
+                  Nobody is past 45 days without a touch.
+                </p>
+              )}
+              <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+                Amber at 60 days without a touch, red at 90. {relationships.quiet60} contacts
+                are at 60–89 days, {relationships.quiet90} at 90+. Operators use their last
+                logged interaction; investors use last record update. n = {relationships.quietTotal}
+              </p>
+            </div>
           </div>
         )}
       </section>
