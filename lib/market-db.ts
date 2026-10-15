@@ -1392,3 +1392,45 @@ export async function getSyncLog(limit = 20): Promise<MiSyncLog[]> {
     message: str(r.message),
   }));
 }
+
+/* ---------------- City commercial / industrial permits (Phase 3) ----------------
+ * Rows live in mi_permits_ci, written by lib/permits-ingest.ts (the table
+ * is created there, not in ensureSchema — hence the existence guard). */
+
+export interface CiPermitSummary {
+  city: string;
+  category: string; // project | subpermit | multifamily
+  currentCount: number; // trailing 12 months
+  currentValuation: number | null;
+  priorCount: number; // the 12 months before that
+  priorValuation: number | null;
+}
+
+/** Per-city, per-category permit volume + valuation, trailing 12 months
+ * vs the prior 12 — the raw material for the sector tailwind score. */
+export async function getCiPermitSummary(): Promise<CiPermitSummary[]> {
+  await ensureSchema();
+  const db = sql();
+  const reg = await db`SELECT to_regclass('mi_permits_ci') AS t`;
+  if (!reg[0]?.t) return [];
+  const rows = (await db`
+    SELECT city, category,
+      COUNT(*) FILTER (WHERE issued_date >= CURRENT_DATE - INTERVAL '12 months') AS cur_count,
+      SUM(valuation) FILTER (WHERE issued_date >= CURRENT_DATE - INTERVAL '12 months') AS cur_val,
+      COUNT(*) FILTER (WHERE issued_date >= CURRENT_DATE - INTERVAL '24 months'
+                       AND issued_date < CURRENT_DATE - INTERVAL '12 months') AS prior_count,
+      SUM(valuation) FILTER (WHERE issued_date >= CURRENT_DATE - INTERVAL '24 months'
+                       AND issued_date < CURRENT_DATE - INTERVAL '12 months') AS prior_val
+    FROM mi_permits_ci
+    WHERE issued_date >= CURRENT_DATE - INTERVAL '24 months'
+    GROUP BY city, category
+    ORDER BY city, category`) as unknown as Record<string, unknown>[];
+  return rows.map((r) => ({
+    city: str(r.city),
+    category: str(r.category),
+    currentCount: Number(r.cur_count ?? 0),
+    currentValuation: numOrNull(r.cur_val),
+    priorCount: Number(r.prior_count ?? 0),
+    priorValuation: numOrNull(r.prior_val),
+  }));
+}
