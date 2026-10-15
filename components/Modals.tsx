@@ -459,6 +459,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     ownerHoursPerWeek: deal?.metrics?.ownerHoursPerWeek != null ? String(deal.metrics.ownerHoursPerWeek) : "",
     broker: deal?.broker ?? "",
     source: deal?.source ?? "",
+    passReason: deal?.passReason ?? "",
     links: (deal?.links ?? [])
       .map((l) => ({ label: l.label ?? "", url: l.url ?? "" }))
       .concat([{ label: "", url: "" }]),
@@ -561,6 +562,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     growthPct: form.growthPct.trim() === "" ? null : Number(form.growthPct),
     broker: form.broker,
     source: form.source,
+    passReason: form.passReason,
     contactName: "",
     contactEmail: "",
     notes: "",
@@ -978,6 +980,22 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
               </select>
             </Field>
           </div>
+          {form.stage === "Passed" && (
+            <Field label="Pass reason">
+              <select className={inputCls} value={form.passReason ?? ""} onChange={set("passReason")}>
+                <option value="">Select a reason…</option>
+                <option value="Valuation / price">Valuation / price</option>
+                <option value="Margins / fit">Margins / fit</option>
+                <option value="Size / scale">Size / scale</option>
+                <option value="Timing / readiness">Timing / readiness</option>
+                <option value="Financials / diligence">Financials / diligence</option>
+                <option value="Seller circumstances">Seller circumstances</option>
+                <option value="Lost to another buyer">Lost to another buyer</option>
+                <option value="Financing">Financing</option>
+                <option value="Other">Other</option>
+              </select>
+            </Field>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Contact name">
               <input className={inputCls} value={form.contactName} onChange={set("contactName")} />
@@ -1129,6 +1147,7 @@ export function ExecutiveModal({ exec, onClose, onSaved, onDeleted }: ExecutiveM
     notes: exec?.notes ?? "",
     owner: exec?.owner ?? "",
     industries: (exec?.industries ?? []).join(", "),
+    photoUrl: exec?.photoUrl ?? "",
   });
 
   const set = (k: keyof typeof form) => (
@@ -1250,6 +1269,9 @@ export function ExecutiveModal({ exec, onClose, onSaved, onDeleted }: ExecutiveM
               onChange={set("industries")}
               placeholder="e.g. Industrial Services, Healthcare"
             />
+          </Field>
+          <Field label="Photo URL (optional)">
+            <input className={inputCls} value={form.photoUrl ?? ""} onChange={set("photoUrl")} placeholder="https://… (initials shown if blank)" />
           </Field>
           <Field label="Background">
             <textarea className={inputCls} rows={3} value={form.background} onChange={set("background")} />
