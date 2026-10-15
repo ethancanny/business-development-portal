@@ -181,7 +181,7 @@ export default function DealTimeline({
 
   return (
     <section className="card-surface mt-6 p-5">
-      <h2 className="font-display mb-4 text-xl font-semibold text-[#0d1f3c] dark:text-white">
+      <h2 className="mb-4 text-xl font-semibold text-[#0d1f3c] dark:text-white">
         Timeline
       </h2>
       <ol className="relative space-y-1 border-l-2 border-slate-200 dark:border-white/10">

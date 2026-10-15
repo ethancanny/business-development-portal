@@ -47,7 +47,7 @@ export default function DealRecordHeader({
           size={44}
         />
         <div className="min-w-0">
-          <h3 className="font-display truncate text-[26px] font-semibold leading-tight text-white">
+          <h3 className="truncate text-[26px] font-semibold leading-tight text-white">
             {deal.companyName}
           </h3>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-white/85">

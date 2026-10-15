@@ -84,7 +84,7 @@ export function DealCardGrid({
               </div>
             </div>
             <div className="p-4">
-              <h3 className="font-display truncate text-xl font-semibold leading-snug text-[#0d1f3c] dark:text-white">
+              <h3 className="truncate text-xl font-semibold leading-snug text-[#0d1f3c] dark:text-white">
                 {d.companyName}
               </h3>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -155,7 +155,7 @@ export function ExecCardGrid({
           <div className="flex items-start gap-3">
             <PersonAvatar name={e.name} photoUrl={e.photoUrl} size={44} />
             <div className="min-w-0">
-              <h3 className="font-display truncate text-xl font-semibold leading-snug text-[#0d1f3c] dark:text-white">
+              <h3 className="truncate text-xl font-semibold leading-snug text-[#0d1f3c] dark:text-white">
                 {e.name}
               </h3>
               {e.currentTitle && (
@@ -233,7 +233,7 @@ export function PairingCardGrid({
               </div>
             </div>
             <div className="p-4">
-              <h3 className="font-display truncate text-xl font-semibold leading-snug text-[#0d1f3c] dark:text-white">
+              <h3 className="truncate text-xl font-semibold leading-snug text-[#0d1f3c] dark:text-white">
                 {d.companyName}
               </h3>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">

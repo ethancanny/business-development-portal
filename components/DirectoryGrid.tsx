@@ -82,7 +82,7 @@ export default function DirectoryGrid({
                 />
               )}
               <span className="min-w-0 flex-1">
-                <span className="font-display block truncate text-xl font-semibold leading-snug text-[#0d1f3c] dark:text-white">
+                <span className="block truncate text-xl font-semibold leading-snug text-[#0d1f3c] dark:text-white">
                   {e.name}
                 </span>
                 <span className="mt-0.5 block truncate text-sm text-slate-500 dark:text-white/55">
