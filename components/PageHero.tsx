@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { BANNER_DARK, BANNER_LIGHT } from "@/lib/sector-colors";
 
 interface PageHeroProps {
@@ -7,15 +10,35 @@ interface PageHeroProps {
 }
 
 /**
- * Page banner. Height/layout are fixed (h-36 sm:h-44) — Ethan, Oct 14,
- * 2026: do not change them. Theme-aware imagery via the app's `.dark`
+ * Page banner. Desktop height/layout are fixed (h-36 sm:h-44) — Ethan,
+ * Oct 14, 2026: do not change them. On phones only (CRM Phase 2), the
+ * hero collapses to a slim title strip once the user scrolls past ~80px
+ * so content gets the screen. Theme-aware imagery via the app's `.dark`
  * class: the desert photo in light mode, the uploaded night-sky photo
  * in dark mode, with a deeper dark gradient (left + bottom) so titles
  * stay readable over the stars. Both images lazy-load.
  */
 export default function PageHero({ eyebrow, title, subtitle }: PageHeroProps) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const onScroll = () => setCollapsed(mq.matches && window.scrollY > 80);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, []);
+
   return (
-    <div className="relative h-36 overflow-hidden sm:h-44">
+    <div
+      className={`relative overflow-hidden transition-[height] duration-300 ${
+        collapsed ? "h-12" : "h-36 sm:h-44"
+      }`}
+    >
       <img
         src={BANNER_LIGHT}
         alt=""
@@ -34,15 +57,19 @@ export default function PageHero({ eyebrow, title, subtitle }: PageHeroProps) {
       <div className="absolute inset-0 hidden bg-gradient-to-r from-[#040b1a]/60 via-[#040b1a]/25 to-transparent dark:block" />
       <div className="absolute inset-0 hidden bg-gradient-to-t from-[#040b1a]/50 via-transparent to-transparent dark:block" />
       <div className="relative mx-auto flex h-full max-w-[1400px] flex-col justify-center px-4 sm:px-6">
-        {eyebrow && (
+        {eyebrow && !collapsed && (
           <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-[#d4b37a]">
             {eyebrow}
           </p>
         )}
-        <h2 className="mt-1 text-2xl font-bold text-white sm:text-3xl">
+        <h2
+          className={`mt-1 font-bold text-white ${
+            collapsed ? "text-lg" : "text-2xl sm:text-3xl"
+          }`}
+        >
           {title}
         </h2>
-        {subtitle && (
+        {subtitle && !collapsed && (
           <p className="mt-1 text-sm text-[#e8dfc8]">{subtitle}</p>
         )}
       </div>

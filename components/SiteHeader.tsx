@@ -15,6 +15,7 @@ const NAV = [
 
 const CALENDAR = { href: "/calendar", label: "Calendar" };
 const AUDIT = { href: "/audit-trail", label: "Audit Trail" };
+const SETTINGS = { href: "/settings", label: "Settings" };
 
 export default function SiteHeader() {
   const pathname = usePathname();
@@ -74,7 +75,7 @@ export default function SiteHeader() {
               alt="Canny Capital Partners"
               className="h-9 w-auto"
             />
-            <span className="hidden border-l border-[#b8975a]/50 pl-3 text-sm font-bold text-white md:block">
+            <span className="border-l border-[#b8975a]/50 pl-3 text-xs font-bold text-white sm:text-sm">
               Business Development Portal
             </span>
           </Link>
@@ -85,6 +86,7 @@ export default function SiteHeader() {
         <div className="hidden items-center gap-3 md:flex">
           {navLink(CALENDAR.href, CALENDAR.label)}
           {navLink(AUDIT.href, AUDIT.label)}
+          {navLink(SETTINGS.href, SETTINGS.label)}
           <span className="hidden h-5 w-px bg-[#b8975a]/40 sm:block" />
           {userName && (
             <span className="hidden text-xs text-[#c8bfa8] sm:block">
@@ -153,6 +155,7 @@ export default function SiteHeader() {
             {NAV.map((item) => navLink(item.href, item.label, true))}
             {navLink(CALENDAR.href, CALENDAR.label, true)}
             {navLink(AUDIT.href, AUDIT.label, true)}
+            {navLink(SETTINGS.href, SETTINGS.label, true)}
           </div>
           <div className="mt-3 flex items-center gap-2 border-t border-[#b8975a]/30 pt-3">
             <button
