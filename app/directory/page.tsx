@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, uniqueStrings } from "@/lib/format";
 import type { Deal, Executive, Interaction } from "@/lib/types";
 import type { Investor } from "@/lib/investors-db";
 import CompanyLogo from "@/components/CompanyLogo";
@@ -129,7 +129,7 @@ export default function Directory() {
       sub: e.currentTitle || e.targetRole || "Operator",
       stage: e.stage,
       owner: e.owner,
-      tags: e.industries ?? [],
+      tags: uniqueStrings(e.industries ?? []),
       sector: (e.industries ?? []).map((i) => dealFocusSector(i)).find(Boolean) ?? undefined,
       searchText:
         `${e.name} ${e.currentTitle} ${e.targetRole} ${(e.industries ?? []).join(" ")} ${e.background} ${e.notes}`.toLowerCase(),
@@ -496,7 +496,7 @@ export default function Directory() {
                       <Field label="Industries">
                         {(selExec.industries ?? []).length > 0 ? (
                           <span className="flex flex-wrap gap-1">
-                            {(selExec.industries ?? []).map((ind) => (
+                            {uniqueStrings(selExec.industries ?? []).map((ind) => (
                               <SectorChip key={ind} sector={dealFocusSector(ind) ?? ind} />
                             ))}
                           </span>

@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { MiCompany } from "@/lib/types";
+import { uniqueStrings, dedupeSourceTokens } from "@/lib/format";
 import CompanyLogo from "@/components/CompanyLogo";
 import SectorChip from "@/components/SectorChip";
 
@@ -126,7 +127,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
     setBusy(c.id);
     try {
       const notes = [
-        `Profile from ${c.source} (Market Intel company targets).`,
+        `Profile from ${dedupeSourceTokens(c.source)} (Market Intel company targets).`,
         c.subsector ? `Sub-sector: ${c.subsector}${c.naics ? ` (NAICS ${c.naics})` : ""}.` : "",
         c.signalValue ? `${c.signalLabel || "Size signal"}: ${fmtMoney(c.signalValue)}.` : "",
         c.contactName ? `Contact on file: ${c.contactName}${c.contactTitle ? `, ${c.contactTitle}` : ""}.` : "",
@@ -142,7 +143,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           industry: c.sector || sector || "",
           city: c.city ? `${c.city}, AZ` : "",
           contactName: c.contactName,
-          source: `Market Intel — ${c.source}`,
+          source: `Market Intel — ${dedupeSourceTokens(c.source)}`,
           notes,
         }),
       });
@@ -167,13 +168,15 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
         .filter(([k, v]) => k !== "note" && k !== "fit" && k !== "fitWhy" && v !== "" && v !== null && v !== undefined)
         .map(([k, v]) => {
           if (Array.isArray(v)) {
-            const s = v
-              .map((x) =>
-                x && typeof x === "object"
-                  ? Object.values(x as Record<string, unknown>).filter(Boolean).join(" · ")
-                  : String(x)
-              )
-              .join("; ");
+            // Detail arrays (signals, top primes, licenses) can carry
+            // exact repeats from layered enrichments — dedupe the
+            // rendered items so no entry prints twice (Oct 14, 2026).
+            const items = v.map((x) =>
+              x && typeof x === "object"
+                ? Object.values(x as Record<string, unknown>).filter(Boolean).join(" · ")
+                : String(x)
+            );
+            const s = uniqueStrings(items.filter((t) => t.trim() !== "")).join("; ");
             return [k, s] as [string, string];
           }
           return [k, String(v)] as [string, string];
@@ -209,7 +212,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           {profileDetails(c).map(([k, v]) => (
             <p key={k}><span className="text-slate-400 dark:text-white/40">{k} </span>{v}</p>
           ))}
-          <p><span className="text-slate-400 dark:text-white/40">Source </span>{c.sourceUrl ? <a className="underline" href={c.sourceUrl} target="_blank" rel="noreferrer">{c.source}</a> : c.source}</p>
+          <p><span className="text-slate-400 dark:text-white/40">Source </span>{c.sourceUrl ? <a className="underline" href={c.sourceUrl} target="_blank" rel="noreferrer">{dedupeSourceTokens(c.source)}</a> : dedupeSourceTokens(c.source)}</p>
         </div>
         {isFit && (
           <p className="mt-2 rounded-lg bg-[#b8975a]/15 px-2.5 py-1.5 text-xs font-medium text-[#8a6f3c] dark:text-[#d4b37a]">
