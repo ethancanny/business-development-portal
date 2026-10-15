@@ -27,7 +27,12 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#0d1f3c",
+  // Header navy in both schemes — the header itself is navy regardless
+  // of the app's day/night theme (mobile polish, Oct 14 2026).
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#0d1f3c" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d1f3c" },
+  ],
 };
 
 /** iPhone splash screens (apple-touch-startup-image), rendered by
@@ -69,9 +74,19 @@ export default function RootLayout({
         ))}
       </head>
       <body className="bg-slate-100 text-slate-900 antialiased dark:bg-[#0d1f3c] dark:text-[#e8dfc8]">
+        {/* Status-bar underlay (mobile polish §1): with
+            black-translucent the app draws under the iOS status bar;
+            this fixed navy strip (pointer-events-none, above content
+            and sheets, below the z-100 lock screen) keeps scrolled
+            content from ever showing behind the clock/battery. */}
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-x-0 top-0 z-[95] bg-[#0d1f3c]"
+          style={{ height: "env(safe-area-inset-top)" }}
+        />
         <ThemeProvider>
           <SiteHeader />
-          {children}
+          <div className="page-pad">{children}</div>
           <PwaShell />
           <Fab />
           <MobileNav />

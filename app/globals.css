@@ -8,6 +8,35 @@ html,
 body {
   overflow-x: clip;
 }
+/* Mobile polish (Oct 14, 2026): anchor jumps land below the 56px
+   mobile header + the status-bar safe area. */
+html {
+  scroll-padding-top: calc(56px + env(safe-area-inset-top));
+}
+/* When the on-screen keyboard is open (MobileNav toggles `kb-open` on
+   <html> from a visualViewport heuristic), the bottom tab bar and the
+   FAB slide away so they never float over the keyboard. */
+html.kb-open .mobile-tabbar,
+html.kb-open .fab-root {
+  transform: translateY(130%);
+  pointer-events: none;
+}
+.mobile-tabbar,
+.fab-root {
+  transition: transform 0.22s ease;
+}
+/* Bottom clearance for page content on phones: always clear the 64px
+   tab bar + home-bar inset; on pages where the FAB renders it adds
+   the `fab-visible` class to <html> for one more FAB-height of room
+   so the last cards are never covered. Desktop: no extra padding. */
+@media (max-width: 767px) {
+  .page-pad {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+  html.fab-visible .page-pad {
+    padding-bottom: calc(128px + env(safe-area-inset-bottom));
+  }
+}
 /* NOTE (Ethan, Oct 14 2026, correction): the cacti / night-sky photo
    is the mobile app's SPLASH / loading image only — never the site
    background. A body-backdrop rule shipped briefly and was reverted

@@ -58,7 +58,7 @@ export default function PageHero({ eyebrow, title, subtitle }: PageHeroProps) {
       <div className="absolute inset-0 hidden bg-gradient-to-t from-[#040b1a]/50 via-transparent to-transparent dark:block" />
       <div className="relative mx-auto flex h-full max-w-[1400px] flex-col justify-center px-4 sm:px-6">
         {eyebrow && !collapsed && (
-          <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-[#d4b37a]">
+          <p className="hidden text-[11px] font-semibold uppercase tracking-[0.25em] text-[#d4b37a] sm:block">
             {eyebrow}
           </p>
         )}
