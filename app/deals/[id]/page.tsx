@@ -18,9 +18,9 @@ import { fmtDate, fmtMoney } from "@/lib/format";
 import PageHero from "@/components/PageHero";
 import type { MiMultiple } from "@/lib/types";
 import { dealFocusSector, resolveDealValue, type MarketRates } from "@/lib/valuation";
-import CompanyLogo from "@/components/CompanyLogo";
 import SectorChip, { StageChip } from "@/components/SectorChip";
-import { dealWebsite } from "@/components/DealTable";
+import DealRecordHeader from "@/components/DealRecordHeader";
+import DealTimeline from "@/components/DealTimeline";
 
 export default function DealDetailPage() {
   const params = useParams();
@@ -140,16 +140,16 @@ export default function DealDetailPage() {
           ← Back to pipeline
         </Link>
 
+        {/* Record header band (Wave 3): graded sector strip with
+            logo, serif name, and key facts, above the dossier card. */}
+        <div className="mt-3">
+          <DealRecordHeader deal={deal} multiples={multiples} rates={rates} />
+        </div>
+
         {/* Dossier header */}
         <div className="mt-3 rounded-xl border border-slate-200 bg-white p-6 dark:border-white/10 dark:bg-[#132847]">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2">
-              <CompanyLogo
-                name={deal.companyName}
-                website={dealWebsite(deal)}
-                sector={dealFocusSector(deal.industry) ?? deal.industry}
-                size={26}
-              />
               <StageChip stage={deal.stage} />
               {deal.industry && (
                 <SectorChip sector={dealFocusSector(deal.industry) ?? deal.industry} />
@@ -429,6 +429,10 @@ export default function DealDetailPage() {
           )}
         </section>
       </div>
+
+      {/* Record timeline (Wave 3): activity log + touches + record
+          markers + stage age, newest first. */}
+      <DealTimeline deal={deal} activity={activity} interactions={interactions} />
 
       {editing && (
         <DealModal
