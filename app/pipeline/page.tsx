@@ -10,7 +10,11 @@ import { DealModal, ExecutiveModal } from "@/components/Modals";
 import PageHero from "@/components/PageHero";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type Executive, type MiMultiple } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
-import { resolveDealValue } from "@/lib/valuation";
+import { dealFocusSector, resolveDealValue } from "@/lib/valuation";
+import CompanyLogo from "@/components/CompanyLogo";
+import PersonAvatar from "@/components/PersonAvatar";
+import SectorChip from "@/components/SectorChip";
+import { dealWebsite } from "@/components/DealTable";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -291,8 +295,20 @@ export default function Dashboard() {
             emptyText="No deals"
             renderCard={(d) => (
               <div>
-                <p className="text-sm font-semibold text-slate-900 dark:text-white">{d.companyName}</p>
-                {d.industry && <p className="text-xs text-slate-500 dark:text-[#c8bfa8]">{d.industry}</p>}
+                <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                  <CompanyLogo
+                    name={d.companyName}
+                    website={dealWebsite(d)}
+                    sector={dealFocusSector(d.industry) ?? d.industry}
+                    size={20}
+                  />
+                  {d.companyName}
+                </p>
+                {d.industry && (
+                  <p className="mt-1.5">
+                    <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
+                  </p>
+                )}
                 <div className="mt-2 flex items-center justify-between">
                   <span className="text-sm font-medium text-slate-700 dark:text-[#e8dfc8]">{valueLabel(d)}</span>
                 </div>
@@ -344,7 +360,10 @@ export default function Dashboard() {
             emptyText="No candidates"
             renderCard={(e) => (
               <div>
-                <p className="text-sm font-semibold text-slate-900 dark:text-white">{e.name}</p>
+                <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                  <PersonAvatar name={e.name} size={20} />
+                  {e.name}
+                </p>
                 {e.currentTitle && <p className="text-xs text-slate-500 dark:text-[#c8bfa8]">{e.currentTitle}</p>}
                 {e.targetRole && (
                   <p className="mt-1 text-xs text-slate-600 dark:text-[#e8dfc8]">
@@ -396,8 +415,20 @@ export default function Dashboard() {
                 emptyText="No pairings"
                 renderCard={({ deal: d, operator: op, isMatch }) => (
                   <div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-white">{d.companyName}</p>
-                    {d.industry && <p className="text-xs text-slate-500 dark:text-[#c8bfa8]">{d.industry}</p>}
+                    <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                      <CompanyLogo
+                        name={d.companyName}
+                        website={dealWebsite(d)}
+                        sector={dealFocusSector(d.industry) ?? d.industry}
+                        size={20}
+                      />
+                      {d.companyName}
+                    </p>
+                    {d.industry && (
+                      <p className="mt-1.5">
+                        <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
+                      </p>
+                    )}
                     <div className="mt-2 flex items-center justify-between">
                       <span className="text-sm font-medium text-slate-700 dark:text-[#e8dfc8]">{valueLabel(d)}</span>
                     </div>

@@ -7,6 +7,12 @@ import PageHero from "@/components/PageHero";
 import { fmtMoney } from "@/lib/format";
 import type { Deal, Executive } from "@/lib/types";
 import type { Investor } from "@/lib/investors-db";
+import CompanyLogo from "@/components/CompanyLogo";
+import PersonAvatar from "@/components/PersonAvatar";
+import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
+import { SECTOR_COLORS } from "@/lib/sector-colors";
+import { dealFocusSector } from "@/lib/valuation";
+import { dealWebsite } from "@/components/DealTable";
 
 /**
  * Directory (Ethan, Oct 9, 2026): every operator and business the firm
@@ -25,6 +31,9 @@ interface Entry {
   owner: string;
   tags: string[];
   searchText: string;
+  /** Focus sector for chip/logo coloring, when the entry maps to one. */
+  sector?: string;
+  website?: string;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -84,6 +93,7 @@ export default function Directory() {
       stage: e.stage,
       owner: e.owner,
       tags: e.industries ?? [],
+      sector: (e.industries ?? []).map((i) => dealFocusSector(i)).find(Boolean) ?? undefined,
       searchText:
         `${e.name} ${e.currentTitle} ${e.targetRole} ${(e.industries ?? []).join(" ")} ${e.background} ${e.notes}`.toLowerCase(),
     }));
@@ -95,6 +105,8 @@ export default function Directory() {
       stage: d.stage,
       owner: d.owner,
       tags: [d.city, d.broker].filter((s) => s && s.trim()),
+      sector: dealFocusSector(d.industry) ?? d.industry,
+      website: dealWebsite(d),
       searchText:
         `${d.companyName} ${d.industry} ${d.city} ${d.broker} ${d.contactName} ${d.notes}`.toLowerCase(),
     }));
@@ -106,6 +118,8 @@ export default function Directory() {
       stage: i.status || "",
       owner: "",
       tags: [i.industry, i.investmentType].filter((s) => s && s.trim()),
+      sector: SECTOR_COLORS[i.industry] ? i.industry : undefined,
+      website: i.website || undefined,
       searchText:
         `${i.name} ${i.firm} ${i.title} ${i.email} ${i.industry} ${i.investmentType} ${i.notes}`.toLowerCase(),
     }));
@@ -175,17 +189,46 @@ export default function Directory() {
                       : "border-slate-200 bg-white hover:border-[#b8975a]/60 dark:border-white/10 dark:bg-[#132847]/60"
                   }`}
                 >
-                  <span className="flex items-baseline justify-between gap-2">
-                    <span className="truncate text-sm font-semibold text-[#0d1f3c] dark:text-white">
-                      {e.name}
+                  <span className="flex items-start gap-2.5">
+                    {e.kind === "business" ? (
+                      <CompanyLogo name={e.name} website={e.website} sector={e.sector} size={28} />
+                    ) : (
+                      <PersonAvatar name={e.name} size={28} />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-baseline justify-between gap-2">
+                        <span className="truncate text-sm font-semibold text-[#0d1f3c] dark:text-white">
+                          {e.name}
+                        </span>
+                        {e.kind === "investor" ? (
+                          <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:bg-white/10 dark:text-white/60">
+                            {e.stage}
+                          </span>
+                        ) : (
+                          <span className="shrink-0">
+                            <StageChip stage={e.stage} />
+                          </span>
+                        )}
+                      </span>
+                      <span className="mt-0.5 block truncate text-xs text-slate-400 dark:text-white/40">
+                        {e.kind === "business"
+                          ? e.tags.join(" · ") || e.sub
+                          : e.sub}
+                        {e.kind === "investor" && e.tags.length > 0 ? ` · ${e.tags.join(" · ")}` : ""}
+                      </span>
+                      {e.kind === "operator" && e.tags.length > 0 && (
+                        <span className="mt-1.5 flex flex-wrap gap-1">
+                          {e.tags.map((t) => (
+                            <SectorChip key={t} sector={dealFocusSector(t) ?? t} />
+                          ))}
+                        </span>
+                      )}
+                      {e.kind === "business" && e.sector && (
+                        <span className="mt-1.5 block">
+                          <SectorChip sector={e.sector} />
+                        </span>
+                      )}
                     </span>
-                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:bg-white/10 dark:text-white/60">
-                      {e.stage}
-                    </span>
-                  </span>
-                  <span className="mt-0.5 block truncate text-xs text-slate-400 dark:text-white/40">
-                    {e.sub}
-                    {e.tags.length > 0 ? ` · ${e.tags.join(" · ")}` : ""}
                   </span>
                 </button>
               </li>
@@ -236,6 +279,18 @@ export default function Directory() {
                   </button>
                 ))}
               </div>
+              {(() => {
+                const present: string[] = [];
+                for (const e of entries) {
+                  if (e.sector && SECTOR_COLORS[e.sector] && !present.includes(e.sector))
+                    present.push(e.sector);
+                }
+                return present.length > 1 ? (
+                  <div className="mb-3">
+                    <SectorLegend sectors={present} />
+                  </div>
+                ) : null;
+              })()}
               {group(tab)}
               {visible.length === 0 && (
                 <p className="text-sm text-slate-400 dark:text-white/40">
@@ -268,16 +323,28 @@ export default function Directory() {
                           ? "Business"
                           : "Investor"}
                     </span>
-                    <span className="rounded-full bg-[#b8975a]/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8a6f3e] dark:text-[#d4b37a]">
-                      {selected.stage}
-                    </span>
+                    {selected.kind === "investor" ? (
+                      <span className="rounded-full bg-[#b8975a]/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8a6f3e] dark:text-[#d4b37a]">
+                        {selected.stage}
+                      </span>
+                    ) : (
+                      <StageChip stage={selected.stage} />
+                    )}
+                    {selected.sector && SECTOR_COLORS[selected.sector] && (
+                      <SectorChip sector={selected.sector} />
+                    )}
                     {selected.owner && (
                       <span className="text-xs text-slate-400 dark:text-white/40">
                         Claimed by {selected.owner}
                       </span>
                     )}
                   </div>
-                  <h3 className="mt-3 text-2xl font-bold text-[#0d1f3c] dark:text-white">
+                  <h3 className="mt-3 flex items-center gap-3 text-2xl font-bold text-[#0d1f3c] dark:text-white">
+                    {selected.kind === "business" ? (
+                      <CompanyLogo name={selected.name} website={selected.website} sector={selected.sector} size={36} />
+                    ) : (
+                      <PersonAvatar name={selected.name} size={36} />
+                    )}
                     {selected.name}
                   </h3>
                   <p className="mt-0.5 text-sm text-slate-500 dark:text-white/60">
@@ -289,13 +356,27 @@ export default function Directory() {
                       <Field label="Current title">{selExec.currentTitle || "—"}</Field>
                       <Field label="Target role">{selExec.targetRole || "—"}</Field>
                       <Field label="Industries">
-                        {(selExec.industries ?? []).join(", ") || "—"}
+                        {(selExec.industries ?? []).length > 0 ? (
+                          <span className="flex flex-wrap gap-1">
+                            {(selExec.industries ?? []).map((ind) => (
+                              <SectorChip key={ind} sector={dealFocusSector(ind) ?? ind} />
+                            ))}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
                       </Field>
                     </div>
                   )}
                   {selDeal && (
                     <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3">
-                      <Field label="Industry">{selDeal.industry || "—"}</Field>
+                      <Field label="Industry">
+                        {selDeal.industry ? (
+                          <SectorChip sector={dealFocusSector(selDeal.industry) ?? selDeal.industry} />
+                        ) : (
+                          "—"
+                        )}
+                      </Field>
                       <Field label="Location">
                         {selDeal.city ? (
                           <a
@@ -382,7 +463,13 @@ export default function Directory() {
                         <Field label="Investment type">{selInvestor.investmentType}</Field>
                       )}
                       {selInvestor.industry && (
-                        <Field label="Industry focus">{selInvestor.industry}</Field>
+                        <Field label="Industry focus">
+                          {SECTOR_COLORS[selInvestor.industry] ? (
+                            <SectorChip sector={selInvestor.industry} />
+                          ) : (
+                            selInvestor.industry
+                          )}
+                        </Field>
                       )}
                       {selInvestor.ebitdaSize && (
                         <Field label="EBITDA size">{selInvestor.ebitdaSize}</Field>
