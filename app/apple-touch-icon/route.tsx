@@ -20,12 +20,15 @@ export async function GET() {
           height: "100%",
           display: "flex",
           backgroundColor: NAVY,
-          backgroundImage: `url(${PHOTO})`,
-          backgroundSize: "contain",
-          backgroundPosition: "center",
-          backgroundRepeat: "no-repeat",
         }}
+      >
+      <img
+        src={PHOTO}
+        width={size}
+        height={size}
+        style={{ objectFit: "contain" }}
       />
+      </div>
     ),
     {
       width: size,

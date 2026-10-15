@@ -23,16 +23,17 @@ export async function GET(req: Request) {
           height: "100%",
           display: "flex",
           backgroundColor: NAVY,
-          ...(navy
-            ? {}
-            : {
-                backgroundImage: `url(${PHOTO})`,
-                backgroundSize: "contain",
-                backgroundPosition: "center",
-                backgroundRepeat: "no-repeat",
-              }),
         }}
+      >
+        {!navy && (
+      <img
+        src={PHOTO}
+        width={size}
+        height={size}
+        style={{ objectFit: "contain" }}
       />
+        )}
+      </div>
     ),
     {
       width: size,
