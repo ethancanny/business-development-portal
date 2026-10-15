@@ -29,6 +29,7 @@ export function middleware(req: NextRequest) {
     "/sw.js",
     "/offline",
     "/apple-touch-icon",
+    "/apple-touch-icon-v2",
   ];
   const PUBLIC_ASSETS = [
     "/canny-logo.png",
