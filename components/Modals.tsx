@@ -5,6 +5,7 @@ import { DEAL_STAGES, EXEC_STAGES, PARTNER_NAMES, type Deal, type DealDrivers, t
 import { fmtMoney, fmtDate } from "@/lib/format";
 import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, dealFocusSector, estimateMultiple, isFocusDeal, matchGroup, resolveDealValue, resolveStatedPrice, resolveStructure, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
 import SectorChip, { StageChip } from "@/components/SectorChip";
+import DealRecordHeader from "@/components/DealRecordHeader";
 
 function fmtMultRange(lo: number, hi: number): string {
   return lo.toFixed(1) === hi.toFixed(1)
@@ -632,7 +633,13 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
       {editing && <DupeWarning deal={deal} allDeals={allDeals} name={form.companyName} />}
 
       {!editing && deal ? (
-        <div className="flex flex-col divide-y divide-slate-100 dark:divide-white/10">
+        <div>
+          {/* Record header band (Wave 3): graded sector strip above
+              the detail rows — same band as the dossier page. */}
+          <div className="mb-4">
+            <DealRecordHeader deal={deal} multiples={multiples} rates={rates} />
+          </div>
+          <div className="flex flex-col divide-y divide-slate-100 dark:divide-white/10">
           <DetailRow
             label="Industry"
             value={
@@ -779,6 +786,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
             >
               Delete
             </button>
+          </div>
           </div>
         </div>
       ) : (
