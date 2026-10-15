@@ -10,7 +10,7 @@ import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive,
 import type { CalendarEvent } from "@/lib/calendar-db";
 import type { Investor } from "@/lib/investors-db";
 import { fmtMoney } from "@/lib/format";
-import { isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
+import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
 import { SectorLegend } from "@/components/SectorChip";
 
@@ -67,7 +67,6 @@ export default function Overview() {
   const [rates, setRates] = useState<MarketRates>({});
   const [fitCounts, setFitCounts] = useState<Record<string, number | null>>({});
   const [weekTab, setWeekTab] = useState<"this" | "last">("this");
-  const [includeNonFocus, setIncludeNonFocus] = useState(false);
   const [showOtherCal, setShowOtherCal] = useState(false);
   const [analyticsTab, setAnalyticsTab] = useState<"pipeline" | "sourcing" | "relationships">("pipeline");
   const [winDays, setWinDays] = useState<30 | 90 | 365>(30);
@@ -170,17 +169,11 @@ export default function Overview() {
     () => deals.filter((d) => !TERMINAL_STAGES.includes(d.stage)),
     [deals]
   );
-  // ONE scope rule (Ethan, Oct 14, 2026): the "Include non-focus
-  // deals" toggle drives BOTH the Active Pipeline Value stat card and
-  // the analytics section. Default: focus sectors only.
-  const scopedDeals = useMemo(
-    () => (includeNonFocus ? deals : deals.filter((d) => isFocusDeal(d.industry))),
-    [deals, includeNonFocus]
-  );
-  const nonFocusCount = useMemo(
-    () => deals.filter((d) => !isFocusDeal(d.industry)).length,
-    [deals]
-  );
+  // Scope rule (Ethan, Oct 14, 2026 — supersedes the same-day toggle):
+  // EVERY deal counts everywhere — stat cards, analytics, charts,
+  // averages. The "Non-focus" tag remains a label on out-of-sector
+  // deals only; it changes no total. (Name kept: ~15 consumers below.)
+  const scopedDeals = deals;
   // Active pipeline value: sum of resolved values — stated price,
   // else the market-multiple estimate — over ACTIVE deals in scope
   // (Passed / Closed Won excluded). 0 of 0 qualifying deals → "—".
@@ -642,7 +635,7 @@ export default function Overview() {
       value: pipelineValued.length === 0 ? "—" : fmtMoney(pipelineValue),
       accent: "#b8975a",
       href: "/pipeline",
-      note: includeNonFocus ? "All sectors" : "Focus sectors only",
+      note: "All sectors",
     },
     { label: "Active targets", value: String(activeDeals.length), accent: "#3B5B84", href: "/pipeline" },
     {
@@ -717,28 +710,6 @@ export default function Overview() {
             </div>
           );
         })}
-      </div>
-
-      {/* The one scope toggle: drives Active Pipeline Value AND the
-          analytics section below. */}
-      <div className="mb-6 flex items-center justify-end gap-2 px-1">
-        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 dark:text-white/60">
-          <input
-            type="checkbox"
-            checked={includeNonFocus}
-            onChange={(e) => setIncludeNonFocus(e.target.checked)}
-            className="h-3.5 w-3.5 accent-[#b8975a]"
-          />
-          Include non-focus deals
-          {!includeNonFocus && nonFocusCount > 0 && (
-            <span className="text-slate-400 dark:text-white/40">
-              ({nonFocusCount} excluded)
-            </span>
-          )}
-        </label>
-        <span className="hidden text-[11px] text-slate-400 dark:text-white/40 sm:inline">
-          — applies to pipeline value + analytics
-        </span>
       </div>
 
       {/* Operators tile */}
@@ -1055,8 +1026,8 @@ export default function Overview() {
 
       {/* Analytics — tabbed (Oct 14, 2026 visual refresh): Pipeline |
           Sourcing | Relationships, one window selector, every chart
-          footed with its data date and sample size. Scope follows the
-          single non-focus toggle above. */}
+          footed with its data date and sample size. Scope: ALL deals
+          (the non-focus toggle was removed later on Oct 14). */}
       <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-bold text-[#0d1f3c] dark:text-white">
@@ -1158,8 +1129,7 @@ export default function Overview() {
               </div>
             </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/40">
-              Data as of {dataDate} · n = {analytics.scopedCount} deals in scope
-              {includeNonFocus ? "" : " (focus sectors only)"}
+              Data as of {dataDate} · n = {analytics.scopedCount} deals · All sectors.
             </p>
 
             {analytics.closedPassedCount >= 5 ? (
