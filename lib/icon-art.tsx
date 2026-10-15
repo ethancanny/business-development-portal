@@ -1,49 +1,68 @@
 import { ImageResponse } from "next/og";
 
 /**
- * App-icon artwork (Ethan, Oct 14, 2026 — final): the cacti /
+ * App-icon artwork (Ethan, Oct 14–15, 2026 — final): the cacti /
  * night-sky photo filling the square (cover), DIMMED under a navy
- * veil, with the bold geometric C from Ethan's reference icon laid
- * over it in plain white. No wordmark, no gold, no letterbox bars.
+ * veil, with the firm's own mark over it in white — the serif C in
+ * its square frame, lifted from the Canny logo and inverted to
+ * white per Ethan's reference image ("This is the C that i want
+ * with the box around it! Just make it white").
  *
- * The C is an annulus sector drawn as an SVG path (satori renders
- * arc commands correctly — verified against a local render before
- * shipping). Glyph diameter ~56% of the icon; the maskable variant
- * shrinks it into the maskable safe zone.
+ * The C is set in Cormorant Garamond 600 (the portal's display
+ * serif), fetched as TTF from Google Fonts at render time and
+ * cached at module scope. If the font fetch ever fails, the icon
+ * still renders with a generic serif fallback rather than erroring.
  */
 const PHOTO = "https://cannycapitalpartners.com/arizona-desert-landscape.jpg";
 const NAVY = "#0d1f3c";
 const DIM = "rgba(5,10,22,0.70)";
 
-function cPath(
-  cx: number,
-  cy: number,
-  R: number,
-  r: number,
-  halfGapDeg: number
-): string {
-  const rad = (d: number) => (d * Math.PI) / 180;
-  const pt = (rad2: number, a: number): [number, number] => [
-    cx + rad2 * Math.cos(a),
-    cy + rad2 * Math.sin(a),
-  ];
-  const a1 = rad(halfGapDeg);
-  const a2 = rad(360 - halfGapDeg);
-  const [x1, y1] = pt(R, a1);
-  const [x2, y2] = pt(R, a2);
-  const [x3, y3] = pt(r, a2);
-  const [x4, y4] = pt(r, a1);
-  const f = (n: number) => Math.round(n * 100) / 100;
-  return `M ${f(x1)} ${f(y1)} A ${R} ${R} 0 1 1 ${f(x2)} ${f(y2)} L ${f(x3)} ${f(
-    y3
-  )} A ${r} ${r} 0 1 0 ${f(x4)} ${f(y4)} Z`;
+type IconFont = {
+  name: string;
+  data: ArrayBuffer;
+  weight: 600;
+  style: "normal";
+};
+
+let fontPromise: Promise<IconFont[] | null> | null = null;
+
+function loadFonts(): Promise<IconFont[] | null> {
+  if (!fontPromise) {
+    fontPromise = (async () => {
+      try {
+        // An old-Safari UA makes Google Fonts serve TTF URLs
+        // (satori cannot consume woff2 in this version).
+        const css = await (
+          await fetch(
+            "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&display=swap",
+            {
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.75.14 (KHTML, like Gecko) Version/7.0.3 Safari/7046A194A",
+              },
+            }
+          )
+        ).text();
+        const m = css.match(/url\((https:[^)]+)\)/);
+        if (!m) return null;
+        const data = await (await fetch(m[1])).arrayBuffer();
+        return [
+          { name: "Cormorant Garamond", data, weight: 600, style: "normal" },
+        ] as IconFont[];
+      } catch {
+        return null;
+      }
+    })();
+  }
+  return fontPromise;
 }
 
-export function iconResponse(size: number, glyphScale = 1): ImageResponse {
-  // Glyph geometry in a 100-unit viewBox: outer R 28, inner r 14.5
-  // (stroke ≈ 24% of diameter), opening of 68° facing east.
-  const R = 28 * glyphScale;
-  const r = 14.5 * glyphScale;
+export async function iconResponse(
+  size: number,
+  emblemScale = 1
+): Promise<ImageResponse> {
+  const fonts = await loadFonts();
+  const box = Math.round(size * 0.76 * emblemScale);
   return new ImageResponse(
     (
       <div
@@ -84,15 +103,38 @@ export function iconResponse(size: number, glyphScale = 1): ImageResponse {
             justifyContent: "center",
           }}
         >
-          <svg width={size} height={size} viewBox="0 0 100 100">
-            <path d={cPath(50, 50, R, r, 34)} fill="#ffffff" />
-          </svg>
+          <div
+            style={{
+              width: box,
+              height: box,
+              borderWidth: Math.max(3, Math.round(size * 0.042 * emblemScale)),
+              borderStyle: "solid",
+              borderColor: "#ffffff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: fonts ? "Cormorant Garamond" : "serif",
+                fontWeight: 600,
+                fontSize: Math.round(size * 0.58 * emblemScale),
+                color: "#ffffff",
+                lineHeight: 1,
+                marginTop: Math.round(size * -0.03 * emblemScale),
+              }}
+            >
+              C
+            </span>
+          </div>
         </div>
       </div>
     ),
     {
       width: size,
       height: size,
+      fonts: fonts ?? undefined,
       headers: {
         "Cache-Control":
           "public, max-age=86400, stale-while-revalidate=604800",
