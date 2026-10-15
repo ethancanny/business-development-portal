@@ -207,7 +207,31 @@ export default function MarketIntelPage() {
   const [latest, setLatest] = useState<LatestMap>({});
   const [obs, setObs] = useState<MiIndicatorObs[]>([]);
   const [tab, setTab] = useState<Tab>("acquisitions");
-  const [bottomTab, setBottomTab] = useState<"deals" | "econ">("econ");
+  // Single tabbed panel (Oct 14, 2026 restructure): one panel under the
+  // Updates tiles replaces the stacked sections. Tab restores from the
+  // URL hash first, then the session's last choice; default Fit Targets.
+  type MainTab = "fit" | "multiples" | "azdata" | "acq";
+  const [mainTab, setMainTab] = useState<MainTab>("fit");
+  const [buyers, setBuyers] = useState<{ acquirer: string; dealCount: number; totalValue: number | null; deals: { target: string; headline: string; industry: string; dealValue: number | null; announcedDate: string }[] }[]>([]);
+  const [spineSeen, setSpineSeen] = useState<string>("");
+  useEffect(() => {
+    const map: Record<string, MainTab> = { "fit-targets": "fit", multiples: "multiples", "az-data": "azdata", acquisitions: "acq" };
+    const fromHash = map[(window.location.hash || "").replace("#", "")];
+    const saved = window.sessionStorage.getItem("ccp-mi-tab") || "";
+    const valid: MainTab[] = ["fit", "multiples", "azdata", "acq"];
+    const pick = fromHash ?? (valid.includes(saved as MainTab) ? (saved as MainTab) : null);
+    if (pick) setMainTab(pick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const selectMainTab = (t: MainTab) => {
+    setMainTab(t);
+    try {
+      window.sessionStorage.setItem("ccp-mi-tab", t);
+      window.history.replaceState(null, "", `#${t === "fit" ? "fit-targets" : t === "multiples" ? "multiples" : t === "azdata" ? "az-data" : "acquisitions"}`);
+    } catch {
+      /* storage unavailable — tab still switches */
+    }
+  };
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [acquisitions, setAcquisitions] = useState<MiAcquisition[]>([]);
   const [filings, setFilings] = useState<MiFiling[]>([]);
@@ -271,7 +295,7 @@ export default function MarketIntelPage() {
           getJSON<MiFiling[]>("/api/market/filings"),
           getJSON<MiWarnNotice[]>("/api/market/warn?limit=500"),
           getJSON<MiMultiple[]>("/api/market/multiples"),
-          getJSON<MiSyncLog[]>("/api/market/sync-log"),
+          getJSON<MiSyncLog[]>("/api/market/sync-status"),
           getJSON<{ id: string; kind: string; status: string; createdAt?: string }[]>("/api/deal-flow"),
         ]);
         const lm: LatestMap = {};
@@ -286,10 +310,16 @@ export default function MarketIntelPage() {
         setMultiples(mult);
         setSyncLog(log);
         try {
-          const cf = await getJSON<{ fitTotal?: number }>("/api/market/companies?limit=1");
+          const cf = await getJSON<{ fitTotal?: number; companies?: { lastSeen?: string }[] }>("/api/market/companies?limit=1");
           setFitTotal(cf.fitTotal ?? null);
+          setSpineSeen(cf.companies?.[0]?.lastSeen ?? "");
         } catch {
           /* fit card falls back to a dash */
+        }
+        try {
+          setBuyers(await getJSON("/api/market/competing-buyers"));
+        } catch {
+          /* competing buyers table shows its empty state */
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -704,11 +734,13 @@ export default function MarketIntelPage() {
     const primeO = rateLatest("DPRIME");
     const sofrO = rateLatest("SOFR");
     const t10O = rateLatest("DGS10");
+    const indOkMs = syncLog.filter((s) => s.job === "indicators" && s.status === "ok").reduce((m, s) => Math.max(m, +new Date(s.ranAt)), 0);
+    const ratesStale = syncLog.length > 0 && (indOkMs === 0 || Date.now() - indOkMs > 48 * 3600_000);
     const ratesCard = primeO
       ? {
           label: "📈 Market Rates",
           value: `Prime ${primeO.value?.toFixed(2)}%`,
-          date: `${sofrO ? `SOFR ${sofrO.value?.toFixed(2)}% · ` : ""}${t10O ? `10-Yr Treasury ${t10O.value?.toFixed(2)}% · ` : ""}FRED · as of ${primeO.obsDate}`,
+          date: `${sofrO ? `SOFR ${sofrO.value?.toFixed(2)}% · ` : ""}${t10O ? `10-Yr Treasury ${t10O.value?.toFixed(2)}% · ` : ""}FRED · as of ${fmtDate(primeO.obsDate)}${ratesStale ? " · ⚠ feed stale" : ""}`,
           chg: null,
         }
       : null;
@@ -1105,7 +1137,7 @@ export default function MarketIntelPage() {
                 .reduce((s, o) => s + (o.value || 0), 0);
               return fy25 > 0 ? (
                 <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
-                  Cross-reference: this series computes to ${(fy25 / 1e9).toFixed(1)}B for federal FY2025 · DoD&apos;s published Defense Spending by State report: $14.5B (FY2023) / $14.7B (FY2024) AZ contract spending — different methodology, shown for comparison. The daily ingest re-verifies these monthly figures against USASpending&apos;s fiscal-year totals every run (see Data freshness below).
+                  Cross-reference: this series computes to ${(fy25 / 1e9).toFixed(1)}B for federal FY2025 · DoD&apos;s published Defense Spending by State report: $14.5B (FY2023) / $14.7B (FY2024) AZ contract spending — different methodology, shown for comparison. The daily ingest re-verifies these monthly figures against USASpending&apos;s fiscal-year totals every run (defense-xcheck in the sync log).
                 </p>
               ) : null;
             })()}
@@ -1214,6 +1246,29 @@ export default function MarketIntelPage() {
       </div>
     ),
   };
+
+  // --- Tab badges, "Updated" labels, and staleness (Oct 14, 2026) ---
+  // Data freshness section deleted; each surface now carries its own
+  // small label from the source's actual data date, plus an amber dot
+  // when a feed has been silent >48h (weekly feeds >7d, census >35d).
+  const filings7d = filings.filter((f) => f.status !== "dismissed" && f.filingDate && Date.now() - +new Date(f.filingDate) <= 7 * 864e5).length;
+  const lastOkMs = (jobs: string[]) => {
+    let m = 0;
+    for (const s of syncLog) if (jobs.includes(s.job) && s.status === "ok") m = Math.max(m, +new Date(s.ranAt));
+    return m;
+  };
+  const feedStale = (jobs: string[], hours: number) => {
+    const m = lastOkMs(jobs);
+    return syncLog.length > 0 && (m === 0 || Date.now() - m > hours * 3600_000);
+  };
+  const fitStale = spineSeen ? Date.now() - +new Date(spineSeen) > 8 * 864e5 : false;
+  const multStale = feedStale(["multiples"], 48);
+  const acqStale = feedStale(["news", "econ_events", "bankruptcy_news", "filings"], 48);
+  const azStale = feedStale(["county_permits", "sector_counts", "susb_sizes"], 168) || feedStale(["census"], 840);
+  const multUpdated = multiples.length ? fmtDate(multiples.reduce((a, m) => (m.createdAt > a ? m.createdAt : a), "")) : "";
+  const acqUpdated = acquisitions.length ? fmtDate(acquisitions.reduce((a, x) => (x.announcedDate > a ? x.announcedDate : a), "")) : "";
+  const staleMark = (stale: boolean) =>
+    stale ? <span className="ml-1.5 text-amber-500" title="Feed has not updated within its expected window">● stale</span> : null;
 
   return (
     <div className="min-h-screen">
@@ -1354,178 +1409,63 @@ export default function MarketIntelPage() {
           </div>
         )}
 
-        <FullSection kicker="Consolidated targets" title="★ Fit Targets" sub="Every company that passes Canny’s fit rules, across all focus industries — switch industries, expand a row, and convert a fit straight into the pipeline">
-          <FitTargets />
-        </FullSection>
-
-        {/* Combined Industries & Multiples (Oct 10, 2026 redo) + consolidated Fit Targets */}
-        <FullSection title="Industries & Multiples" sub="One home for industries and their multiples — switch industries at the top for multiples by subindustry and the typical deal structure in each; best guesses are flagged est where no multiple is published">
-          <div className="rounded-2xl border border-[#b8975a]/40 bg-gradient-to-br from-[#e6edf6] via-white to-[#f7f1e3] p-3 shadow-sm dark:from-[#132847] dark:via-[#0d1f3c] dark:to-[#1a3358] sm:p-4">
-            <IndustryExplorer
-              multiples={multiples}
-              dark={dark}
-              onMultiplesAdded={async () => setMultiples(await getJSON("/api/market/multiples"))}
-              overview={overviewNode}
-              extras={sectorExtras}
-            />
-          </div>
-        </FullSection>
-
-        {/* Bottom reference block — tabbed: Arizona Economic Data (default, left) | Acquisitions & Filings */}
-        <div className="mb-6 rounded-2xl border border-slate-200 bg-white/60 p-3 dark:border-white/10 dark:bg-[#132847]/30 sm:p-4">
-          <div className="mb-2 flex flex-wrap items-center gap-2 border-b-2 border-[#b8975a]/50 pb-3">
-            <button onClick={() => setBottomTab("econ")} className={tabBtn(bottomTab === "econ")}>Arizona Economic Data</button>
-            <button onClick={() => setBottomTab("deals")} className={tabBtn(bottomTab === "deals")}>Acquisitions &amp; Filings</button>
+        {/* Single tabbed panel (Ethan, Oct 14, 2026 restructure): Fit Targets | Industries & Multiples | Arizona Economic Data | Acquisitions & Filings — one panel under the Updates tiles, page ends after it. */}
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white/60 dark:border-white/10 dark:bg-[#132847]/30">
+          <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-t-2xl border-b-2 border-[#b8975a]/50 bg-white/95 px-3 py-3 backdrop-blur dark:bg-[#0d1f3c]/95 sm:px-4">
+            <button onClick={() => selectMainTab("fit")} className={tabBtn(mainTab === "fit")}>
+              Fit Targets{fitTotal !== null && <span className="ml-1.5 rounded-full bg-[#b8975a]/15 px-1.5 py-0.5 text-[11px] font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">{fitTotal.toLocaleString()}</span>}
+            </button>
+            <button onClick={() => selectMainTab("multiples")} className={tabBtn(mainTab === "multiples")}>Industries &amp; Multiples</button>
+            <button onClick={() => selectMainTab("azdata")} className={tabBtn(mainTab === "azdata")}>Arizona Economic Data</button>
+            <button onClick={() => selectMainTab("acq")} className={tabBtn(mainTab === "acq")}>
+              Acquisitions &amp; Filings{filings7d > 0 && <span className="ml-1.5 rounded-full bg-[#b8975a]/15 px-1.5 py-0.5 text-[11px] font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">{filings7d} new</span>}
+            </button>
             <span className="ml-auto hidden text-xs text-slate-400 dark:text-white/40 sm:block">
-              {bottomTab === "deals" ? "AZ acquisitions and SEC filings · last 7 days only" : "Companies by sector and the source data behind our scoring"}
+              {mainTab === "fit" && <>Spines updated {spineSeen ? fmtDate(spineSeen) : "—"}{staleMark(fitStale)}</>}
+              {mainTab === "multiples" && <>Multiples data as of {multUpdated || "—"}{staleMark(multStale)}</>}
+              {mainTab === "azdata" && <>Background datasets, linked at the source{staleMark(azStale)}</>}
+              {mainTab === "acq" && <>Latest announced {acqUpdated || "—"} · last 7 days shown{staleMark(acqStale)}</>}
             </span>
           </div>
-          {bottomTab === "econ" && (
-            <div>
-          <SubSection alt title="Arizona Companies by Sector">
-{sectorRows.length > 0 && (
-            <div className={`${chartCard} mb-4`}>
-              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">Arizona Companies by Sector</h3>
-                <div className="flex gap-1">
-                  {(["trend", "share"] as const).map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => setSectorView(v)}
-                      className={
-                        sectorView === v
-                          ? "rounded-full bg-[#b8975a] px-3 py-1 text-xs font-semibold text-white"
-                          : "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-500 hover:border-[#b8975a] dark:border-white/15 dark:text-white/50"
-                      }
-                    >
-                      {v === "trend" ? "Trend" : "Share"}
-                    </button>
-                  ))}
-                </div>
+          <div className="p-3 sm:p-4">
+            {mainTab === "fit" && <FitTargets />}
+            {mainTab === "multiples" && (
+<div className="rounded-2xl border border-[#b8975a]/40 bg-gradient-to-br from-[#e6edf6] via-white to-[#f7f1e3] p-3 shadow-sm dark:from-[#132847] dark:via-[#0d1f3c] dark:to-[#1a3358] sm:p-4">
+          <IndustryExplorer
+            multiples={multiples}
+            dark={dark}
+            onMultiplesAdded={async () => setMultiples(await getJSON("/api/market/multiples"))}
+            overview={overviewNode}
+            extras={sectorExtras}
+          />
+        </div>
+            )}
+            {mainTab === "azdata" && (
+              <div>
+                <p className="mb-3 text-sm text-slate-600 dark:text-white/70">
+                  The background datasets behind our scoring, linked at the source. We keep ingesting them — demographics, sector employment, and permits feed target and tailwind scoring — but the charts live with the providers now.
+                </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {[
+            { name: "Economic Indicators", url: "https://fred.stlouisfed.org", note: "State jobs, income, and housing trends behind demand in our sectors." },
+            { name: "State Revenue & Spending", url: "https://www.census.gov/programs-surveys/govfin.html", note: "Arizona's fiscal health and spending mix (AHCCCS/Medicaid, education) that healthcare and trades demand rides on." },
+            { name: "Demographics", url: "https://data.census.gov", note: "Tract-level age, income, and population growth — the demand-tailwind inputs for healthcare, hospitality, and construction." },
+            { name: "Commodity Prices", url: "https://fred.stlouisfed.org", note: "Copper, energy, and farm input costs that drive operator margins across the focus sectors." },
+            { name: "Layoffs & WARN Notices", url: "https://github.com/APVentureEngine/warn-act-notices", note: "Layoff notices often precede sales — worth a look when a target-industry employer appears." },
+            { name: "Housing Permits", url: "https://www.census.gov/construction/bps/index.html", note: "Residential construction pulse by county (Census Building Permits Survey)." },
+          ].map((l) => (
+            <a key={l.name} href={l.url} target="_blank" rel="noreferrer" className="block rounded-xl border border-slate-200 px-3.5 py-3 transition hover:border-[#b8975a] dark:border-white/10">
+              <span className="text-sm font-semibold text-[#0d1f3c] dark:text-white">{l.name} <span className="text-[#b8975a]">↗</span></span>
+              <span className="mt-0.5 block text-xs text-slate-500 dark:text-white/50">{l.note}</span>
+              <span className="mt-1 block text-[11px] text-slate-400 dark:text-white/30">{l.url.replace("https://", "")}</span>
+            </a>
+          ))}
+        </div>
               </div>
-              <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-                Employer establishments by NAICS sector · U.S. Census Bureau, County Business Patterns · refreshed daily (CBP publishes annually)
-              </p>
-              {sectorView === "trend" ? (
-                <div className="h-[380px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={sectorTrend.rows} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
-                      <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="year" tick={{ fontSize: 11, fill: tick }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: tick }} width={52} tickFormatter={(v: number) => v.toLocaleString()} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
-                      <Tooltip
-                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12, borderRadius: 8 }}
-                        cursor={{ stroke: grid }}
-                        formatter={(v, name) => [Number(v).toLocaleString(), name]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
-                      {sectorTrend.slugs.map((slug, i) => (
-                        <Line
-                          key={slug}
-                          type="monotone"
-                          dataKey={slug}
-                          name={SECTOR_SHORT[slug] ?? slug}
-                          stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                          strokeWidth={hoverSlug === slug ? 3.5 : 2}
-                          strokeOpacity={hoverSlug && hoverSlug !== slug ? 0.12 : 1}
-                          dot={false}
-                          activeDot={{ r: 3.5 }}
-                        />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <div className="h-[380px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={sectorPieData} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={1} stroke={dark ? "#132847" : "#ffffff"} strokeWidth={1}>
-                        {sectorPieData.map((d, i) => (
-                          <Cell
-                            key={d.name}
-                            fill={CHART_COLORS[i % CHART_COLORS.length]}
-                            fillOpacity={hoverSlug ? (d.slugs.includes(hoverSlug) ? 1 : 0.22) : 1}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }}
-                        formatter={(v, name) => [`${Number(v).toLocaleString()} (${sectorTotal ? ((Number(v) / sectorTotal) * 100).toFixed(1) : "0"}%)`, name]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-              <p className="mt-2 text-xs text-slate-400 dark:text-white/30">
-                {sectorView === "trend" ? "Establishments per year — top 8 sectors" : `CBP ${sectorYear} mix`} · {sectorTotal.toLocaleString()} establishments statewide (CBP {sectorYear})
-              </p>
-              <div className={`${tableWrap} mt-3 max-h-[320px] overflow-y-auto`}>
-                <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
-                  <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                    <th className={th}>Sector</th><th className={th}>Companies</th><th className={th}>Employees</th><th className={th}>Share</th>
-                  </tr></thead>
-                  <tbody>
-                    {sectorRows.map((r) => (
-                      <tr
-                        key={r.slug}
-                        onMouseEnter={() => { setHoverSlug(r.slug); setHovRow(`sector:${r.slug}`); }}
-                        onMouseLeave={() => { setHoverSlug(null); setHovRow(""); }}
-                        style={{
-                          backgroundColor:
-                            hoverSlug === r.slug
-                              ? dark
-                                ? "rgba(255,255,255,0.10)"
-                                : "rgb(215,225,240)"
-                              : hovRow === `sector:${r.slug}`
-                                ? dark
-                                  ? "rgba(255,255,255,0.08)"
-                                  : "rgb(230,237,246)"
-                                : undefined,
-                          transition: "background-color 200ms ease",
-                        }}
-                        className="border-b border-slate-100 dark:border-white/5"
-                      >
-                        <td className={td}>{r.name}</td>
-                        <td className={`${td} font-medium`}>{r.estab.toLocaleString()}</td>
-                        <td className={td}>{r.emp ? r.emp.toLocaleString() : "—"}</td>
-                        <td className={td}>{sectorTotal ? `${((r.estab / sectorTotal) * 100).toFixed(1)}%` : "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          </SubSection>
-<SubSection title="Arizona Economic Data — Sources">
-            <p className="mb-3 text-xs text-slate-500 dark:text-white/40">
-              The background datasets behind our scoring, linked at the source. We keep ingesting them — demographics, sector employment, and permits feed target and tailwind scoring — but the charts live with the providers now.
-            </p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {[
-                { name: "Economic Indicators", url: "https://fred.stlouisfed.org", note: "State jobs, income, and housing trends behind demand in our sectors." },
-                { name: "State Revenue & Spending", url: "https://www.census.gov/programs-surveys/govfin.html", note: "Arizona's fiscal health and spending mix (AHCCCS/Medicaid, education) that healthcare and trades demand rides on." },
-                { name: "Demographics", url: "https://data.census.gov", note: "Tract-level age, income, and population growth — the demand-tailwind inputs for healthcare, hospitality, and construction." },
-                { name: "Commodity Prices", url: "https://fred.stlouisfed.org", note: "Copper, energy, and farm input costs that drive operator margins across the focus sectors." },
-                { name: "Layoffs & WARN Notices", url: "https://github.com/APVentureEngine/warn-act-notices", note: "Layoff notices often precede sales — worth a look when a target-industry employer appears." },
-                { name: "Housing Permits", url: "https://www.census.gov/construction/bps/index.html", note: "Residential construction pulse by county (Census Building Permits Survey)." },
-              ].map((l) => (
-                <a key={l.name} href={l.url} target="_blank" rel="noreferrer" className="block rounded-xl border border-slate-200 px-3.5 py-3 transition hover:border-[#b8975a] dark:border-white/10">
-                  <span className="text-sm font-semibold text-[#0d1f3c] dark:text-white">{l.name} <span className="text-[#b8975a]">↗</span></span>
-                  <span className="mt-0.5 block text-xs text-slate-500 dark:text-white/50">{l.note}</span>
-                  <span className="mt-1 block text-[11px] text-slate-400 dark:text-white/30">{l.url.replace("https://", "")}</span>
-                </a>
-              ))}
-            </div>
-          </SubSection>
-            </div>
-          )}
-
-
-          {bottomTab === "deals" && (
-            <div>
-          <div>
+            )}
+            {mainTab === "acq" && (
+              <div>
+<div>
 {/* Tabs */}
         <div className="mb-4 flex flex-wrap gap-2">
           {(TABS as readonly string[]).map((t) => (
@@ -1618,24 +1558,39 @@ export default function MarketIntelPage() {
         )}
 
           </div>
-            </div>
-          )}
+                <div className="mt-8">
+                  <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Competing Buyers — repeat acquirers &amp; platforms</h3>
+                  <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Acquirers with 2+ Arizona deals in the acquisitions feed over the last 12 months — the repeat buyers and PE-backed platforms most likely to bid against us on add-ons.</p>
+                  <div className={tableWrap}>
+                    <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                      <thead><tr className="border-b border-slate-200 dark:border-white/10">
+                        <th className={th}>Acquirer / platform</th><th className={th}>Deals</th><th className={th}>What was bought</th><th className={th}>Total size</th>
+                      </tr></thead>
+                      <tbody>
+                        {buyers.map((b) => (
+                          <tr key={b.acquirer} {...rowProps(`buyer:${b.acquirer}`)}>
+                            <td className={`${td} font-medium`}>{decodeEntities(b.acquirer)}</td>
+                            <td className={td}>{b.dealCount}</td>
+                            <td className={td}>
+                              {b.deals.map((d, i) => (
+                                <span key={i} className="block text-xs">
+                                  {decodeEntities(d.target || d.headline || "Deal")}{d.announcedDate ? ` · ${fmtDate(d.announcedDate)}` : ""}{d.dealValue ? ` · ${fmtMoney(d.dealValue)}` : ""}
+                                </span>
+                              ))}
+                            </td>
+                            <td className={`${td} whitespace-nowrap`}>{b.totalValue ? fmtMoney(b.totalValue) : "—"}</td>
+                          </tr>
+                        ))}
+                        {buyers.length === 0 && <tr><td className={td} colSpan={4}>No repeat acquirers yet — a buyer appears here after its second Arizona deal in the feed.</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Sync status */}
-        {syncLog.length > 0 && (
-          <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/40">
-            <h3 className="mb-2 text-sm font-semibold text-[#0d1f3c] dark:text-white">Data freshness</h3>
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500 dark:text-white/50">
-              {syncLog.slice(0, 8).map((s) => (
-                <span key={s.id}>
-                  <span className={s.status === "ok" ? "text-emerald-600 dark:text-emerald-400" : s.status === "skipped" ? "text-amber-500" : "text-red-500"}>●</span>{" "}
-                  {s.job}: {fmtDate(s.ranAt.slice(0, 10))}{s.added ? ` (+${s.added})` : ""}{s.message ? ` — ${s.message}` : ""}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );
