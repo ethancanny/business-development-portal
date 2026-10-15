@@ -269,7 +269,11 @@ export async function getNewsForUi(q: NewsQuery): Promise<{ items: MiNewsItem[];
           : q.type === "sector"
             ? `kind = 'sector'`
             : `TRUE`;
-  const savedCond = q.savedOnly ? `saved = TRUE` : `dismissed = FALSE`;
+  // Dismissed always wins: a story that is both saved and dismissed
+  // must not resurface in the Saved view (dismissal is permanent).
+  const savedCond = q.savedOnly
+    ? `saved = TRUE AND dismissed = FALSE`
+    : `dismissed = FALSE`;
   const rows = (await db.query(
     `SELECT * FROM mi_news
      WHERE ${savedCond}
