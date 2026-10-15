@@ -17,7 +17,7 @@ import {
 import type { Investor } from "@/lib/investors-db";
 import { fmtMoney } from "@/lib/format";
 import { isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
-import { AGING_COLORS, FOCUS_SECTOR_NAMES, sectorColor, stageColor } from "@/lib/sector-colors";
+import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
 
 /**
  * Full analytics (Ethan, Oct 14, 2026): linked from Overview only once
@@ -298,7 +298,7 @@ export default function AnalyticsPage() {
       <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
         <div
           className="h-full rounded-full"
-          style={{ width: `${((n / Math.max(1, max)) * 100).toFixed(1)}%`, backgroundColor: color }}
+          style={{ width: `${((n / Math.max(1, max)) * 100).toFixed(1)}%`, background: barGradient(color) }}
         />
       </div>
     </div>
@@ -510,7 +510,7 @@ export default function AnalyticsPage() {
                     Source quality — Activity feed
                   </p>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="tbl-grad w-full text-sm">
                       <thead>
                         <tr className="text-left text-xs uppercase tracking-wide text-slate-400 dark:text-white/40">
                           <th className="py-1 pr-3 font-semibold">Source</th>
@@ -544,7 +544,7 @@ export default function AnalyticsPage() {
                     Source quality — brokers on pipeline deals
                   </p>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="tbl-grad w-full text-sm">
                       <thead>
                         <tr className="text-left text-xs uppercase tracking-wide text-slate-400 dark:text-white/40">
                           <th className="py-1 pr-3 font-semibold">Broker</th>
@@ -646,7 +646,7 @@ export default function AnalyticsPage() {
                 </p>
                 {buyers.length > 0 ? (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="tbl-grad w-full text-sm">
                       <thead>
                         <tr className="text-left text-xs uppercase tracking-wide text-slate-400 dark:text-white/40">
                           <th className="py-1 pr-3 font-semibold">Acquirer / platform</th>
@@ -688,7 +688,7 @@ export default function AnalyticsPage() {
                 </p>
                 {compGroups.length > 0 ? (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="tbl-grad w-full text-sm">
                       <thead>
                         <tr className="text-left text-xs uppercase tracking-wide text-slate-400 dark:text-white/40">
                           <th className="py-1 pr-3 font-semibold">Sector / group</th>

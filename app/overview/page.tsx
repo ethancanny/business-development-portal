@@ -10,7 +10,7 @@ import type { CalendarEvent } from "@/lib/calendar-db";
 import type { Investor } from "@/lib/investors-db";
 import { fmtMoney } from "@/lib/format";
 import { isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
-import { AGING_COLORS, FOCUS_SECTOR_NAMES, sectorColor, stageColor } from "@/lib/sector-colors";
+import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
 import { SectorLegend } from "@/components/SectorChip";
 
 /** Fit-target sectors — all five focus sectors (Oct 14, 2026: the
@@ -948,7 +948,7 @@ export default function Overview() {
                     className="h-full rounded-full"
                     style={{
                       width: `${(value / maxStageValue) * 100}%`,
-                      backgroundColor: stageColor(stage),
+                      background: barGradient(stageColor(stage)),
                     }}
                   />
                 </div>
@@ -1010,7 +1010,7 @@ export default function Overview() {
                       className="h-full rounded-full"
                       style={{
                         width: `${(((count ?? 0) / maxFit) * 100).toFixed(1)}%`,
-                        backgroundColor: sectorColor(sector),
+                        background: barGradient(sectorColor(sector)),
                       }}
                     />
                   </div>
@@ -1221,7 +1221,7 @@ export default function Overview() {
                             className="h-full rounded-full"
                             style={{
                               width: `${(((r.avgDays ?? 0) / maxD) * 100).toFixed(1)}%`,
-                              backgroundColor: stageColor(r.stage),
+                              background: barGradient(stageColor(r.stage)),
                             }}
                           />
                         </div>
@@ -1261,7 +1261,7 @@ export default function Overview() {
                         className="h-full rounded-full"
                         style={{
                           width: `${((count / maxFit) * 100).toFixed(1)}%`,
-                          backgroundColor: sectorColor(sector),
+                          background: barGradient(sectorColor(sector)),
                         }}
                       />
                     </div>
@@ -1302,7 +1302,7 @@ export default function Overview() {
                   Source quality — Activity feed
                 </p>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="tbl-grad w-full text-sm">
                     <thead>
                       <tr className="text-left text-xs uppercase tracking-wide text-slate-400 dark:text-white/40">
                         <th className="py-1 pr-3 font-semibold">Source</th>
@@ -1337,7 +1337,7 @@ export default function Overview() {
                   Source quality — brokers on pipeline deals
                 </p>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="tbl-grad w-full text-sm">
                     <thead>
                       <tr className="text-left text-xs uppercase tracking-wide text-slate-400 dark:text-white/40">
                         <th className="py-1 pr-3 font-semibold">Broker</th>
@@ -1387,7 +1387,7 @@ export default function Overview() {
                         className="h-full rounded-full"
                         style={{
                           width: `${((r.n / maxN) * 100).toFixed(1)}%`,
-                          backgroundColor: stageColor(r.stage),
+                          background: barGradient(stageColor(r.stage)),
                         }}
                       />
                     </div>
