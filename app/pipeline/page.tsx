@@ -62,6 +62,19 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // FAB / deep-link entry points: /pipeline?new=deal | ?new=exec
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("new") === "deal") {
+      setTab("deals");
+      setDealModal({ deal: null });
+    }
+    if (sp.get("new") === "exec") {
+      setTab("execs");
+      setExecModal({ exec: null });
+    }
+  }, []);
+
   const owners = useMemo(() => {
     const s = new Set<string>();
     deals.forEach((d) => d.owner && s.add(d.owner));
