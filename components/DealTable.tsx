@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Deal, Executive, MiMultiple } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
-import { estimateMultiple, type MarketRates } from "@/lib/valuation";
+import { estimateMultiple, isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
 
 type SortKey = "companyName" | "industry" | "stage" | "dealValue" | "ebitda" | "estMultiple" | "owner" | "updatedAt";
 
@@ -46,6 +46,12 @@ export default function DealTable({
         const ma = ea ? (ea.headlineLow + ea.headlineHigh) / 2 : -1;
         const mb = eb ? (eb.headlineLow + eb.headlineHigh) / 2 : -1;
         return (ma - mb) * sortDir;
+      }
+      if (sortKey === "dealValue") {
+        // Sort by the resolved Value (stated price, else estimate).
+        const va = resolveDealValue(a, multiples, rates).value ?? -1;
+        const vb = resolveDealValue(b, multiples, rates).value ?? -1;
+        return (va - vb) * sortDir;
       }
       const va = a[sortKey];
       const vb = b[sortKey];
@@ -117,6 +123,11 @@ export default function DealTable({
               </td>
               <td className="px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
                 {d.industry || "—"}
+                {d.industry && !isFocusDeal(d.industry) && (
+                  <span className="ml-1.5 inline-block rounded-full bg-slate-100 px-1.5 py-px align-middle text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-white/50">
+                    Non-focus
+                  </span>
+                )}
               </td>
               <td className="px-3 py-2.5">
                 <span className="rounded-full bg-[#0d1f3c] px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
@@ -124,7 +135,20 @@ export default function DealTable({
                 </span>
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700 dark:text-[#e8dfc8]">
-                {fmtMoney(d.dealValue)}
+                {(() => {
+                  const rv = resolveDealValue(d, multiples, rates);
+                  if (rv.value === null) return "—";
+                  return (
+                    <>
+                      {fmtMoney(rv.value)}
+                      {rv.estimated && (
+                        <span className="ml-1 text-[11px] font-normal text-slate-400 dark:text-white/40">
+                          est.
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
                 {d.ebitda != null ? fmtMoney(d.ebitda) : "—"}

@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import type { Deal, Executive } from "@/lib/types";
+import type { Deal, Executive, MiMultiple } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
+import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 
 export interface Pairing {
   deal: Deal;
@@ -28,14 +29,14 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "owner", label: "Deal owner" },
 ];
 
-function sortVal(p: Pairing, key: SortKey): string | number {
+function sortVal(p: Pairing, key: SortKey, multiples: MiMultiple[] = [], rates: MarketRates = {}): string | number {
   switch (key) {
     case "dealName":
       return p.deal.companyName;
     case "stage":
       return p.deal.stage;
     case "dealValue":
-      return p.deal.dealValue || 0;
+      return resolveDealValue(p.deal, multiples, rates).value ?? 0;
     case "industry":
       return p.deal.industry;
     case "operatorName":
@@ -48,9 +49,13 @@ function sortVal(p: Pairing, key: SortKey): string | number {
 export default function PairingTable({
   pairings,
   onSelectDeal,
+  multiples = [],
+  rates = {},
 }: {
   pairings: Pairing[];
   onSelectDeal: (d: Deal) => void;
+  multiples?: MiMultiple[];
+  rates?: MarketRates;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("dealName");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
@@ -58,8 +63,8 @@ export default function PairingTable({
   const sorted = useMemo(() => {
     const arr = [...pairings];
     arr.sort((a, b) => {
-      const va = sortVal(a, sortKey);
-      const vb = sortVal(b, sortKey);
+      const va = sortVal(a, sortKey, multiples, rates);
+      const vb = sortVal(b, sortKey, multiples, rates);
       let cmp: number;
       if (typeof va === "number" || typeof vb === "number") {
         cmp = Number(va) - Number(vb);
@@ -69,7 +74,7 @@ export default function PairingTable({
       return cmp * sortDir;
     });
     return arr;
-  }, [pairings, sortKey, sortDir]);
+  }, [pairings, sortKey, sortDir, multiples, rates]);
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 1 ? -1 : 1));
@@ -124,7 +129,12 @@ export default function PairingTable({
                 </span>
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700 dark:text-[#e8dfc8]">
-                {fmtMoney(d.dealValue)}
+                {(() => {
+                  const rv = resolveDealValue(d, multiples, rates);
+                  return rv.value === null
+                    ? "—"
+                    : `${fmtMoney(rv.value)}${rv.estimated ? " est." : ""}`;
+                })()}
               </td>
               <td className="px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
                 {d.industry || "—"}
