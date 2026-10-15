@@ -887,6 +887,75 @@ export async function clearNewBankruptcyNews(): Promise<number> {
 
 /* ---------------- Filings ---------------- */
 
+
+/* ---------- Filing classification (Ethan, Oct 14, 2026 rework) ----------
+ * "AZ company" = Arizona PRINCIPAL place of business (EDGAR submissions
+ * business address), and the filer must map to one of the five focus
+ * sectors via SIC. Asset-backed / funding-vehicle filers are excluded. */
+export const FILING_FOCUS_SECTORS = ["Aerospace & Defense", "Healthcare", "Advanced Manufacturing", "Specialty Trades & Construction", "Hospitality"];
+
+export function sicToSector(sicRaw: string): string {
+  const sic = parseInt(String(sicRaw || "").replace(/\D/g, ""), 10);
+  if (!sic || Number.isNaN(sic)) return "";
+  if (sic >= 1500 && sic <= 1799) return "Specialty Trades & Construction";
+  if ((sic >= 5800 && sic <= 5899) || (sic >= 7000 && sic <= 7099) || (sic >= 7900 && sic <= 7999)) return "Hospitality";
+  if (sic >= 8000 && sic <= 8099) return "Healthcare";
+  if (sic >= 2833 && sic <= 2836) return "Healthcare"; // pharmaceuticals
+  if (sic >= 3841 && sic <= 3851) return "Healthcare"; // medical / dental instruments & supplies
+  if (sic === 8731) return "Healthcare"; // biotech R&D
+  if ((sic >= 3720 && sic <= 3729) || (sic >= 3760 && sic <= 3769) || (sic >= 3480 && sic <= 3489) || sic === 3812)
+    return "Aerospace & Defense";
+  if (sic >= 2000 && sic <= 3999) return "Advanced Manufacturing";
+  return "";
+}
+
+/** SPV / asset-backed issuer screen (Ethan's rule): funding vehicles,
+ * receivables trusts and issuers, plus SIC 6189 / 6199 (asset-backed). */
+export function isSpvFiler(name: string, sic: string): boolean {
+  if (sic === "6189" || sic === "6199") return true;
+  return /\b(Funding|Receivables|Trust|Issuer)\b/i.test(name || "");
+}
+
+export interface FilerProfile {
+  cik: string;
+  name: string;
+  sic: string;
+  sicDesc: string;
+  bizState: string;
+  mailState: string;
+  sector: string;
+}
+
+export async function getFilerProfiles(ciks: string[]): Promise<Map<string, FilerProfile>> {
+  const out = new Map<string, FilerProfile>();
+  if (!ciks.length) return out;
+  await ensureSchema();
+  const rows = (await sql()`SELECT * FROM mi_filer_profiles WHERE cik = ANY(${ciks})`) as unknown as Record<string, unknown>[];
+  for (const r of rows)
+    out.set(str(r.cik), {
+      cik: str(r.cik), name: str(r.name), sic: str(r.sic), sicDesc: str(r.sic_desc),
+      bizState: str(r.biz_state), mailState: str(r.mail_state), sector: str(r.sector),
+    });
+  return out;
+}
+
+export async function upsertFilerProfile(p: FilerProfile): Promise<void> {
+  await ensureSchema();
+  await sql()`
+    INSERT INTO mi_filer_profiles (cik, name, sic, sic_desc, biz_state, mail_state, sector, updated_at)
+    VALUES (${p.cik}, ${p.name}, ${p.sic}, ${p.sicDesc}, ${p.bizState}, ${p.mailState}, ${p.sector}, NOW())
+    ON CONFLICT (cik) DO UPDATE SET name = EXCLUDED.name, sic = EXCLUDED.sic, sic_desc = EXCLUDED.sic_desc,
+      biz_state = EXCLUDED.biz_state, mail_state = EXCLUDED.mail_state, sector = EXCLUDED.sector, updated_at = NOW()`;
+}
+
+/** Strip EDGAR display-name decorations: "Foo, Inc. (FOO) (CIK 0001234)". */
+export function cleanFilerName(displayName: string): string {
+  return String(displayName || "")
+    .replace(/\s*\(CIK\s+\d+\)\s*$/i, "")
+    .replace(/\s*\([A-Z][A-Z0-9.\-]{0,5}\)\s*$/, "")
+    .trim();
+}
+
 export interface FilingInput {
   form: string;
   company: string;
@@ -898,6 +967,11 @@ export interface FilingInput {
   url?: string;
   azCompany?: boolean;
   majorEvent?: boolean;
+  sector?: string;
+  tag?: string;
+  why?: string;
+  details?: string;
+  sic?: string;
 }
 
 export async function upsertFilings(rows: FilingInput[]): Promise<number> {
@@ -908,14 +982,20 @@ export async function upsertFilings(rows: FilingInput[]): Promise<number> {
   for (const r of rows) {
     if (!r.accession) continue;
     const res = await db`
-      INSERT INTO mi_filings (id, form, company, cik, filing_date, accession, category, summary, url, az_company, major_event)
+      INSERT INTO mi_filings (id, form, company, cik, filing_date, accession, category, summary, url, az_company, major_event, sector, tag, why, details, sic)
       VALUES (${newId()}, ${r.form}, ${r.company ?? ""}, ${r.cik ?? ""}, ${r.filingDate ?? ""},
               ${r.accession}, ${r.category}, ${r.summary ?? ""}, ${r.url ?? ""},
-              ${r.azCompany ?? false}, ${r.majorEvent ?? false})
+              ${r.azCompany ?? false}, ${r.majorEvent ?? false},
+              ${r.sector ?? ""}, ${r.tag ?? ""}, ${r.why ?? ""}, ${r.details ?? ""}, ${r.sic ?? ""})
       ON CONFLICT (accession) DO UPDATE SET
         az_company = CASE WHEN NOT mi_filings.az_company THEN EXCLUDED.az_company ELSE mi_filings.az_company END,
         major_event = CASE WHEN NOT mi_filings.major_event THEN EXCLUDED.major_event ELSE mi_filings.major_event END,
-        summary = CASE WHEN EXCLUDED.summary <> '' THEN EXCLUDED.summary ELSE mi_filings.summary END
+        summary = CASE WHEN EXCLUDED.summary <> '' THEN EXCLUDED.summary ELSE mi_filings.summary END,
+        sector = CASE WHEN EXCLUDED.sector <> '' THEN EXCLUDED.sector ELSE mi_filings.sector END,
+        tag = CASE WHEN EXCLUDED.tag <> '' THEN EXCLUDED.tag ELSE mi_filings.tag END,
+        why = CASE WHEN EXCLUDED.why <> '' THEN EXCLUDED.why ELSE mi_filings.why END,
+        details = CASE WHEN EXCLUDED.details <> '' THEN EXCLUDED.details ELSE mi_filings.details END,
+        sic = CASE WHEN EXCLUDED.sic <> '' THEN EXCLUDED.sic ELSE mi_filings.sic END
       RETURNING (xmax = 0) AS inserted`;
     if (res[0]?.inserted) added++;
   }
@@ -931,29 +1011,155 @@ export async function purgeNonAzFilings(): Promise<number> {
   return res.count ?? 0;
 }
 
-export async function getFilings(category?: string, status?: string): Promise<MiFiling[]> {
+export async function getFilings(category?: string, status?: string, days?: number): Promise<MiFiling[]> {
   await ensureSchema();
   const db = sql();
+  // Auto-dismiss rows that match Ethan's exclusion rules (Oct 14, 2026) so
+  // legacy rows self-clean: periodic reports and SPV/funding-vehicle
+  // names. Court bankruptcy rows are pre-filtered at ingest and exempt
+  // from the name screen. Only "new" rows flip — a human Keep wins.
+  await db`UPDATE mi_filings SET status = 'dismissed'
+    WHERE status = 'new' AND category <> 'bankruptcy' AND (
+      form IN ('10-K', '10-Q') OR company ~* '\\y(Funding|Receivables|Trust|Issuer)\\y')`;
+  const cutoff = days && days > 0 ? new Date(Date.now() - days * 864e5).toISOString().slice(0, 10) : null;
   let rows;
   if (category && category !== "all" && status && status !== "all")
-    rows = await db`SELECT * FROM mi_filings WHERE category = ${category} AND status = ${status} ORDER BY filing_date DESC LIMIT 200`;
+    rows = await db`SELECT * FROM mi_filings WHERE category = ${category} AND status = ${status} AND (${cutoff}::text IS NULL OR filing_date >= ${cutoff}) ORDER BY filing_date DESC LIMIT 500`;
   else if (category && category !== "all")
-    rows = await db`SELECT * FROM mi_filings WHERE category = ${category} ORDER BY filing_date DESC LIMIT 200`;
+    rows = await db`SELECT * FROM mi_filings WHERE category = ${category} AND (${cutoff}::text IS NULL OR filing_date >= ${cutoff}) ORDER BY filing_date DESC LIMIT 500`;
   else if (status && status !== "all")
-    rows = await db`SELECT * FROM mi_filings WHERE status = ${status} ORDER BY filing_date DESC LIMIT 200`;
-  else rows = await db`SELECT * FROM mi_filings ORDER BY filing_date DESC LIMIT 200`;
+    rows = await db`SELECT * FROM mi_filings WHERE status = ${status} AND (${cutoff}::text IS NULL OR filing_date >= ${cutoff}) ORDER BY filing_date DESC LIMIT 500`;
+  else rows = await db`SELECT * FROM mi_filings WHERE (${cutoff}::text IS NULL OR filing_date >= ${cutoff}) ORDER BY filing_date DESC LIMIT 500`;
   return rows.map((r) => ({
     id: str(r.id), form: str(r.form), company: str(r.company), cik: str(r.cik),
     filingDate: str(r.filing_date), accession: str(r.accession),
     category: str(r.category) as MiFilingCategory, summary: str(r.summary), url: str(r.url),
     azCompany: Boolean(r.az_company), majorEvent: Boolean(r.major_event),
     status: str(r.status) as MiFiling["status"], createdAt: String(r.created_at),
+    sector: str(r.sector), tag: str(r.tag), why: str(r.why), details: str(r.details), sic: str(r.sic),
   }));
 }
 
+/** Patch a filing's enrichment fields (Form D pass fills details/tag/
+ * summary/why/sector after the base row lands). */
+export async function updateFilingDetails(
+  id: string,
+  patch: { details?: string; tag?: string; summary?: string; why?: string; sector?: string }
+): Promise<void> {
+  await ensureSchema();
+  const db = sql();
+  const rows = (await db`SELECT details, tag, summary, why, sector FROM mi_filings WHERE id = ${id}`) as unknown as Record<string, unknown>[];
+  if (!rows.length) return;
+  const cur = rows[0];
+  await db`UPDATE mi_filings SET
+    details = ${patch.details ?? str(cur.details)},
+    tag = ${patch.tag ?? str(cur.tag)},
+    summary = ${patch.summary ?? str(cur.summary)},
+    why = ${patch.why ?? str(cur.why)},
+    sector = ${patch.sector ?? str(cur.sector)}
+    WHERE id = ${id}`;
+}
+
+/** Form D rows still missing their enrichment payload (details = ''),
+ * newest first — the ingest's Form D pass works through these. */
+export async function getFilingsNeedingDetails(limit = 20): Promise<{ id: string; cik: string; accession: string; company: string; filingDate: string }[]> {
+  await ensureSchema();
+  const rows = (await sql()`SELECT id, cik, accession, company, filing_date FROM mi_filings
+    WHERE category = 'form_d' AND details = '' ORDER BY filing_date DESC LIMIT ${limit}`) as unknown as Record<string, unknown>[];
+  return rows.map((r) => ({
+    id: str(r.id), cik: str(r.cik), accession: str(r.accession),
+    company: str(r.company), filingDate: str(r.filing_date),
+  }));
+}
+
+/** The Filings tab's bankruptcy coverage is court-sourced now (Oct 14,
+ * 2026) — retire un-triaged SEC 8-K bankruptcy rows so the category shows
+ * only Arizona federal court filings. Human keeps are left alone. */
+export async function retireSecBankruptcyFilings(): Promise<void> {
+  await ensureSchema();
+  await sql()`UPDATE mi_filings SET status = 'dismissed'
+    WHERE category = 'bankruptcy' AND status = 'new' AND form = '8-K'`;
+}
+
+function normCompanyName(n: string): string {
+  return n
+    .toLowerCase()
+    .replace(/\(cik[^)]*\)/g, " ")
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\b(inc|llc|ltd|corp|corporation|co|company|lp|llp|plc|sa|nv|ag)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Triage a filing. On "keep" (Ethan, Oct 14, 2026): link the filer to a
+ * company record — matching fit target or Directory company if one
+ * exists, created from the filing if not and the sector is known — and
+ * log the filing as a signal on that company. */
 export async function setFilingStatus(id: string, status: MiFiling["status"]): Promise<void> {
   await ensureSchema();
-  await sql()`UPDATE mi_filings SET status = ${status} WHERE id = ${id}`;
+  const db = sql();
+  await db`UPDATE mi_filings SET status = ${status} WHERE id = ${id}`;
+  if (status !== "keep") return;
+  try {
+    const frows = (await db`SELECT * FROM mi_filings WHERE id = ${id}`) as unknown as Record<string, unknown>[];
+    const f = frows[0];
+    if (!f) return;
+    const name = cleanFilerName(str(f.company));
+    const norm = normCompanyName(name);
+    if (!norm) return;
+    const probe = norm.split(" ").filter((w) => w.length >= 5).sort((a, b) => b.length - a.length)[0] ?? norm.split(" ")[0];
+    const cands = (await db`SELECT id, source, dedup_key, name, details FROM mi_companies WHERE name ILIKE ${"%" + probe + "%"} LIMIT 200`) as unknown as Record<string, unknown>[];
+    let target = cands.find((c) => normCompanyName(str(c.name)) === norm);
+    if (!target)
+      target = cands.find((c) => {
+        const cn = normCompanyName(str(c.name));
+        return cn.length >= 4 && (cn.includes(norm) || norm.includes(cn));
+      });
+    let source = target ? str(target.source) : "";
+    let dedupKey = target ? str(target.dedup_key) : "";
+    if (!target && str(f.sector)) {
+      dedupKey = `SEC-${str(f.cik) || norm.replace(/ /g, "-").slice(0, 40)}`;
+      source = "SEC Filings";
+      await importCompanies(
+        "SEC Filings",
+        [{
+          dedupKey, name, sector: str(f.sector), state: "AZ", source,
+          details: JSON.stringify({ createdFromFiling: str(f.accession) }),
+        }],
+        false
+      );
+      const back = (await db`SELECT id, source, dedup_key, name, details FROM mi_companies WHERE source = ${source} AND dedup_key = ${dedupKey} LIMIT 1`) as unknown as Record<string, unknown>[];
+      target = back[0];
+    }
+    if (!target) return;
+    let details: Record<string, unknown> = {};
+    try {
+      details = JSON.parse(str(target.details) || "{}") as Record<string, unknown>;
+    } catch {
+      details = {};
+    }
+    const signals = Array.isArray(details.signals) ? (details.signals as unknown[]) : [];
+    signals.push({
+      date: str(f.filing_date),
+      kind: "filing",
+      tag: str(f.tag),
+      text: str(f.why) || str(f.summary),
+      url: str(f.url),
+      accession: str(f.accession),
+    });
+    details.signals = signals.slice(-20);
+    await db`UPDATE mi_companies SET details = ${JSON.stringify(details).slice(0, 3900)} WHERE id = ${str(target.id)}`;
+    let fdetails: Record<string, unknown> = {};
+    try {
+      fdetails = JSON.parse(str(f.details) || "{}") as Record<string, unknown>;
+    } catch {
+      fdetails = {};
+    }
+    fdetails.linkedCompany = { source, dedupKey };
+    await db`UPDATE mi_filings SET details = ${JSON.stringify(fdetails)} WHERE id = ${id}`;
+  } catch {
+    /* keep still stands even if linking fails */
+  }
 }
 
 /* ---------------- WARN ---------------- */
@@ -1120,6 +1326,28 @@ export async function getCompetingBuyers(): Promise<CompetingBuyer[]> {
       target: String(r.target ?? ""), headline: String(r.headline ?? ""),
       industry: String(r.industry ?? ""), dealValue: dv,
       announcedDate: String(r.announced_date ?? ""),
+    });
+  }
+  // M&A 8-K filings feed the same table (Ethan, Oct 14, 2026): the filer
+  // is the registrant on the deal — usually the acquirer — tagged as a
+  // possible exit buyer / competing platform at ingest.
+  const frows = (await db`
+    SELECT company, summary, filing_date FROM mi_filings
+    WHERE category = 'acquisition' AND status <> 'dismissed' AND filing_date >= ${since}
+    ORDER BY filing_date DESC`) as unknown as Record<string, unknown>[];
+  for (const r of frows) {
+    const name = cleanFilerName(String(r.company ?? ""));
+    if (!name) continue;
+    const key = name.toUpperCase();
+    let g = groups.get(key);
+    if (!g) {
+      g = { acquirer: name, dealCount: 0, totalValue: null, deals: [] };
+      groups.set(key, g);
+    }
+    g.dealCount += 1;
+    g.deals.push({
+      target: "", headline: String(r.summary ?? ""), industry: "",
+      dealValue: null, announcedDate: String(r.filing_date ?? ""),
     });
   }
   return Array.from(groups.values())
