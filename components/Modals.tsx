@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DEAL_STAGES, EXEC_STAGES, PARTNER_NAMES, type Deal, type DealDrivers, type Executive, type MiMultiple } from "@/lib/types";
-import { fmtMoney, fmtDate } from "@/lib/format";
+import { fmtMoney, fmtDate, uniqueStrings, dedupeSourceTokens } from "@/lib/format";
 import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, dealFocusSector, estimateMultiple, isFocusDeal, matchGroup, resolveDealValue, resolveStatedPrice, resolveStructure, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
 import SectorChip, { StageChip } from "@/components/SectorChip";
 import DealRecordHeader from "@/components/DealRecordHeader";
@@ -679,7 +679,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
             value={deal.askingPrice != null ? fmtMoney(deal.askingPrice) : "—"}
           />
           <DetailRow label="Broker" value={deal.broker || "—"} />
-          <DetailRow label="Source" value={deal.source || "—"} />
+          <DetailRow label="Source" value={deal.source ? dedupeSourceTokens(deal.source) : "—"} />
           <DetailRow label="Contact" value={deal.contactName} />
           <DetailRow label="Contact email" value={deal.contactEmail} />
           <DetailRow label="Owner" value={deal.owner} />
@@ -688,7 +688,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
             value={
               deal.operatorIds && deal.operatorIds.length > 0 ? (
                 <span className="flex flex-col gap-0.5">
-                  {deal.operatorIds.map((id) => {
+                  {uniqueStrings(deal.operatorIds).map((id) => {
                     const op = executives.find((e) => e.id === id);
                     return (
                       <span key={id}>
@@ -696,7 +696,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
                         {op && op.industries && op.industries.length > 0 && (
                           <span className="text-slate-400 dark:text-white/40">
                             {" "}
-                            · {op.industries.join(", ")}
+                            · {uniqueStrings(op.industries).join(", ")}
                           </span>
                         )}
                       </span>
@@ -1059,7 +1059,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
                       )}
                       {e.industries && e.industries.length > 0 && (
                         <span className="truncate text-xs text-slate-400 dark:text-white/40">
-                          {e.industries.join(", ")}
+                          {uniqueStrings(e.industries).join(", ")}
                         </span>
                       )}
                     </label>
@@ -1209,7 +1209,7 @@ export function ExecutiveModal({ exec, onClose, onSaved, onDeleted }: ExecutiveM
             value={
               exec.industries && exec.industries.length > 0 ? (
                 <span className="flex flex-wrap gap-1">
-                  {exec.industries.map((ind) => (
+                  {uniqueStrings(exec.industries).map((ind) => (
                     <SectorChip key={ind} sector={dealFocusSector(ind) ?? ind} />
                   ))}
                 </span>
