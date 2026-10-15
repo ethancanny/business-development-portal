@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { DEAL_STAGES, EXEC_STAGES, PARTNER_NAMES, type Deal, type DealDrivers, type Executive, type MiMultiple } from "@/lib/types";
 import { fmtMoney, fmtDate } from "@/lib/format";
-import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, estimateMultiple, isFocusDeal, matchGroup, resolveDealValue, resolveStatedPrice, resolveStructure, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
+import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, dealFocusSector, estimateMultiple, isFocusDeal, matchGroup, resolveDealValue, resolveStatedPrice, resolveStructure, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
+import SectorChip, { StageChip } from "@/components/SectorChip";
 
 function fmtMultRange(lo: number, hi: number): string {
   return lo.toFixed(1) === hi.toFixed(1)
@@ -633,18 +634,22 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
           <DetailRow
             label="Industry"
             value={
-              <>
-                {deal.industry}
-                {deal.industry && !isFocusDeal(deal.industry) && (
-                  <span className="ml-1.5 inline-block rounded-full bg-slate-100 px-1.5 py-px align-middle text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-white/50">
-                    Non-focus
-                  </span>
-                )}
-              </>
+              deal.industry ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <SectorChip sector={dealFocusSector(deal.industry) ?? deal.industry} />
+                  {!isFocusDeal(deal.industry) && (
+                    <span className="inline-block rounded-full bg-slate-100 px-1.5 py-px align-middle text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-white/50">
+                      Non-focus
+                    </span>
+                  )}
+                </span>
+              ) : (
+                ""
+              )
             }
           />
           <DetailRow label="City" value={deal.city} />
-          <DetailRow label="Stage" value={deal.stage} />
+          <DetailRow label="Stage" value={<StageChip stage={deal.stage} />} />
           <DetailRow
             label="Deal value"
             value={(() => {
@@ -1170,7 +1175,7 @@ export function ExecutiveModal({ exec, onClose, onSaved, onDeleted }: ExecutiveM
         <div className="flex flex-col divide-y divide-slate-100 dark:divide-white/10">
           <DetailRow label="Current title" value={exec.currentTitle} />
           <DetailRow label="Target role" value={exec.targetRole} />
-          <DetailRow label="Stage" value={exec.stage} />
+          <DetailRow label="Stage" value={<StageChip stage={exec.stage} />} />
           <DetailRow label="Owner" value={exec.owner} />
           <DetailRow
             label="Industries"
@@ -1178,12 +1183,7 @@ export function ExecutiveModal({ exec, onClose, onSaved, onDeleted }: ExecutiveM
               exec.industries && exec.industries.length > 0 ? (
                 <span className="flex flex-wrap gap-1">
                   {exec.industries.map((ind) => (
-                    <span
-                      key={ind}
-                      className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs font-medium text-[#8a6f3c] dark:text-[#d4b37a]"
-                    >
-                      {ind}
-                    </span>
+                    <SectorChip key={ind} sector={dealFocusSector(ind) ?? ind} />
                   ))}
                 </span>
               ) : (
