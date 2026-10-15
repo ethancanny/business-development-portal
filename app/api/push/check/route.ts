@@ -296,8 +296,21 @@ async function evalCompetingBuyers(now: Date): Promise<EvalOutcome> {
   return { candidates, sent };
 }
 
-/* h. Data feeds whose latest sync-log run is more than 48h old —
- * one alert per job per day. */
+/* h. Data feeds silent past their expected cadence — one alert per job
+ * per day. Thresholds are per job: event/daily feeds 48h, the weekly
+ * SAM entities pull 9 days, monthly/annual reference feeds (Census
+ * govfin + tracts, CBP sector counts, county permits) 40 days. A flat
+ * 48h rule would false-alarm on every slow-cadence feed. */
+const FEED_SILENCE_HOURS: Record<string, number> = {
+  entities: 9 * 24,
+  census: 40 * 24,
+  "census-fin": 40 * 24,
+  susb_sizes: 40 * 24,
+  sector_counts: 40 * 24,
+  "sector-xcheck": 40 * 24,
+  county_permits: 40 * 24,
+  "permits-xcheck": 40 * 24,
+};
 async function evalFeeds(now: Date): Promise<EvalOutcome> {
   const rows = await getSyncLogLatestByJob();
   const today = phoenixDate(now);
@@ -305,7 +318,8 @@ async function evalFeeds(now: Date): Promise<EvalOutcome> {
   let sent = 0;
   for (const row of rows) {
     const age = now.getTime() - Date.parse(row.ranAt);
-    if (!(age > 48 * 3600 * 1000)) continue;
+    const limit = (FEED_SILENCE_HOURS[row.job] ?? 48) * 3600 * 1000;
+    if (!(age > limit)) continue;
     candidates += 1;
     const entityKey = `feed-${row.job}-${today}`;
     if (await alreadySent("feedDown", entityKey, 2)) continue;
