@@ -1166,14 +1166,27 @@ export async function setFilingStatus(id: string, status: MiFiling["status"]): P
       details = {};
     }
     const signals = Array.isArray(details.signals) ? (details.signals as unknown[]) : [];
-    signals.push({
-      date: str(f.filing_date),
-      kind: "filing",
-      tag: str(f.tag),
-      text: str(f.why) || str(f.summary),
-      url: str(f.url),
-      accession: str(f.accession),
+    // Dedupe on write (Ethan, Oct 14, 2026): re-keeping the same filing
+    // (keep → dismiss → keep, or a double-fired action) must not stack a
+    // second copy of the same signal on the company. Identity = the
+    // filing's accession number, falling back to date + text.
+    const sigText = str(f.why) || str(f.summary);
+    const sigAccession = str(f.accession);
+    const sigDupe = signals.some((sg) => {
+      const o = (sg ?? {}) as Record<string, unknown>;
+      if (sigAccession && String(o.accession ?? "") === sigAccession) return true;
+      return String(o.text ?? "") === sigText && String(o.date ?? "") === str(f.filing_date);
     });
+    if (!sigDupe) {
+      signals.push({
+        date: str(f.filing_date),
+        kind: "filing",
+        tag: str(f.tag),
+        text: sigText,
+        url: str(f.url),
+        accession: sigAccession,
+      });
+    }
     details.signals = signals.slice(-20);
     await db`UPDATE mi_companies SET details = ${JSON.stringify(details).slice(0, 3900)} WHERE id = ${str(target.id)}`;
     let fdetails: Record<string, unknown> = {};
