@@ -17,6 +17,7 @@ import {
   YAxis,
 } from "recharts";
 import PageHero from "@/components/PageHero";
+import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import SizeProfileRow, { hasSizeProfile, SUBSECTOR_IDS_CSV } from "@/components/SizeProfileRows";
 import CompanyTargets from "@/components/CompanyTargets";
 import IndustryExplorer from "@/components/IndustryExplorer";
@@ -276,8 +277,7 @@ export default function MarketIntelPage() {
   const [syncLog, setSyncLog] = useState<MiSyncLog[]>([]);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    (async () => {
+  const loadAll = async () => {
       try {
         const [latestData, obsData, acq, fil, warnData, mult, log, flow] = await Promise.all([
           getJSON<LatestMap>("/api/market/latest"),
@@ -328,8 +328,15 @@ export default function MarketIntelPage() {
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
-    })();
+  };
+
+  useEffect(() => {
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Pull-to-refresh (mobile PWA).
+  const { pull, refreshing } = usePullToRefresh(loadAll);
 
   const grid = dark ? "rgba(255,255,255,0.08)" : "#e2e8f0";
   const tick = dark ? "rgba(255,255,255,0.55)" : "#64748b";
@@ -1283,6 +1290,13 @@ export default function MarketIntelPage() {
       <PageHero eyebrow="Canny Capital Partners" title="Market Intel" subtitle="Arizona market activity" />
 
       <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+        {(pull > 8 || refreshing) && (
+          <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center">
+            <span className="rounded-full bg-[#0d1f3c] px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg">
+              {pullPillLabel(pull, refreshing)}
+            </span>
+          </div>
+        )}
         {error && (
           <div className="mb-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
             Couldn&apos;t load market data: {error}. {error.includes("DATABASE_URL") ? "Market Intel needs the Postgres database." : "Data loads after the first daily ingest runs."}
