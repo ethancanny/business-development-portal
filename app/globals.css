@@ -71,17 +71,17 @@ html.kb-open .fab-root {
   background-image: none;
 }
 .tbl-grad thead th {
-  background-color: #eef2f7;
-  color: #33475f;
-  border-bottom: 1px solid #d7dee8;
+  background-color: #0d1f3c;
+  color: #f3ead8;
+  border-bottom: 2px solid #b8975a;
 }
 .dark .tbl-grad {
   background-image: none;
 }
 .dark .tbl-grad thead th {
-  background-color: rgba(255, 255, 255, 0.06);
-  color: #dbe4f0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  background-color: #12294d;
+  color: #f3ead8;
+  border-bottom: 2px solid rgba(184, 151, 90, 0.75);
 }
 
 /* Premium redesign Wave 1 (Oct 14, 2026) — design-system utilities.
