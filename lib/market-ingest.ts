@@ -22,6 +22,7 @@ import {
 } from "./market-db";
 import type { MiIndicatorSource } from "./types";
 import { ingestFilings } from "./filings-ingest";
+import { ingestIntelNews } from "./news-ingest";
 import { ingestCiPermits } from "./permits-ingest";
 import { classifyIndustry, INDUSTRY_KEYWORDS, kwMatch } from "./industry-classify";
 
@@ -2048,7 +2049,7 @@ export async function ingestSusbSizes(): Promise<number> {
   return total;
 }
 
-export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "permits_ci" | "sector_counts" | "commodity_spot" | "susb_sizes" | "all";
+export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "permits_ci" | "sector_counts" | "commodity_spot" | "susb_sizes" | "intel_news" | "all";
 
 export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -2070,6 +2071,7 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["permits_ci", async () => (await ingestCiPermits()).reduce((sum, r) => sum + r.upserted, 0)],
     ["sector_counts", ingestSectorCounts],
     ["susb_sizes", ingestSusbSizes],
+    ["intel_news", ingestIntelNews],
   ];
   for (const [name, fn] of jobs) {
     if (source !== "all" && source !== name) continue;
