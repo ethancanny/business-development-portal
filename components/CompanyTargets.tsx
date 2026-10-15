@@ -210,7 +210,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
         </p>
       )}
       <div className="max-h-96 overflow-auto rounded-xl border border-slate-200 dark:border-white/10">
-        <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+        <table className="tbl-grad w-full border-collapse bg-white dark:bg-[#132847]/40">
           <thead>
             <tr>
               <th className={th}>Company</th>

@@ -192,7 +192,7 @@ export default function SizeProfileRow({ obs, slug }: { obs: MiIndicatorObs[]; s
         <p className="text-[11px] text-[#8a6f3e] dark:text-[#d4b37a]">gold rows = $5–20M target band</p>
       </div>
       <div className="max-h-64 overflow-auto rounded-xl border border-slate-200 dark:border-white/10">
-        <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+        <table className="tbl-grad w-full border-collapse bg-white dark:bg-[#132847]/40">
           <thead>
             <tr className="border-b border-slate-200 dark:border-white/10">
               <th className={th}>Revenue class</th>
@@ -221,7 +221,7 @@ export default function SizeProfileRow({ obs, slug }: { obs: MiIndicatorObs[]; s
             <p className="text-[11px] text-slate-400 dark:text-white/30">selected NAICS breakouts · companies are CBP establishments · band counts modeled</p>
           </div>
           <div className="max-h-64 overflow-auto rounded-xl border border-slate-200 dark:border-white/10">
-            <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+            <table className="tbl-grad w-full border-collapse bg-white dark:bg-[#132847]/40">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-white/10">
                   <th className={th}>Sub-sector</th>

@@ -84,3 +84,9 @@ export function agingColor(days: number, warnAt = 30, badAt = 90): string {
  * dark-mode banner on every page and the digest/empty-state header. */
 export const BANNER_LIGHT = "https://cannycapitalpartners.com/arizona-desert-hero.jpg";
 export const BANNER_DARK = "https://cannycapitalpartners.com/arizona-desert-landscape.jpg";
+
+/** Gradient fill for chart/density bars (Ethan asked for the gradient
+ * bar look back, Oct 14, 2026): the solid hue sweeps into brand gold. */
+export function barGradient(color: string): string {
+  return `linear-gradient(90deg, ${color} 0%, ${color} 52%, #b8975a 135%)`;
+}

@@ -63,7 +63,7 @@ export default function ExecTable({
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-[#132847]">
-      <table className="w-full min-w-[900px] border-collapse text-sm">
+      <table className="tbl-grad w-full min-w-[900px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-slate-200 dark:border-white/10">
             {COLUMNS.map((c) => (

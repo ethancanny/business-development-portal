@@ -1,3 +1,24 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Data-table gradients (Ethan, Oct 14, 2026 — "bring back those
+   gradients"): a soft navy-to-gold wash behind the table body and a
+   navy gradient band across the header row. Add class "tbl-grad" to a
+   <table>. Row hover tints are translucent, so the wash shows through. */
+.tbl-grad {
+  background-image: linear-gradient(135deg, rgba(230, 237, 246, 0.85), rgba(255, 255, 255, 0.25) 45%, rgba(247, 241, 227, 0.85));
+}
+.tbl-grad thead th {
+  background-image: linear-gradient(to bottom, #1c3560, #0d1f3c);
+  color: #f3ead8;
+  border-bottom: 2px solid #b8975a;
+}
+.dark .tbl-grad {
+  background-image: linear-gradient(135deg, rgba(26, 51, 88, 0.5), rgba(13, 31, 60, 0.12) 50%, rgba(184, 151, 90, 0.12));
+}
+.dark .tbl-grad thead th {
+  background-image: linear-gradient(to bottom, #24436f, #101f3a);
+  color: #f3ead8;
+  border-bottom: 2px solid rgba(184, 151, 90, 0.75);
+}

@@ -351,7 +351,7 @@ export default function IndustryExplorer({
     const subs = subsByGroup[group] ?? [];
     return (
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
+        <table className="tbl-grad w-full border-collapse">
           <thead>
             <tr className="border-b border-slate-200 dark:border-white/10">
               <th className={th}>Subindustry</th>
@@ -469,7 +469,7 @@ export default function IndustryExplorer({
               <p className="py-4 text-center text-sm text-slate-400">No {metric === "ebitda" ? "EV/EBITDA" : "EV/Revenue"} data for the {band} band yet — try another band or metric.</p>
             )}
             <div className="mt-3 overflow-x-auto border-t border-slate-100 pt-3 dark:border-white/10">
-              <table className="w-full border-collapse">
+              <table className="tbl-grad w-full border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/10">
                     <th className={th}>Industry</th>

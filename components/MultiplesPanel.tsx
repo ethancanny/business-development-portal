@@ -75,7 +75,7 @@ export default function MultiplesPanel({ multiples, onAdded, dark }: { multiples
         </button>
       </div>
       <div className="lg:col-span-2 max-h-[360px] overflow-auto rounded-xl border border-slate-200 dark:border-white/10">
-        <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+        <table className="tbl-grad w-full border-collapse bg-white dark:bg-[#132847]/40">
           <thead><tr className="border-b border-slate-200 dark:border-white/10">
             <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50 sticky top-0 bg-white dark:bg-[#132847]">Report</th>
             <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50 sticky top-0 bg-white dark:bg-[#132847]">Period</th>
