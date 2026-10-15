@@ -42,6 +42,21 @@ export function uniqueStrings(values: readonly (string | null | undefined)[]): s
  * Tokens are split on "+" / "·" boundaries; the joiner follows the
  * string's own separator. Single-token strings pass through untouched.
  */
+/** Compact relative time for feed timestamps ("just now", "2h ago"). */
+export function fmtRelTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const secs = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return days === 1 ? "1d ago" : `${days}d ago`;
+}
+
 export function dedupeSourceTokens(source: string): string {
   const s = (source ?? "").trim();
   if (!s) return s;
