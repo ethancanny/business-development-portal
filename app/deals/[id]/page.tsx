@@ -17,7 +17,10 @@ import type {
 import { fmtDate, fmtMoney } from "@/lib/format";
 import PageHero from "@/components/PageHero";
 import type { MiMultiple } from "@/lib/types";
-import { resolveDealValue, type MarketRates } from "@/lib/valuation";
+import { dealFocusSector, resolveDealValue, type MarketRates } from "@/lib/valuation";
+import CompanyLogo from "@/components/CompanyLogo";
+import SectorChip, { StageChip } from "@/components/SectorChip";
+import { dealWebsite } from "@/components/DealTable";
 
 export default function DealDetailPage() {
   const params = useParams();
@@ -140,10 +143,17 @@ export default function DealDetailPage() {
         {/* Dossier header */}
         <div className="mt-3 rounded-xl border border-slate-200 bg-white p-6 dark:border-white/10 dark:bg-[#132847]">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex flex-wrap gap-2">
-              <span className="rounded-full bg-[#0d1f3c] px-3 py-1 text-xs font-semibold text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
-                {deal.stage}
-              </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <CompanyLogo
+                name={deal.companyName}
+                website={dealWebsite(deal)}
+                sector={dealFocusSector(deal.industry) ?? deal.industry}
+                size={26}
+              />
+              <StageChip stage={deal.stage} />
+              {deal.industry && (
+                <SectorChip sector={dealFocusSector(deal.industry) ?? deal.industry} />
+              )}
               {deal.owner ? (
                 <span className="rounded-full bg-[#b8975a]/20 px-3 py-1 text-xs font-semibold text-[#8a6f3c] dark:bg-white/10 dark:text-[#e8dfc8]">
                   Claimed by {deal.owner}
