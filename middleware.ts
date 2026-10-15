@@ -16,6 +16,10 @@ export function middleware(req: NextRequest) {
     "/api/calendar/microsoft/webhook",
     "/api/calendar/microsoft/ensure",
     "/api/push/check",
+    // News summary pass: the agent runner has no session cookie; both
+    // routes enforce session-or-CRON_SECRET auth themselves.
+    "/api/market/news/pending",
+    "/api/market/news/summary",
   ];
   // PWA assets: browsers fetch the manifest, icons, splash images and the
   // service worker outside the page's auth context (notably iOS), and the

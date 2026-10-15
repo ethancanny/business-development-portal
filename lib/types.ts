@@ -445,3 +445,36 @@ export interface MiSyncLog {
   added: number;
   message: string;
 }
+
+/** News & Intelligence (redesign Wave 2, Oct 14, 2026): an entity the
+ * relevance screen matched a story to. `kind` on the item is the primary
+ * lane (entity | watchlist | event | sector) that decided its score. */
+export interface MiNewsMatch {
+  type: "company" | "deal" | "operator" | "investor" | "watchlist";
+  id: string;
+  name: string;
+}
+
+export interface MiNewsItem {
+  id: string;
+  dedupeKey: string;
+  headline: string;
+  url: string;
+  sourceName: string;
+  publishedAt: string;
+  fetchedAt: string;
+  sector: string | null;
+  /** Written by an agent in our own words (≤2 sentences) — never copied
+   * from the publisher. Null until the summary pass fills it. */
+  summary: string | null;
+  summaryAt: string | null;
+  relevanceScore: number;
+  kind: "entity" | "watchlist" | "event" | "sector";
+  matched: MiNewsMatch[];
+  imageUrl: string | null;
+  imageCredit: string | null;
+  alsoCoveredBy: string[];
+  saved: boolean;
+  dismissed: boolean;
+  linkedCompanyId: string | null;
+}
