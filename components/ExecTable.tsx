@@ -95,7 +95,7 @@ export default function ExecTable({
               >
                 <td className="px-3 py-2.5 font-semibold text-slate-900 dark:text-white">
                   <span className="flex items-center gap-2">
-                    <PersonAvatar name={e.name} />
+                    <PersonAvatar name={e.name} photoUrl={e.photoUrl} />
                     {e.name}
                   </span>
                 </td>

@@ -193,7 +193,7 @@ export default function Directory() {
                     {e.kind === "business" ? (
                       <CompanyLogo name={e.name} website={e.website} sector={e.sector} size={28} />
                     ) : (
-                      <PersonAvatar name={e.name} size={28} />
+                      <PersonAvatar name={e.name} photoUrl={(e as { photoUrl?: string }).photoUrl} size={28} />
                     )}
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
@@ -343,7 +343,7 @@ export default function Directory() {
                     {selected.kind === "business" ? (
                       <CompanyLogo name={selected.name} website={selected.website} sector={selected.sector} size={36} />
                     ) : (
-                      <PersonAvatar name={selected.name} size={36} />
+                      <PersonAvatar name={selected.name} photoUrl={(selected as { photoUrl?: string }).photoUrl} size={36} />
                     )}
                     {selected.name}
                   </h3>
