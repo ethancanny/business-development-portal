@@ -1154,7 +1154,7 @@ export default function MarketIntelPage() {
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Contracts — Recent Months</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Source data · USASpending.gov, $M</p>
             <div className={tableWrap}>
-              <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+              <table className="tbl-grad w-full border-collapse bg-white dark:bg-[#132847]/40">
                 <thead><tr className="border-b border-slate-200 dark:border-white/10">
                   <th className={th}>Month</th><th className={th}>All DoD</th><th className={th}>Aerospace</th>
                 </tr></thead>
@@ -1485,7 +1485,7 @@ export default function MarketIntelPage() {
 
         {tab === "acquisitions" && (
           <div className={tableWrap}>
-            <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+            <table className="tbl-grad w-full border-collapse bg-white dark:bg-[#132847]/40">
               <thead><tr className="border-b border-slate-200 dark:border-white/10">
                 <th className={th}>Deal</th><th className={th}>Industry</th><th className={th}>Value</th><th className={th}>Announced</th><th className={th}>Source</th><th className={th}></th>
               </tr></thead>
@@ -1543,7 +1543,7 @@ export default function MarketIntelPage() {
               </span>
             </div>
             <div className={tableWrap}>
-              <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+              <table className="tbl-grad w-full border-collapse bg-white dark:bg-[#132847]/40">
                 <thead><tr className="border-b border-slate-200 dark:border-white/10">
                   <th className={th}>Company</th><th className={th}>Form</th><th className={th}>Sector</th><th className={th}>Filed</th><th className={th}>What happened</th><th className={th}></th>
                 </tr></thead>
@@ -1606,7 +1606,7 @@ export default function MarketIntelPage() {
                   <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Competing Buyers — repeat acquirers &amp; platforms</h3>
                   <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Acquirers with 2+ Arizona deals in the acquisitions feed over the last 12 months — the repeat buyers and PE-backed platforms most likely to bid against us on add-ons.</p>
                   <div className={tableWrap}>
-                    <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
+                    <table className="tbl-grad w-full border-collapse bg-white dark:bg-[#132847]/40">
                       <thead><tr className="border-b border-slate-200 dark:border-white/10">
                         <th className={th}>Acquirer / platform</th><th className={th}>Deals</th><th className={th}>What was bought</th><th className={th}>Total size</th>
                       </tr></thead>
