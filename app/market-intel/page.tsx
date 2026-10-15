@@ -1304,7 +1304,7 @@ export default function MarketIntelPage() {
         )}
 
         {/* Stat cards */}
-        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="mb-4 grid grid-cols-2 items-start gap-3 lg:grid-cols-4">
           {statCards.map((c) => {
             const isEvent = c.label.includes("Top Market Event");
             return (
@@ -1312,8 +1312,8 @@ export default function MarketIntelPage() {
                 key={c.label}
                 className={
                   isEvent
-                    ? "rounded-xl border-2 border-[#b8975a] bg-gradient-to-br from-[#b8975a]/20 via-white to-white p-4 shadow-[0_0_28px_rgba(184,151,90,0.35)] dark:via-[#132847]/70 dark:to-[#132847]/70"
-                    : "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]/60"
+                    ? "rounded-xl border-2 border-[#b8975a] bg-gradient-to-br from-[#b8975a]/20 via-white to-white p-3 shadow-[0_0_28px_rgba(184,151,90,0.35)] dark:via-[#132847]/70 dark:to-[#132847]/70"
+                    : "rounded-xl border border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-[#132847]/60"
                 }
               >
                 <p
@@ -1331,8 +1331,8 @@ export default function MarketIntelPage() {
                   )}
                   {c.label}
                 </p>
-                <p className={isEvent ? "mt-1 text-base font-semibold leading-snug text-[#0d1f3c] dark:text-white" : "mt-1 text-2xl font-bold text-[#0d1f3c] dark:text-white"}>{c.value}</p>
-                <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
+                <p className={isEvent ? "mt-0.5 text-sm font-semibold leading-snug text-[#0d1f3c] dark:text-white" : "mt-0.5 text-xl font-bold text-[#0d1f3c] dark:text-white"}>{c.value}</p>
+                <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-slate-400 dark:text-white/40">
                   {c.date}
                   {c.chg !== null && (
                     <span className={c.invert
