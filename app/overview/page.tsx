@@ -674,7 +674,7 @@ export default function Overview() {
 
       {/* Stat cards — thin accent top border per card (navy/gold/
           sector tones; aging hues stay reserved for staleness). */}
-      <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mb-3 grid grid-cols-2 items-start gap-3 lg:grid-cols-4">
         {stats.map((s) => {
           const card = (
             <>
@@ -698,7 +698,7 @@ export default function Overview() {
             </>
           );
           const cls =
-            "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]";
+            "rounded-xl border border-slate-200 bg-white p-3.5 dark:border-white/10 dark:bg-[#132847]";
           const style = { borderTop: `3px solid ${s.accent}` };
           return s.href ? (
             <Link key={s.label} href={s.href} style={style} className={`${cls} block transition hover:border-[#b8975a]/60`}>
