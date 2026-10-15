@@ -77,3 +77,79 @@ html.kb-open .fab-root {
   color: #f3ead8;
   border-bottom: 2px solid rgba(184, 151, 90, 0.75);
 }
+
+/* Premium redesign Wave 1 (Oct 14, 2026) — design-system utilities.
+   Serif display comes from Tailwind's font-display (tailwind.config
+   maps it to --font-display / Cormorant Garamond, loaded in
+   app/layout.tsx). Everything below is additive: soft layered
+   surfaces instead of outlined boxes, one consistent navy grade on
+   photography, tabular numerals for figures, skeleton loaders. */
+
+/* Tabular numerals — figures line up in columns everywhere .tnum is
+   applied (stat values, strip figures, card numbers). */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Soft layered card surface: white by day, deep navy layer at night,
+   16px radius, a hairline border and a soft shadow — no decorative
+   gold borders. */
+.card-surface {
+  border-radius: 1rem;
+  border: 1px solid rgb(226 232 240);
+  background-color: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(13, 31, 60, 0.05),
+    0 12px 32px -20px rgba(13, 31, 60, 0.28);
+}
+.dark .card-surface {
+  border-color: rgba(255, 255, 255, 0.1);
+  background-color: #12294d;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    0 12px 32px -20px rgba(0, 0, 0, 0.6);
+}
+
+/* One consistent photo grade: wrap the image (or a color block) in
+   .img-grade and every picture gets the same soft navy duotone —
+   a ~38% navy overlay plus a slight desaturation of the image
+   itself. The overlay sits above the wrapped content; keep text in
+   a positioned (relative, z-10) child if it must stay ungraded. */
+.img-grade {
+  position: relative;
+  overflow: hidden;
+}
+.img-grade > img {
+  filter: saturate(0.82) contrast(1.03);
+}
+.img-grade::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 31, 60, 0.38);
+  pointer-events: none;
+}
+
+/* Skeleton loader block (replaces spinners): a pulsing rounded slab. */
+.skel {
+  border-radius: 1rem;
+  background-color: rgba(148, 163, 184, 0.28);
+  animation: skel-pulse 1.6s ease-in-out infinite;
+}
+.dark .skel {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+@keyframes skel-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel {
+    animation: none;
+  }
+}

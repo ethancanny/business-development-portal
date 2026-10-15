@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Cormorant_Garamond, Inter } from "next/font/google";
 import "./globals.css";
 import SiteHeader from "@/components/SiteHeader";
 import ThemeProvider, { ThemeInitScript } from "@/components/ThemeProvider";
@@ -6,6 +7,21 @@ import PwaShell from "@/components/PwaShell";
 import MobileNav from "@/components/MobileNav";
 import Fab from "@/components/Fab";
 import LockScreen from "@/components/LockScreen";
+
+// Premium redesign (Oct 14, 2026): serif display + clean sans, loaded
+// once at the root and shared via CSS variables (see tailwind.config).
+const fontDisplay = Cormorant_Garamond({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-display",
+  display: "swap",
+});
+const fontSans = Inter({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-sans",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Business Development Portal | Canny Capital Partners",
@@ -61,7 +77,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={`dark ${fontDisplay.variable} ${fontSans.variable}`}>
       <head>
         <ThemeInitScript />
         {SPLASH_LINKS.map((s) => (
@@ -73,7 +89,7 @@ export default function RootLayout({
           />
         ))}
       </head>
-      <body className="bg-slate-100 text-slate-900 antialiased dark:bg-[#0d1f3c] dark:text-[#e8dfc8]">
+      <body className="bg-slate-100 font-sans text-slate-900 antialiased dark:bg-[#0d1f3c] dark:text-[#e8dfc8]">
         {/* Status-bar underlay (mobile polish §1): with
             black-translucent the app draws under the iOS status bar;
             this fixed navy strip (pointer-events-none, above content
