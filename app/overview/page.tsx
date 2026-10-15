@@ -378,8 +378,9 @@ export default function Overview() {
   // Upcoming important dates for the weekly summary (Ethan, Oct 9, 2026):
   // the next 14 days of Outlook events mirrored into the portal. (The
   // earlier "Activity highlights" lines were removed at Ethan's request —
-  // the summary is counts + important dates. Wave 1 reorder, Oct 14:
-  // Tasks & follow-ups now sit directly above this section.)
+  // the summary is counts + important dates. Oct 14, 2026: this
+  // summary and Tasks & follow-ups are combined in the "Today &
+  // this week" section directly under the Morning Brief.)
   // Oct 14, 2026: Important Dates shows only meetings linked to a
   // Directory contact or a deal — an attendee matching a deal contact
   // or an operator/investor, or the event title naming the company or
@@ -982,6 +983,183 @@ export default function Overview() {
         )}
       </section>
 
+      {/* Today & this week (Oct 14, 2026) — Tasks & follow-ups and
+          the Weekly summary combined into one section directly under
+          the Morning Brief, at Ethan's request: what's going on and
+          what needs to be done, instead of two sections buried at
+          the bottom of the page. Left zone: Needs attention — the
+          add-a-follow-up form + task list (the /api/tasks sort puts
+          overdue first, then due today, then upcoming), with stale
+          deals folded in as one compact line to the pipeline. Right
+          zone: What's happening — the Weekly summary (week toggle,
+          counts, important dates). The section keeps
+          id="overview-tasks" so the FAB's ?newtask=1 deep link
+          lands here and focuses the form exactly as before. All
+          state, memos, and handlers are unchanged — a relocation
+          and merge of the two sections' JSX only. */}
+      <section id="overview-tasks" className="card-surface mb-6 scroll-mt-4 p-5 sm:p-6">
+        <h2 className="text-xl font-bold text-[#0d1f3c] dark:text-white">
+          Today &amp; this week
+        </h2>
+        <div className="mt-4 grid gap-6 lg:grid-cols-5">
+          <div className="lg:col-span-3">
+            <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
+              Needs attention
+            </h3>
+            <TaskList
+              tasks={tasks}
+              deals={deals}
+              execs={execs}
+              onChanged={load}
+            />
+            {staleDeals.length > 0 && (
+              <Link
+                href="/pipeline"
+                className="mt-4 block rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/15"
+              >
+                ⚠ {staleDeals.length}{" "}
+                {staleDeals.length === 1 ? "deal is" : "deals are"} stale — no
+                touch in 30+ days →
+              </Link>
+            )}
+          </div>
+          <div className="border-t border-slate-100 pt-6 dark:border-white/10 lg:col-span-2 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
+                What&apos;s happening
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 dark:text-white/40">
+                  {weekWindow.start.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  {" – "}
+                  {weekTab === "this"
+                    ? "today"
+                    : new Date(weekWindow.end.getTime() - 86400000).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                </span>
+                {(["this", "last"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setWeekTab(t)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                      weekTab === t
+                        ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                        : "text-slate-500 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/5"
+                    }`}
+                  >
+                    {t === "this" ? "This week" : "Last week"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mb-4 flex flex-wrap gap-2">
+              {[
+                `${weekly.newDeals.length} new target${weekly.newDeals.length === 1 ? "" : "s"}${
+                  weekly.newDealsValue > 0 ? ` · ${fmtMoney(weekly.newDealsValue)}` : ""
+                }`,
+                `${weekly.newExecs.length} new operator${weekly.newExecs.length === 1 ? "" : "s"}`,
+                `${weekly.flowForSale + weekly.flowOperators + weekly.flowNotes} new in Activity (${weekly.flowForSale} for sale · ${weekly.flowOperators} operators · ${weekly.flowNotes} notes)`,
+                `${weekly.flowAdded} moved to pipeline`,
+                `${weekly.touches} touches logged`,
+                `${weekly.tasksDone} follow-ups completed`,
+                ...(weekly.closedWon > 0 ? [`${weekly.closedWon} closed won 🎉`] : []),
+                ...(weekly.passed > 0 ? [`${weekly.passed} passed`] : []),
+              ].map((chip) => (
+                <span
+                  key={chip}
+                  className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
+                >
+                  {chip}
+                </span>
+              ))}
+            </div>
+            {weekTab === "this" && (calSummary.linked.length > 0 || calSummary.other.length > 0) && (
+              <div className="mt-4">
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+                  Important dates
+                </p>
+                {calSummary.linked.length > 0 ? (
+                  <ul className="space-y-1.5">
+                    {calSummary.linked.map(({ e, href, label }) => {
+                      const d = new Date(e.startsAt);
+                      return (
+                        <li
+                          key={e.eventId}
+                          className="group flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-2.5 py-2 dark:border-white/5 dark:bg-white/[0.03]"
+                        >
+                          <div className="flex h-10 w-11 shrink-0 flex-col items-center justify-center rounded-md bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
+                            <span className="text-[9px] font-bold uppercase leading-none tracking-wider">
+                              {d.toLocaleDateString("en-US", { month: "short", timeZone: "America/Phoenix" })}
+                            </span>
+                            <span className="text-base font-bold leading-tight">
+                              {d.toLocaleDateString("en-US", { day: "numeric", timeZone: "America/Phoenix" })}
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <Link
+                              href={href}
+                              className="block truncate text-sm font-semibold text-[#0d1f3c] hover:underline dark:text-white"
+                            >
+                              {e.title}
+                            </Link>
+                            <p className="truncate text-xs text-slate-400 dark:text-white/40">
+                              {fmtWhen(e.startsAt, e.allDay)}
+                              {e.location ? <> · {renderLoc(e.location)}</> : null}
+                              {" · "}
+                              <Link href={href} className="font-medium text-[#8a6f3c] hover:underline dark:text-[#d4b37a]">
+                                {label} ↗
+                              </Link>
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => dismissEvent(e.eventId)}
+                            title="Dismiss"
+                            aria-label="Dismiss event"
+                            className="shrink-0 rounded px-1.5 text-lg leading-none text-slate-300 opacity-0 transition hover:text-red-400 group-hover:opacity-100 dark:text-white/25"
+                          >
+                            ×
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-slate-400 dark:text-white/40">
+                    No upcoming meetings linked to a Directory contact or deal.
+                  </p>
+                )}
+                {calSummary.other.length > 0 && (
+                  <div className="mt-2">
+                    <button
+                      onClick={() => setShowOtherCal((v) => !v)}
+                      className="text-xs font-semibold text-slate-500 hover:underline dark:text-white/50"
+                      aria-expanded={showOtherCal}
+                    >
+                      {showOtherCal ? "▾" : "▸"} Other calendar items ({calSummary.other.length})
+                    </button>
+                    {showOtherCal && (
+                      <ul className="mt-1.5 space-y-1">
+                        {calSummary.other.map((e) => (
+                          <li
+                            key={e.eventId}
+                            className="flex items-baseline justify-between gap-3 px-1 py-0.5 text-xs text-slate-500 dark:text-white/50"
+                          >
+                            <span className="min-w-0 truncate">{e.title}</span>
+                            <span className="shrink-0">{fmtWhen(e.startsAt, e.allDay)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* Top Signals — the newest high-signal fit targets. No
           per-sector photography exists in the portal and unlicensed
           images are off-limits, so the card header is the sector
@@ -1301,181 +1479,6 @@ export default function Overview() {
           </div>
         </div>
       </section>
-
-      {/* Tasks & follow-ups (moved above the Weekly summary in the
-          Wave 1 reorder, Oct 14, 2026) */}
-      <section id="overview-tasks" className="card-surface mb-6 scroll-mt-4 p-5">
-        <h2 className="mb-4 font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
-          Tasks &amp; follow-ups
-        </h2>
-        <TaskList
-          tasks={tasks}
-          deals={deals}
-          execs={execs}
-          onChanged={load}
-        />
-      </section>
-
-      {staleDeals.length > 0 && (
-        <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
-          <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
-            ⚠ {staleDeals.length} {staleDeals.length === 1 ? "deal is" : "deals are"} going stale
-            <span className="font-normal"> — no touch in 30+ days: </span>
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {staleDeals.slice(0, 6).map((d) => (
-              <Link
-                key={d.id}
-                href={`/deals/${d.id}`}
-                className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-800 shadow-sm hover:underline dark:bg-white/10 dark:text-amber-200"
-              >
-                {d.companyName}
-              </Link>
-            ))}
-            {staleDeals.length > 6 && (
-              <span className="px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
-                +{staleDeals.length - 6} more
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Weekly summary */}
-      <div className="card-surface mb-6 p-4 sm:p-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
-            📅 Weekly summary
-          </h2>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400 dark:text-white/40">
-              {weekWindow.start.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-              {" – "}
-              {weekTab === "this"
-                ? "today"
-                : new Date(weekWindow.end.getTime() - 86400000).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                  })}
-            </span>
-            {(["this", "last"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setWeekTab(t)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
-                  weekTab === t
-                    ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
-                    : "text-slate-500 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/5"
-                }`}
-              >
-                {t === "this" ? "This week" : "Last week"}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="mb-4 flex flex-wrap gap-2">
-          {[
-            `${weekly.newDeals.length} new target${weekly.newDeals.length === 1 ? "" : "s"}${
-              weekly.newDealsValue > 0 ? ` · ${fmtMoney(weekly.newDealsValue)}` : ""
-            }`,
-            `${weekly.newExecs.length} new operator${weekly.newExecs.length === 1 ? "" : "s"}`,
-            `${weekly.flowForSale + weekly.flowOperators + weekly.flowNotes} new in Activity (${weekly.flowForSale} for sale · ${weekly.flowOperators} operators · ${weekly.flowNotes} notes)`,
-            `${weekly.flowAdded} moved to pipeline`,
-            `${weekly.touches} touches logged`,
-            `${weekly.tasksDone} follow-ups completed`,
-            ...(weekly.closedWon > 0 ? [`${weekly.closedWon} closed won 🎉`] : []),
-            ...(weekly.passed > 0 ? [`${weekly.passed} passed`] : []),
-          ].map((chip) => (
-            <span
-              key={chip}
-              className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
-            >
-              {chip}
-            </span>
-          ))}
-        </div>
-        {weekTab === "this" && (calSummary.linked.length > 0 || calSummary.other.length > 0) && (
-          <div className="mt-4">
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-              Important dates
-            </p>
-            {calSummary.linked.length > 0 ? (
-              <ul className="space-y-1.5">
-                {calSummary.linked.map(({ e, href, label }) => {
-                  const d = new Date(e.startsAt);
-                  return (
-                    <li
-                      key={e.eventId}
-                      className="group flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-2.5 py-2 dark:border-white/5 dark:bg-white/[0.03]"
-                    >
-                      <div className="flex h-10 w-11 shrink-0 flex-col items-center justify-center rounded-md bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
-                        <span className="text-[9px] font-bold uppercase leading-none tracking-wider">
-                          {d.toLocaleDateString("en-US", { month: "short", timeZone: "America/Phoenix" })}
-                        </span>
-                        <span className="text-base font-bold leading-tight">
-                          {d.toLocaleDateString("en-US", { day: "numeric", timeZone: "America/Phoenix" })}
-                        </span>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <Link
-                          href={href}
-                          className="block truncate text-sm font-semibold text-[#0d1f3c] hover:underline dark:text-white"
-                        >
-                          {e.title}
-                        </Link>
-                        <p className="truncate text-xs text-slate-400 dark:text-white/40">
-                          {fmtWhen(e.startsAt, e.allDay)}
-                          {e.location ? <> · {renderLoc(e.location)}</> : null}
-                          {" · "}
-                          <Link href={href} className="font-medium text-[#8a6f3c] hover:underline dark:text-[#d4b37a]">
-                            {label} ↗
-                          </Link>
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => dismissEvent(e.eventId)}
-                        title="Dismiss"
-                        aria-label="Dismiss event"
-                        className="shrink-0 rounded px-1.5 text-lg leading-none text-slate-300 opacity-0 transition hover:text-red-400 group-hover:opacity-100 dark:text-white/25"
-                      >
-                        ×
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="text-xs text-slate-400 dark:text-white/40">
-                No upcoming meetings linked to a Directory contact or deal.
-              </p>
-            )}
-            {calSummary.other.length > 0 && (
-              <div className="mt-2">
-                <button
-                  onClick={() => setShowOtherCal((v) => !v)}
-                  className="text-xs font-semibold text-slate-500 hover:underline dark:text-white/50"
-                  aria-expanded={showOtherCal}
-                >
-                  {showOtherCal ? "▾" : "▸"} Other calendar items ({calSummary.other.length})
-                </button>
-                {showOtherCal && (
-                  <ul className="mt-1.5 space-y-1">
-                    {calSummary.other.map((e) => (
-                      <li
-                        key={e.eventId}
-                        className="flex items-baseline justify-between gap-3 px-1 py-0.5 text-xs text-slate-500 dark:text-white/50"
-                      >
-                        <span className="min-w-0 truncate">{e.title}</span>
-                        <span className="shrink-0">{fmtWhen(e.startsAt, e.allDay)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* Analytics — tabbed (Oct 14, 2026 visual refresh): Pipeline |
           Sourcing | Relationships, one window selector, every chart
