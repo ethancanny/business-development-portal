@@ -9,6 +9,7 @@ import type { Deal, Executive } from "@/lib/types";
 import type { Investor } from "@/lib/investors-db";
 import CompanyLogo from "@/components/CompanyLogo";
 import PersonAvatar from "@/components/PersonAvatar";
+import { ExecutiveModal } from "@/components/Modals";
 import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
 import { SECTOR_COLORS } from "@/lib/sector-colors";
 import { dealFocusSector } from "@/lib/valuation";
@@ -56,6 +57,8 @@ export default function Directory() {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<"operator" | "business" | "investor">("operator");
   const [sel, setSel] = useState<{ kind: string; id: string } | null>(null);
+  const [execModal, setExecModal] = useState<{ exec: Executive | null } | null>(null);
+  const [touchMode, setTouchMode] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -78,6 +81,12 @@ export default function Directory() {
         }
         const param = new URLSearchParams(window.location.search).get("q");
         if (param) setQ(param);
+        const sp = new URLSearchParams(window.location.search);
+        if (sp.get("new") === "contact") setExecModal({ exec: null });
+        if (sp.get("touch") === "1") {
+          setTouchMode(true);
+          setTab("operator");
+        }
       } finally {
         setLoading(false);
       }
@@ -182,7 +191,16 @@ export default function Directory() {
             return (
               <li key={`${e.kind}-${e.id}`}>
                 <button
-                  onClick={() => setSel({ kind: e.kind, id: e.id })}
+                  onClick={() => {
+                    if (touchMode && e.kind === "operator") {
+                      const ex = execs.find((x) => x.id === e.id);
+                      if (ex) {
+                        setExecModal({ exec: ex });
+                        return;
+                      }
+                    }
+                    setSel({ kind: e.kind, id: e.id });
+                  }}
                   className={`w-full rounded-xl border px-3 py-2.5 text-left transition ${
                     active
                       ? "border-[#b8975a] bg-[#b8975a]/10 ring-1 ring-[#b8975a]"
@@ -252,6 +270,19 @@ export default function Directory() {
         ) : (
           <div className="grid items-start gap-6 lg:grid-cols-[380px_1fr]">
             <div>
+              {touchMode && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[#b8975a]/50 bg-[#b8975a]/10 px-3.5 py-2.5">
+                  <p className="text-xs font-medium text-[#8a6f3c] dark:text-[#d4b37a]">
+                    Log a touch: tap a person to open their record — saving stamps the touch and refreshes their last-touch date.
+                  </p>
+                  <button
+                    onClick={() => setTouchMode(false)}
+                    className="shrink-0 rounded-lg bg-[#0d1f3c] px-3 py-2 text-xs font-semibold text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
@@ -559,6 +590,21 @@ export default function Directory() {
           </div>
         )}
       </div>
+      {execModal && (
+        <ExecutiveModal
+          exec={execModal.exec}
+          onClose={() => setExecModal(null)}
+          onSaved={() => {
+            setExecModal(null);
+            setTouchMode(false);
+            window.location.reload();
+          }}
+          onDeleted={() => {
+            setExecModal(null);
+            window.location.reload();
+          }}
+        />
+      )}
     </div>
   );
 }
