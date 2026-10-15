@@ -1017,7 +1017,7 @@ export default function Overview() {
           <p className="mt-3 text-xs text-slate-400 dark:text-white/40">
             {FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0).toLocaleString()} fit
             targets across the five focus sectors — live from Market Intel
-            (Hospitality has no company spine yet, so its count is honestly 0).{" "}
+            (Hospitality: no data source connected yet.){" "}
             Data as of {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · n ={" "}
             {FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0).toLocaleString()}
           </p>
