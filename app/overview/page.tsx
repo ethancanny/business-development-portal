@@ -432,8 +432,8 @@ export default function Overview() {
       };
     }).filter((r) => r.n > 0);
 
-    // Pass reasons, categorized from the passed deals' own notes —
-    // there is no structured pass-reason field yet. Windowed by the
+    // Pass reasons: the structured passReason field when set on the
+    // deal, else categorized from the deal's notes. Windowed by the
     // pass (last update) date.
     const PASS_REASONS: { label: string; re: RegExp }[] = [
       { label: "Valuation / price", re: /price|pricing|valuation|expensive|asking|multiple/i },
@@ -447,8 +447,9 @@ export default function Overview() {
     );
     const reasonCounts = new Map<string, number>();
     for (const d of passedDeals) {
+      const structured = (d.passReason || "").trim();
       const hit = PASS_REASONS.find((r) => r.re.test(d.notes || ""));
-      const label = hit ? hit.label : "Not specified in notes";
+      const label = structured || (hit ? hit.label : "Not specified in notes");
       reasonCounts.set(label, (reasonCounts.get(label) ?? 0) + 1);
     }
     const passReasons = Array.from(reasonCounts.entries())
