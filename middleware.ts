@@ -15,6 +15,16 @@ export function middleware(req: NextRequest) {
     "/api/market/listings/import",
     "/api/calendar/microsoft/webhook",
     "/api/calendar/microsoft/ensure",
+    "/api/push/check",
+  ];
+  // PWA assets: browsers fetch the manifest, icons, splash images and the
+  // service worker outside the page's auth context (notably iOS), and the
+  // offline page must render without a session.
+  const PUBLIC_PWA = [
+    "/manifest.webmanifest",
+    "/sw.js",
+    "/offline",
+    "/apple-touch-icon",
   ];
   const PUBLIC_ASSETS = [
     "/canny-logo.png",
@@ -26,7 +36,10 @@ export function middleware(req: NextRequest) {
   if (
     pathname === "/login" ||
     PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p)) ||
-    PUBLIC_ASSETS.includes(pathname)
+    PUBLIC_ASSETS.includes(pathname) ||
+    PUBLIC_PWA.includes(pathname) ||
+    pathname.startsWith("/icon-") ||
+    pathname.startsWith("/splash/")
   ) {
     return NextResponse.next();
   }

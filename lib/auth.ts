@@ -43,11 +43,15 @@ export async function verifyCredentials(
   return { id: partner.id, name: partner.name, email: partner.email };
 }
 
-export function signToken(user: AuthUser): string {
-  return jwt.sign(user, JWT_SECRET, { expiresIn: TOKEN_TTL_SECONDS });
+export type SessionUser = AuthUser & { epoch?: number };
+
+export function signToken(user: AuthUser, epoch = 0): string {
+  return jwt.sign({ ...user, epoch }, JWT_SECRET, {
+    expiresIn: TOKEN_TTL_SECONDS,
+  });
 }
 
-export function verifyToken(token: string): AuthUser | null {
+export function verifyToken(token: string): SessionUser | null {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     if (
@@ -56,7 +60,7 @@ export function verifyToken(token: string): AuthUser | null {
       "id" in decoded &&
       "email" in decoded
     ) {
-      return decoded as AuthUser;
+      return decoded as SessionUser;
     }
     return null;
   } catch {
