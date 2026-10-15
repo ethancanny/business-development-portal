@@ -50,7 +50,7 @@ export default function SiteHeader() {
         key={href}
         href={href}
         className={`rounded-lg font-semibold transition ${
-          mobile ? "block px-4 py-3 text-base" : "px-3 py-1.5 text-sm"
+          mobile ? "block px-4 py-3 text-base" : "whitespace-nowrap px-3 py-1.5 text-sm"
         } ${
           active
             ? "bg-[#b8975a] text-[#0d1f3c]"
@@ -69,13 +69,13 @@ export default function SiteHeader() {
     <header className="bg-[#0d1f3c]">
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-6">
-          <Link href="/overview" className="flex items-center gap-3">
+          <Link href="/overview" className="flex shrink-0 items-center gap-3">
             <img
               src="https://cannycapitalpartners.com/canny-logo-white.png"
               alt="Canny Capital Partners"
               className="h-9 w-auto"
             />
-            <span className="border-l border-[#b8975a]/50 pl-3 text-xs font-bold text-white sm:text-sm">
+            <span className="whitespace-nowrap border-l border-[#b8975a]/50 pl-3 text-xs font-bold text-white sm:text-sm">
               Business Development Portal
             </span>
           </Link>

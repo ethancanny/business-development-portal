@@ -98,6 +98,10 @@ export default function PwaShell() {
   const verifiedRef = useRef(false);
 
   const onLogin = pathname === "/login";
+  // Ethan (Oct 14, 2026): the install + notification asks appear ONLY
+  // on the Overview page — once, then permanently dismissed (the
+  // localStorage flags set by the dismiss handlers below).
+  const onOverview = pathname === "/overview";
 
   /* --- service worker registration (everywhere, incl. /login) --- */
   useEffect(() => {
@@ -245,7 +249,7 @@ export default function PwaShell() {
 
   return (
     <>
-      {showIosInstall && (
+      {onOverview && showIosInstall && (
         <div className={bannerCls} role="dialog" aria-label="Install app">
           <p className="text-sm font-semibold text-white">Install Canny Capital Portal</p>
           <p className="mt-1 text-sm leading-relaxed text-[#e8dfc8]">
@@ -261,7 +265,7 @@ export default function PwaShell() {
         </div>
       )}
 
-      {!showIosInstall && installEvent && !standalone && (
+      {onOverview && !showIosInstall && installEvent && !standalone && (
         <div className={bannerCls} role="dialog" aria-label="Install app">
           <p className="text-sm font-semibold text-white">Install Canny Capital Portal</p>
           <p className="mt-1 text-sm text-[#e8dfc8]">
@@ -278,7 +282,7 @@ export default function PwaShell() {
         </div>
       )}
 
-      {standalone && showPushPrompt && (
+      {onOverview && standalone && showPushPrompt && (
         <div className={bannerCls} role="dialog" aria-label="Enable notifications">
           <p className="text-sm font-semibold text-white">Stay in the loop</p>
           <p className="mt-1 text-sm text-[#e8dfc8]">
