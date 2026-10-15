@@ -7,23 +7,22 @@ import * as XLSX from "xlsx";
 import {
   upsertAcquisitions,
   upsertEntities,
-  upsertFilings,
   upsertIndicatorObs,
   upsertIndicatorObsBulk,
   getIndicatorSeries,
   upsertWarn,
   backfillWarnIndustries,
   clearNewBankruptcyNews,
-  purgeNonAzFilings,
   addMultiple,
   deleteMultiples,
   logSync,
   type AcquisitionInput,
-  type FilingInput,
   type IndicatorInput,
   type WarnInput,
 } from "./market-db";
 import type { MiIndicatorSource } from "./types";
+import { ingestFilings } from "./filings-ingest";
+import { classifyIndustry, INDUSTRY_KEYWORDS, kwMatch } from "./industry-classify";
 
 /* ---------------- FRED indicators ---------------- */
 
@@ -163,138 +162,6 @@ export async function ingestIndicators(): Promise<number> {
   return total;
 }
 
-/* ---------------- SEC EDGAR ---------------- */
-
-const EDGAR_UA = {
-  "User-Agent": "CannyCapitalPortal/1.0 (ethan@cannycapitalpartners.com)",
-  Accept: "application/json",
-};
-
-const EDGAR_QUERIES: { category: "acquisition" | "form_d" | "expansion" | "bankruptcy"; q: string; forms: string; national?: boolean }[] = [
-  { category: "acquisition", q: '"acquisition" AND Arizona', forms: "8-K" },
-  { category: "form_d", q: "Arizona", forms: "D,D/A" },
-  { category: "expansion", q: '"Arizona" AND expansion', forms: "10-K" },
-  // Major-event exception: public-company bankruptcies are rare and newsworthy — track nationally,
-  // keep only exchange-listed filers ("good sized corps").
-  { category: "bankruptcy", q: '"bankruptcy" OR "chapter 11"', forms: "8-K", national: true },
-];
-
-/** Exchange-listed? EDGAR puts the ticker in display_names for listed
- * filers: "Leslie's, Inc. (LESL) (CIK 0001821806)". */
-function isListed(displayName: string): boolean {
-  return /\([A-Z][A-Z0-9.\-]{0,5}\)\s*\(CIK/.test(displayName);
-}
-
-interface EdgarHit {
-  _source?: {
-    adsh?: string;
-    ciks?: string[];
-    display_names?: string[];
-    form?: string;
-    file_date?: string;
-    file_description?: string;
-    biz_states?: string[];
-    items?: string[];
-  };
-}
-
-const ITEM_LABELS: Record<string, string> = {
-  "1.01": "Entry into a material definitive agreement",
-  "1.02": "Termination of a material agreement",
-  "1.03": "Bankruptcy or receivership",
-  "1.05": "Material impairments",
-  "2.01": "Completion of acquisition / disposition of assets",
-  "2.03": "New direct financial obligation",
-  "2.04": "Obligation accelerated / increased",
-  "3.02": "Unregistered sale of equity securities",
-  "5.01": "Change in control",
-  "5.02": "Director / executive officer change",
-  "5.03": "Amendments to charter or bylaws",
-  "7.01": "Regulation FD disclosure",
-  "8.01": "Other events",
-  "9.01": "Financial statements and exhibits",
-};
-
-/** Human summary for a filing from its 8-K items / form — EDGAR's raw
- * file_description is exhibit noise ("EX-10.2"), never show that. */
-function filingSummary(s: EdgarHit["_source"]): string {
-  const items = (s?.items ?? []).filter((i) => ITEM_LABELS[i]);
-  if (items.length)
-    return items.map((i) => `Item ${i} — ${ITEM_LABELS[i]}`).join(" · ").slice(0, 300);
-  const form = (s?.form ?? "").toUpperCase();
-  if (form.startsWith("D")) return "Form D — notice of exempt securities offering";
-  if (form.includes("10-K")) return "Annual report (Form 10-K)";
-  if (form.includes("10-Q")) return "Quarterly report (Form 10-Q)";
-  const d = s?.file_description ?? "";
-  return /^EX[\s-]|EXHIBIT/i.test(d) ? "" : d;
-}
-
-export async function ingestFilings(): Promise<number> {
-  const end = new Date().toISOString().slice(0, 10);
-  const start = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
-  let total = 0;
-  for (const q of EDGAR_QUERIES) {
-    const url =
-      `https://efts.sec.gov/LATEST/search-index?q=${encodeURIComponent(q.q)}` +
-      `&forms=${encodeURIComponent(q.forms)}&startdt=${start}&enddt=${end}`;
-    let hits: EdgarHit[] = [];
-    try {
-      const res = await fetch(url, { headers: EDGAR_UA, signal: AbortSignal.timeout(25000) });
-      if (!res.ok) {
-        await logSync("filings", "error", total, `EDGAR ${q.category}: HTTP ${res.status}`);
-        continue;
-      }
-      const data = (await res.json()) as { hits?: { hits?: EdgarHit[] } };
-      hits = data.hits?.hits ?? [];
-    } catch (e) {
-      await logSync("filings", "error", total, `EDGAR ${q.category}: ${e instanceof Error ? e.message : String(e)}`);
-      continue;
-    }
-    const rows: FilingInput[] = [];
-    for (const h of hits) {
-      const s = h._source ?? {};
-      const cik = (s.ciks ?? [])[0]?.replace(/^0+/, "") ?? "";
-      const adsh = (s.adsh ?? "").replace(/-/g, "");
-      const name = (s.display_names ?? [])[0] ?? "";
-      // Arizona-based? EDGAR tags every search hit with the filer's
-      // business state(s), so no per-company lookup is needed. (The old
-      // design verified each filer with a separate submissions-API call —
-      // up to ~100 per query — and that loop is what timed this ingest out.)
-      const azCompany = (s.biz_states ?? []).some((st) => st.toUpperCase() === "AZ");
-      // Arizona-based filers ONLY, every category — no national exception
-      // (Ethan, Oct 2026): material events at big non-AZ companies reach the
-      // portal as news / Major Events articles, not as raw filings.
-      if (!azCompany) continue;
-      if (q.category === "bankruptcy") {
-        // Must be an actual bankruptcy report (8-K Item 1.03), not a
-        // boilerplate text match.
-        if (!(s.items ?? []).includes("1.03")) continue;
-      }
-      rows.push({
-        form: s.form ?? "",
-        company: name,
-        cik,
-        filingDate: s.file_date ?? "",
-        accession: s.adsh ?? "",
-        category: q.category,
-        summary: filingSummary(s),
-        url: cik && adsh ? `https://www.sec.gov/Archives/edgar/data/${cik}/${adsh}/` : "",
-        azCompany,
-        majorEvent: q.category === "bankruptcy",
-      });
-    }
-    total += await upsertFilings(rows);
-  }
-  const purged = await purgeNonAzFilings().catch(() => 0);
-  await logSync(
-    "filings",
-    "ok",
-    total,
-    `EDGAR: ${EDGAR_QUERIES.length} queries, 30d window, AZ-based filers via biz_states${purged ? ` · purged ${purged} non-AZ rows` : ""}`
-  );
-  return total;
-}
-
 /* ---------------- Google News RSS (AZ acquisitions) ---------------- */
 
 const NEWS_QUERIES = [
@@ -305,41 +172,6 @@ const NEWS_QUERIES = [
   'Arizona (healthcare OR hospital) (merger OR acquisition) when:30d',
   'Arizona (construction OR contractor) (acquired OR acquisition) when:30d',
 ];
-
-// Word-boundary keyword matching (Ethan, Oct 2026 — a resort deal was tagged
-// "Healthcare" because the old substring match found "hospital" inside
-// "hospitality"). Words ending in * are prefix stems (fabricat* →
-// fabrication); all others must match as whole words. Order matters: the
-// first matching category wins, and Hospitality sits above Healthcare so
-// hotels/resorts can never fall into the hospital bucket.
-const INDUSTRY_KEYWORDS: { industry: string; words: string[] }[] = [
-  { industry: "Hospitality & Leisure", words: ["hospitality", "hotel*", "resort*", "casino*", "restaurant*", "lodging", "tourism", "nightclub*", "brewery", "winery"] },
-  { industry: "Aerospace & Defense", words: ["aerospace", "defense", "avionics", "missile*", "spacecraft", "aircraft", "defence"] },
-  { industry: "Advanced Manufacturing", words: ["manufacturing", "semiconductor*", "chips", "chipmaker*", "fabricat*", "machining", "industrial"] },
-  { industry: "Healthcare", words: ["healthcare", "health care", "hospitals", "hospital", "clinics", "clinic", "pharma*", "biotech", "medical", "dental", "veterinary", "senior living", "assisted living"] },
-  { industry: "Specialty Trades & Construction", words: ["construction", "contractors", "contractor", "hvac", "plumbing", "electrical", "roofing", "paving", "concrete"] },
-  { industry: "Real Estate", words: ["real estate", "multifamily", "apartment*", "homebuilder*", "land development", "self-storage", "warehouse*", "industrial park"] },
-  { industry: "Energy & Utilities", words: ["solar", "utility", "utilities", "power plant", "battery storage", "energy storage", "wind farm", "electric cooperative"] },
-  { industry: "Financial Services", words: ["bank", "banks", "insurance", "fintech", "wealth management", "credit union*", "mortgage"] },
-  { industry: "Technology", words: ["software", "data center*", "artificial intelligence", "cybersecurity", "semiconductor*"] },
-  { industry: "Consumer & Retail", words: ["retail", "grocery", "e-commerce", "consumer brands", "franchise*"] },
-];
-
-/** Whole-word / prefix-stem keyword test: "hospital" must NOT match inside
- * "hospitality"; words ending in * match word prefixes (fabricat*). */
-function kwMatch(text: string, word: string): boolean {
-  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return word.endsWith("*")
-    ? new RegExp(`\\b${esc.slice(0, -2)}`, "i").test(text)
-    : new RegExp(`\\b${esc}\\b`, "i").test(text);
-}
-
-function classifyIndustry(text: string): string {
-  for (const { industry, words } of INDUSTRY_KEYWORDS) {
-    if (words.some((w) => kwMatch(text, w))) return industry;
-  }
-  return "";
-}
 
 /** Naive acquirer/target extraction from deal headlines. */
 function parseDealHeadline(headline: string): { acquirer: string; target: string } {
