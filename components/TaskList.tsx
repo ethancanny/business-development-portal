@@ -135,12 +135,12 @@ export default function TaskList({
             type="date"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-white/15 dark:bg-[#132847] dark:text-[#e8dfc8]"
+            className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-white/15 dark:bg-[#132847] dark:text-[#e8dfc8]"
           />
           <select
             value={owner}
             onChange={(e) => setOwner(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-white/15 dark:bg-[#132847] dark:text-[#e8dfc8]"
+            className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-white/15 dark:bg-[#132847] dark:text-[#e8dfc8]"
           >
             <option value="">Anyone</option>
             {PARTNER_NAMES.map((p) => (
@@ -153,7 +153,7 @@ export default function TaskList({
             <select
               value={link}
               onChange={(e) => setLink(e.target.value)}
-              className="max-w-[220px] rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-white/15 dark:bg-[#132847] dark:text-[#e8dfc8]"
+              className="w-full min-w-0 basis-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-white/15 dark:bg-[#132847] dark:text-[#e8dfc8] sm:w-[220px] sm:basis-auto sm:flex-none"
             >
               <option value="__none__">No linked account</option>
               <optgroup label="Acquisition targets">

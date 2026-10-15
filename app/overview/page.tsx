@@ -14,6 +14,7 @@ import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, sectorIcon, stageColor } from "@/lib/sector-colors";
 import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
 import CompanyLogo from "@/components/CompanyLogo";
+import LatestIntel from "@/components/LatestIntel";
 
 /** Fit-target sectors — all five focus sectors (Oct 14, 2026: the
  * density view includes Hospitality even at 0; there is no
@@ -881,7 +882,7 @@ export default function Overview() {
         title="Overview"
         subtitle="The state of the firm's pipeline at a glance."
       />
-      <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+      <main className="mx-auto max-w-[1400px] overflow-x-clip px-4 py-6 sm:px-6">
       {(pull > 8 || refreshing) && (
         <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center">
           <span className="rounded-full bg-[#0d1f3c] px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg">
@@ -1002,7 +1003,7 @@ export default function Overview() {
           Today &amp; this week
         </h2>
         <div className="mt-4 grid gap-6 lg:grid-cols-5">
-          <div className="lg:col-span-3">
+          <div className="min-w-0 lg:col-span-3">
             <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
               Needs attention
             </h3>
@@ -1023,7 +1024,7 @@ export default function Overview() {
               </Link>
             )}
           </div>
-          <div className="border-t border-slate-100 pt-6 dark:border-white/10 lg:col-span-2 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+          <div className="min-w-0 border-t border-slate-100 pt-6 dark:border-white/10 lg:col-span-2 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
                 What&apos;s happening
@@ -1265,6 +1266,11 @@ export default function Overview() {
           </div>
         </section>
       )}
+
+      {/* Latest intelligence — top 3 News & Intelligence stories,
+          directly under Top Signals. Self-fetching; renders nothing
+          when the feed is empty or unavailable. */}
+      <LatestIntel />
 
       {/* Market strip — FRED reference rates only (Prime, SOFR,
           10-Yr, 2-Yr) with the move vs the previous observation and
