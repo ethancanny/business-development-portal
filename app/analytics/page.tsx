@@ -16,7 +16,7 @@ import {
 } from "@/lib/types";
 import type { Investor } from "@/lib/investors-db";
 import { fmtMoney } from "@/lib/format";
-import { isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
+import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
 
 /**
@@ -62,7 +62,6 @@ export default function AnalyticsPage() {
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [tab, setTab] = useState<"pipeline" | "sourcing" | "relationships" | "market">("pipeline");
   const [winDays, setWinDays] = useState<30 | 90 | 365>(90);
-  const [includeNonFocus, setIncludeNonFocus] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -126,10 +125,9 @@ export default function AnalyticsPage() {
     () => new Date(Date.now() - winDays * 86400000).toISOString(),
     [winDays]
   );
-  const scopedDeals = useMemo(
-    () => (includeNonFocus ? deals : deals.filter((d) => isFocusDeal(d.industry))),
-    [deals, includeNonFocus]
-  );
+  // All deals count (Ethan, Oct 14, 2026 — the non-focus toggle is
+  // gone; the "Non-focus" tag is a label only and changes no total).
+  const scopedDeals = deals;
   const compLog = useMemo(
     () =>
       multiples
@@ -364,15 +362,6 @@ export default function AnalyticsPage() {
               ))}
             </div>
             <div className="flex items-center gap-3">
-              <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 dark:text-white/60">
-                <input
-                  type="checkbox"
-                  checked={includeNonFocus}
-                  onChange={(e) => setIncludeNonFocus(e.target.checked)}
-                  className="h-3.5 w-3.5 accent-[#b8975a]"
-                />
-                Include non-focus deals
-              </label>
               <div className="flex overflow-hidden rounded-lg border border-slate-200 dark:border-white/15">
                 {([30, 90, 365] as const).map((d) => (
                   <button
@@ -415,12 +404,11 @@ export default function AnalyticsPage() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{scopedDeals.length}</p>
-                  <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Deals in scope</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Deals</p>
                 </div>
               </div>
               <p className="mt-2 text-[11px] text-slate-400 dark:text-white/40">
-                Data as of {dataDate} · n = {scopedDeals.length}
-                {includeNonFocus ? "" : " (focus sectors only)"}
+                Data as of {dataDate} · n = {scopedDeals.length} · All sectors.
               </p>
               {pipeline.closedPassedCount >= 5 ? (
                 <div className="mt-5 border-t border-slate-100 pt-4 dark:border-white/10">
