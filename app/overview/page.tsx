@@ -989,7 +989,7 @@ export default function Overview() {
       {visibleSignals.length > 0 && (
         <section className="mb-6">
           <div className="mb-3 flex items-baseline justify-between gap-2">
-            <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+            <h2 className="text-xl font-bold text-[#0d1f3c] dark:text-white">
               Top signals
             </h2>
             <Link
@@ -1021,7 +1021,7 @@ export default function Overview() {
                     </div>
                   </div>
                   <div className="p-4">
-                    <p className="truncate font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
+                    <p className="truncate text-lg font-semibold text-[#0d1f3c] dark:text-white">
                       {c.name}
                     </p>
                     <div className="mt-1.5 flex flex-wrap items-center gap-2">

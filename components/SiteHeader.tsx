@@ -44,7 +44,7 @@ export default function SiteHeader() {
         key={href}
         href={href}
         className={`rounded-lg font-semibold transition ${
-          mobile ? "block px-4 py-3 text-base" : "whitespace-nowrap px-3 py-1.5 text-sm"
+          mobile ? "block px-4 py-3 text-base" : "whitespace-nowrap px-2 py-1.5 text-[13px] xl:px-3 xl:text-sm"
         } ${
           active
             ? "bg-[#b8975a] text-[#0d1f3c]"
@@ -61,8 +61,8 @@ export default function SiteHeader() {
 
   return (
     <header className="bg-[#0d1f3c] pt-safe">
-      <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6 md:h-auto">
-        <div className="flex items-center gap-6">
+      <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between gap-2 px-4 py-3 sm:px-6 md:h-auto xl:gap-4">
+        <div className="flex min-w-0 items-center gap-3 xl:gap-6">
           <Link href="/overview" className="flex shrink-0 items-center gap-3">
             {/* Mobile brand (spec §2): a 32px gold-ringed "C" mark +
                 "Canny Capital" on one line. The hosted wordmark's
@@ -87,7 +87,7 @@ export default function SiteHeader() {
                 alt="Canny Capital Partners"
                 className="h-9 w-auto"
               />
-              <span className="whitespace-nowrap border-l border-[#b8975a]/50 pl-3 text-xs font-bold text-white sm:text-sm">
+              <span className="hidden whitespace-nowrap border-l border-[#b8975a]/50 pl-3 text-xs font-bold text-white sm:text-sm xl:block">
                 Business Development Portal
               </span>
             </span>
@@ -96,7 +96,7 @@ export default function SiteHeader() {
             {NAV.map((item) => navLink(item.href, item.label))}
           </nav>
         </div>
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="hidden shrink-0 items-center gap-2 md:flex xl:gap-3">
           {navLink(CALENDAR.href, CALENDAR.label)}
           {navLink(AUDIT.href, AUDIT.label)}
           {navLink(SETTINGS.href, SETTINGS.label)}

@@ -94,6 +94,7 @@ export default function PwaShell() {
   const [standalone, setStandalone] = useState(false);
   const [showIosInstall, setShowIosInstall] = useState(false);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
+  const [showAndroidInstall, setShowAndroidInstall] = useState(false);
   const [showPushPrompt, setShowPushPrompt] = useState(false);
   const verifiedRef = useRef(false);
 
@@ -114,7 +115,15 @@ export default function PwaShell() {
   useEffect(() => {
     const handler = (e: Event) => {
       e.preventDefault();
+      // Shown-once rule: if the ask was ever displayed, never capture again.
+      try {
+        if (localStorage.getItem(INSTALL_KEY) === "1") return;
+        localStorage.setItem(INSTALL_KEY, "1");
+      } catch {
+        /* storage unavailable — fall through and show this once */
+      }
       setInstallEvent(e as BeforeInstallPromptEvent);
+      setShowAndroidInstall(true);
     };
     window.addEventListener("beforeinstallprompt", handler);
     return () => window.removeEventListener("beforeinstallprompt", handler);
@@ -132,8 +141,14 @@ export default function PwaShell() {
     } catch {
       /* storage unavailable */
     }
-    if (!sa && !installDismissed && isIOS()) setShowIosInstall(true);
+    // Ethan (Oct 14): the ask comes up ONCE — the flag is written when the
+    // banner is shown, not when it is dismissed, so a refresh never re-asks.
+    if (!sa && !installDismissed && isIOS()) {
+      try { localStorage.setItem(INSTALL_KEY, "1"); } catch { /* ignore */ }
+      setShowIosInstall(true);
+    }
     if (sa && !pushAsked && "Notification" in window && Notification.permission === "default") {
+      try { localStorage.setItem(PUSH_ASKED_KEY, "1"); } catch { /* ignore */ }
       setShowPushPrompt(true);
     }
   }, []);
@@ -200,6 +215,7 @@ export default function PwaShell() {
       /* ignore */
     }
     setShowIosInstall(false);
+    setShowAndroidInstall(false);
     setInstallEvent(null);
   };
 
@@ -265,7 +281,7 @@ export default function PwaShell() {
         </div>
       )}
 
-      {onOverview && !showIosInstall && installEvent && !standalone && (
+      {onOverview && !showIosInstall && showAndroidInstall && installEvent && !standalone && (
         <div className={bannerCls} role="dialog" aria-label="Install app">
           <p className="text-sm font-semibold text-white">Install Canny Capital Portal</p>
           <p className="mt-1 text-sm text-[#e8dfc8]">
