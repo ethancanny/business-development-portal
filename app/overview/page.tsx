@@ -9,7 +9,7 @@ import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiCompany, type MiIndicatorObs, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
 import type { Investor } from "@/lib/investors-db";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, dedupeSourceTokens } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, sectorIcon, stageColor } from "@/lib/sector-colors";
 import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
@@ -472,7 +472,7 @@ export default function Overview() {
     setAddingSignalId(c.id);
     try {
       const notes = [
-        `Profile from ${c.source} (Market Intel company targets).`,
+        `Profile from ${dedupeSourceTokens(c.source)} (Market Intel company targets).`,
         c.subsector
           ? `Sub-sector: ${c.subsector}${c.naics ? ` (NAICS ${c.naics})` : ""}.`
           : "",
@@ -494,7 +494,7 @@ export default function Overview() {
           industry: c.sector || "",
           city: c.city ? `${c.city}, AZ` : "",
           contactName: c.contactName,
-          source: `Market Intel — ${c.source}`,
+          source: `Market Intel — ${dedupeSourceTokens(c.source)}`,
           notes,
         }),
       });
