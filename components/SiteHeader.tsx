@@ -174,7 +174,7 @@ export default function SiteHeader() {
                             : "text-[#e8dfc8] hover:bg-white/10 hover:text-white"
                         }`}
                       >
-                        <item.Icon className="h-4.5 w-4.5 shrink-0" />
+                        <item.Icon className="h-5 w-5 shrink-0" />
                         {item.label}
                         {active && (
                           <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#b8975a]" />
