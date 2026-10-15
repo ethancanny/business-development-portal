@@ -72,6 +72,29 @@ export function matchGroup(industry: string): string | null {
   return null;
 }
 
+/** Ethan's five focus sectors, as deal-industry groups. Hospitality
+ * deals land in Consumer & Retail in the multiples taxonomy, so they
+ * are detected by name here. Everything else is "Non-focus". */
+export const FOCUS_GROUPS = [
+  "Aerospace & Defense",
+  "Healthcare",
+  "Advanced Manufacturing",
+  "Specialty Trades & Construction",
+] as const;
+
+export function dealFocusSector(industry: string): string | null {
+  const s = (industry || "").toLowerCase();
+  if (/hospitality|hotel|lodging|resort|casino|restaurant/.test(s))
+    return "Hospitality & Leisure";
+  const g = matchGroup(industry);
+  if (g && (FOCUS_GROUPS as readonly string[]).includes(g)) return g;
+  return null;
+}
+
+export function isFocusDeal(industry: string): boolean {
+  return dealFocusSector(industry) !== null;
+}
+
 /** Industry-typical structure mixes (% of value), midpoints of the
  * Market Intel per-industry deal-structure ranges. */
 const TYPICAL_STRUCTURE: Record<string, { cash: number; seller: number; earnout: number; rollover: number }> = {
@@ -213,6 +236,32 @@ export interface MultipleEstimate {
   baseBasis: string;
   band: string;
   group: string | null;
+  /** Valuation lens (Oct 14, 2026): EBITDA multiples for the focus
+   * sectors; revenue multiples for software deals with revenue on
+   * record. */
+  lens: "EBITDA" | "Revenue";
+  /** Human-readable source of the base multiple, e.g.
+   * "ExitValue — Technology & Media overall, EV $5–25M". */
+  baseSource: string;
+  /** True when the base fell back to the all-industry blend. */
+  baseIsBlend: boolean;
+  /** Published/logged comps behind the base: ExitValue rows in the
+   * group+band plus Canny Comp Log entries for the group+band. */
+  compSupport: number;
+  /** Confidence from compSupport: 0–2 Low, 3–6 Med, 7+ High. */
+  confidence: "Low" | "Med" | "High";
+  /** Canny Comp Log entries for this group+band (lens metric). */
+  compLogCount: number;
+  /** True when ≥5 comp-log entries fed the base (50/50 blend with
+   * ExitValue, or the base outright when no ExitValue base exists). */
+  compBlended: boolean;
+  /** Per-driver adjustments by name, for the summary line. */
+  driverImpacts: { label: string; adj: number }[];
+  /** The single largest driver adjustment by absolute size. */
+  largestDriver: { label: string; adj: number } | null;
+  /** Sources actually used by the engine for this deal, with
+   * periods — rendered in the synthesis Details view. */
+  sourcesUsed: string[];
   /** Net multiple points from recorded drivers (can be negative). */
   driverAdj: number;
   /** Growth-outlook adjustment (its own layer, from growthPct). */
@@ -387,7 +436,7 @@ function fmtAdj(a: number): string {
 
 export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: MarketRates): MultipleEstimate | null {
   const evRows = multiples.filter((m) => m.sourceReport.includes("ExitValue"));
-  if (!evRows.length) return null;
+  const compRows = multiples.filter((m) => m.sourceReport.includes("Canny Comp Log"));
   const group = matchGroup(deal.industry);
   const band = bandFor(deal);
 
@@ -403,24 +452,179 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
     return median(vals);
   };
 
+  /** How many published ExitValue rows stand behind a base, and the
+   * most common period among them (for the source citation). */
+  const supportFor = (g: string | null, metric: "evEbitdaMedian" | "evRevenueMedian"): { count: number; period: string } => {
+    let count = 0;
+    const periods: Record<string, number> = {};
+    for (const m of evRows) {
+      if (m.sizeBand !== band) continue;
+      const [mg] = splitIndustry(m.industry);
+      if (g !== null && mg !== g) continue;
+      const v = m[metric];
+      if (v !== null && v !== undefined) {
+        count++;
+        if (m.period) periods[m.period] = (periods[m.period] ?? 0) + 1;
+      }
+    }
+    let period = "";
+    let best = 0;
+    for (const p of Object.keys(periods)) {
+      if (periods[p] > best) {
+        best = periods[p];
+        period = p;
+      }
+    }
+    return { count, period };
+  };
+
+  /** Canny Comp Log entries for this deal's group + band. */
+  const compFor = (metric: "evEbitdaMedian" | "evRevenueMedian"): { med: number | null; count: number; period: string } => {
+    if (!group) return { med: null, count: 0, period: "" };
+    const vals: number[] = [];
+    const periods: Record<string, number> = {};
+    for (const m of compRows) {
+      if (m.sizeBand !== band) continue;
+      const [mg] = splitIndustry(m.industry);
+      if (mg !== group) continue;
+      const v = m[metric];
+      if (v !== null && v !== undefined) {
+        vals.push(v);
+        if (m.period) periods[m.period] = (periods[m.period] ?? 0) + 1;
+      }
+    }
+    let period = "";
+    let best = 0;
+    for (const p of Object.keys(periods)) {
+      if (periods[p] > best) {
+        best = periods[p];
+        period = p;
+      }
+    }
+    return { med: median(vals), count: vals.length, period };
+  };
+
   let base: number | null = null;
   let baseBasis = "";
-  base = overallFor(group, "evEbitdaMedian");
-  if (base !== null) {
-    baseBasis = `${group ?? "All-industry"} overall EV/EBITDA, ${band} private deals (ExitValue)`;
-  } else {
-    const rev = overallFor(group, "evRevenueMedian");
-    const margin =
-      deal.revenue && deal.ebitda && deal.revenue > 0 ? deal.ebitda / deal.revenue : null;
-    if (rev !== null && margin !== null && margin > 0) {
-      base = rev / margin;
-      baseBasis = `Derived: ${group ?? "all-industry"} EV/Revenue ${rev.toFixed(2)}× ÷ this deal's ${(margin * 100).toFixed(0)}% EBITDA margin`;
+  let baseSource = "";
+  let baseIsBlend = false;
+  let support = 0;
+  let supportPeriod = "";
+  let compCount = 0;
+  let compPeriod = "";
+  let compBlended = false;
+
+  // Lens (Oct 14, 2026): software deals with revenue on record are
+  // valued on a revenue multiple; everything else on EBITDA. A
+  // software deal with no revenue recorded stays on the EBITDA lens
+  // until revenue lands — a revenue multiple needs a revenue.
+  const isSoftware = /saas|software|tech/.test((deal.industry || "").toLowerCase());
+  let lens: "EBITDA" | "Revenue" = "EBITDA";
+
+  if (isSoftware && deal.revenue && deal.revenue > 0) {
+    let revBase = overallFor(group, "evRevenueMedian");
+    if (revBase !== null) {
+      lens = "Revenue";
+      base = revBase;
+      const s = supportFor(group, "evRevenueMedian");
+      support = s.count;
+      supportPeriod = s.period;
+      baseSource = `ExitValue — ${group ?? "All industries"} overall, ${band}`;
+      baseBasis = `${group ?? "All-industry"} overall EV/Revenue, ${band} private deals (ExitValue)`;
     } else if (group !== null) {
-      base = overallFor(null, "evEbitdaMedian");
-      if (base !== null) baseBasis = `All-industry overall EV/EBITDA, ${band} (no ${group} EBITDA median published)`;
+      revBase = overallFor(null, "evRevenueMedian");
+      if (revBase !== null) {
+        lens = "Revenue";
+        base = revBase;
+        baseIsBlend = true;
+        const s = supportFor(null, "evRevenueMedian");
+        support = s.count;
+        supportPeriod = s.period;
+        baseSource = `ExitValue — all-industry blend, ${band}`;
+        baseBasis = `All-industry overall EV/Revenue, ${band} (no ${group} revenue median published)`;
+      }
+    }
+    if (lens === "Revenue") {
+      const c = compFor("evRevenueMedian");
+      compCount = c.count;
+      compPeriod = c.period;
+      if (c.count >= 5 && c.med !== null) {
+        compBlended = true;
+        base = base !== null ? (base + c.med) / 2 : c.med;
+        baseSource = baseSource
+          ? `${baseSource} + Canny Comp Log (n=${c.count})`
+          : `Canny Comp Log (n=${c.count})`;
+        if (!baseBasis)
+          baseBasis = `Canny comp log EV/Revenue median, ${group}, ${band} (n=${c.count})`;
+      }
+    }
+  }
+
+  if (lens !== "Revenue") {
+    base = overallFor(group, "evEbitdaMedian");
+    if (base !== null) {
+      const s = supportFor(group, "evEbitdaMedian");
+      support = s.count;
+      supportPeriod = s.period;
+      baseSource = `ExitValue — ${group ?? "All industries"} overall, ${band}`;
+      baseBasis = `${group ?? "All-industry"} overall EV/EBITDA, ${band} private deals (ExitValue)`;
+    } else {
+      const rev = overallFor(group, "evRevenueMedian");
+      const margin =
+        deal.revenue && deal.ebitda && deal.revenue > 0 ? deal.ebitda / deal.revenue : null;
+      if (rev !== null && margin !== null && margin > 0) {
+        base = rev / margin;
+        const s = supportFor(group, "evRevenueMedian");
+        support = s.count;
+        supportPeriod = s.period;
+        baseSource = `ExitValue — derived from EV/Revenue, ${band}`;
+        baseBasis = `Derived: ${group ?? "all-industry"} EV/Revenue ${rev.toFixed(2)}× ÷ this deal's ${(margin * 100).toFixed(0)}% EBITDA margin`;
+      } else if (group !== null) {
+        base = overallFor(null, "evEbitdaMedian");
+        if (base !== null) {
+          baseIsBlend = true;
+          const s = supportFor(null, "evEbitdaMedian");
+          support = s.count;
+          supportPeriod = s.period;
+          baseSource = `ExitValue — all-industry blend, ${band}`;
+          baseBasis = `All-industry overall EV/EBITDA, ${band} (no ${group} EBITDA median published)`;
+        }
+      }
+    }
+    // Comp log (Oct 14, 2026): with ≥5 logged comps for the group +
+    // band, their median blends 50/50 into the base — or is the base
+    // when ExitValue publishes nothing for the band.
+    const c = compFor("evEbitdaMedian");
+    compCount = c.count;
+    compPeriod = c.period;
+    if (c.count >= 5 && c.med !== null) {
+      compBlended = true;
+      base = base !== null ? (base + c.med) / 2 : c.med;
+      baseSource = baseSource
+        ? `${baseSource} + Canny Comp Log (n=${c.count})`
+        : `Canny Comp Log (n=${c.count})`;
+      if (!baseBasis)
+        baseBasis = `Canny comp log EV/EBITDA median, ${group}, ${band} (n=${c.count})`;
     }
   }
   if (base === null || !isFinite(base) || base <= 0) return null;
+
+  const compSupport = support + compCount;
+  const confidence: "Low" | "Med" | "High" =
+    compSupport <= 2 ? "Low" : compSupport <= 6 ? "Med" : "High";
+  const sourcesUsed: string[] = [];
+  if (support > 0)
+    sourcesUsed.push(
+      `ExitValue private-deal multiples — ${group ?? "All industries"}, ${band}${supportPeriod ? ` (${supportPeriod})` : ""}`
+    );
+  if (compBlended)
+    sourcesUsed.push(
+      `Canny Comp Log — ${group}, ${band} (n=${compCount}${compPeriod ? `, ${compPeriod}` : ""})`
+    );
+
+  // The metric the dollar figures hang off: EBITDA normally,
+  // revenue on the revenue lens.
+  const metricVal = lens === "Revenue" ? deal.revenue ?? null : deal.ebitda ?? null;
 
   // Drivers. Measured metrics (Oct 11, 2026) supersede the matching
   // qualitative bucket: the adjustment scales continuously with the
@@ -515,6 +719,18 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
   driverAdj = Object.values(adjByKey).reduce((sum, v) => sum + (v ?? 0), 0) + interactionAdj;
   driverAdj = Math.max(-2, Math.min(2, driverAdj));
 
+  // Named per-driver impacts for the panel's summary line.
+  const driverImpacts: { label: string; adj: number }[] = [];
+  for (const def of DRIVER_DEFS) {
+    const a = adjByKey[def.key];
+    if (a !== undefined && a !== 0) driverImpacts.push({ label: def.label, adj: a });
+  }
+  if (interactionAdj !== 0)
+    driverImpacts.push({ label: "Concentration × owner dependence", adj: interactionAdj });
+  const largestDriver = driverImpacts.length
+    ? driverImpacts.reduce((m, d) => (Math.abs(d.adj) > Math.abs(m.adj) ? d : m))
+    : null;
+
   // Growth outlook — its own quantitative layer, separate from the
   // qualitative drivers: ~0.05× per point of projected annual
   // growth (10%/yr ≈ +0.5×), clamped to ±1.25×.
@@ -546,8 +762,8 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
       mix.earnout * pieces.earnout) /
     100;
 
-  const evLow = deal.ebitda ? cashEqLow * deal.ebitda : null;
-  const evHigh = deal.ebitda ? cashEqHigh * deal.ebitda : null;
+  const evLow = metricVal ? cashEqLow * metricVal : null;
+  const evHigh = metricVal ? cashEqHigh * metricVal : null;
 
   // The market estimate (effective): the market multiple run
   // through the USUAL deal structure at today's piece values,
@@ -578,16 +794,16 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
     statedEvLow = amountsTotal;
     statedEvHigh = amountsTotal;
     headlineSource = "sum of the structure amounts";
-    if (deal.ebitda) {
-      headlineLow = amountsTotal / deal.ebitda;
+    if (metricVal) {
+      headlineLow = amountsTotal / metricVal;
       headlineHigh = headlineLow;
     }
   } else if (deal.askingPrice && deal.askingPrice > 0) {
     statedEvLow = deal.askingPrice;
     statedEvHigh = deal.askingPrice;
     headlineSource = "asking price";
-    if (deal.ebitda) {
-      headlineLow = deal.askingPrice / deal.ebitda;
+    if (metricVal) {
+      headlineLow = deal.askingPrice / metricVal;
       headlineHigh = headlineLow;
     }
   }
@@ -599,15 +815,25 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
   const effMid = ((headlineLow + headlineHigh) / 2) * structureFactor;
   const gapHeadlineX = (headlineLow + headlineHigh) / 2 - mid;
   const gapEffectiveX = effMid - estimateEffMid;
-  const gapEffectiveDollars = deal.ebitda ? gapEffectiveX * deal.ebitda : null;
-  const effEvLow = deal.ebitda ? effLow * deal.ebitda : null;
-  const effEvHigh = deal.ebitda ? effHigh * deal.ebitda : null;
+  const gapEffectiveDollars = metricVal ? gapEffectiveX * metricVal : null;
+  const effEvLow = metricVal ? effLow * metricVal : null;
+  const effEvHigh = metricVal ? effHigh * metricVal : null;
 
   return {
     base,
     baseBasis,
     band,
     group,
+    lens,
+    baseSource,
+    baseIsBlend,
+    compSupport,
+    confidence,
+    compLogCount: compCount,
+    compBlended,
+    driverImpacts,
+    largestDriver,
+    sourcesUsed,
     driverAdj,
     growthAdj,
     growthNote,
@@ -647,3 +873,44 @@ export function estimateMultiple(deal: Deal, multiples: MiMultiple[], rates?: Ma
 }
 
 export { BANDS as VALUATION_BANDS };
+export { GROUPS as VALUATION_GROUPS };
+
+export function bandForDeal(deal: Deal): string {
+  return bandFor(deal);
+}
+
+/** The deal's stated price (Oct 14, 2026): the structure-amounts sum
+ * first — the same order the valuation engine's headline uses — then
+ * the asking price, then the manually recorded deal value. Null when
+ * no price is stated anywhere; never 0-as-a-price. */
+export function resolveStatedPrice(deal: Deal): number | null {
+  const { amountsTotal } = resolveStructure(deal, matchGroup(deal.industry));
+  if (amountsTotal !== null && amountsTotal > 0) return amountsTotal;
+  if (deal.askingPrice && deal.askingPrice > 0) return deal.askingPrice;
+  if (deal.dealValue && deal.dealValue > 0) return deal.dealValue;
+  return null;
+}
+
+export interface ResolvedDealValue {
+  value: number | null;
+  /** True when the value is the market-multiple estimate (EBITDA or
+   * revenue × market multiple), not a stated price. */
+  estimated: boolean;
+}
+
+/** The one Value every surface shows (Pipeline table, Overview stat
+ * cards, stage chart): stated price when present, else the estimated
+ * EV from the market multiple, else null → render "—", never $0. */
+export function resolveDealValue(
+  deal: Deal,
+  multiples: MiMultiple[],
+  rates?: MarketRates
+): ResolvedDealValue {
+  const stated = resolveStatedPrice(deal);
+  if (stated !== null) return { value: stated, estimated: false };
+  const est = estimateMultiple(deal, multiples, rates);
+  if (est && est.evLow !== null && est.evHigh !== null) {
+    return { value: (est.evLow + est.evHigh) / 2, estimated: true };
+  }
+  return { value: null, estimated: false };
+}
