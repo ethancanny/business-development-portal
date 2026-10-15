@@ -8,6 +8,7 @@ import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
  */
 
 export interface Investor {
+  photoUrl: string;
   id: string;
   name: string;
   firm: string;
@@ -57,9 +58,11 @@ async function ensure(): Promise<void> {
     status TEXT NOT NULL DEFAULT '',
     notes TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL DEFAULT '',
+    photo_url TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  await q`ALTER TABLE investors ADD COLUMN IF NOT EXISTS photo_url TEXT NOT NULL DEFAULT ''`;
   ensured = true;
 }
 
@@ -81,6 +84,7 @@ function rowToInvestor(r: Record<string, unknown>): Investor {
     status: str(r.status),
     notes: str(r.notes),
     source: str(r.source),
+    photoUrl: str(r.photo_url),
     createdAt: str(r.created_at),
     updatedAt: str(r.updated_at),
   };
@@ -96,8 +100,8 @@ export async function getInvestors(): Promise<Investor[]> {
 export async function upsertInvestor(inv: Omit<Investor, "createdAt" | "updatedAt">): Promise<void> {
   await ensure();
   const q = sql();
-  await q`INSERT INTO investors (id, name, firm, title, email, phone, website, investment_type, industry, ebitda_size, check_size, status, notes, source, updated_at)
-    VALUES (${inv.id}, ${inv.name}, ${inv.firm}, ${inv.title}, ${inv.email}, ${inv.phone}, ${inv.website}, ${inv.investmentType}, ${inv.industry}, ${inv.ebitdaSize}, ${inv.checkSize}, ${inv.status}, ${inv.notes}, ${inv.source}, now())
+  await q`INSERT INTO investors (id, name, firm, title, email, phone, website, investment_type, industry, ebitda_size, check_size, status, notes, source, photo_url, updated_at)
+    VALUES (${inv.id}, ${inv.name}, ${inv.firm}, ${inv.title}, ${inv.email}, ${inv.phone}, ${inv.website}, ${inv.investmentType}, ${inv.industry}, ${inv.ebitdaSize}, ${inv.checkSize}, ${inv.status}, ${inv.notes}, ${inv.source}, ${inv.photoUrl}, now())
     ON CONFLICT (id) DO UPDATE SET
       name = EXCLUDED.name,
       firm = EXCLUDED.firm,
@@ -112,6 +116,7 @@ export async function upsertInvestor(inv: Omit<Investor, "createdAt" | "updatedA
       status = EXCLUDED.status,
       notes = EXCLUDED.notes,
       source = EXCLUDED.source,
+      photo_url = EXCLUDED.photo_url,
       updated_at = now()`;
 }
 

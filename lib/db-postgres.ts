@@ -156,6 +156,10 @@ export function ensureSchema(): Promise<void> {
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS metrics JSONB NOT NULL DEFAULT '{}'`;
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS synthesis JSONB`;
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS pass_reason TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE executives ADD COLUMN IF NOT EXISTS photo_url TEXT NOT NULL DEFAULT ''`;
       /* ---- Market Intel tables ---- */
       await db`
         CREATE TABLE IF NOT EXISTS mi_indicators (
@@ -376,6 +380,7 @@ function rowToDeal(r: Record<string, unknown>): Deal {
         ? null
         : Number(r.asking_price),
     broker: String(r.broker ?? ""),
+    passReason: String(r.pass_reason ?? ""),
     source: String(r.source ?? ""),
     drivers:
       r.drivers && typeof r.drivers === "object"
@@ -414,7 +419,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
         INSERT INTO deals (
           id, company_name, industry, stage, deal_value, contact_name,
           contact_email, notes, owner, city, lat, lng, links, operator_ids,
-          revenue, ebitda, asking_price, growth_pct, broker, source, drivers, structure,
+          revenue, ebitda, asking_price, growth_pct, broker, pass_reason, source, drivers, structure,
           metrics, synthesis, created_at, updated_at
         ) VALUES (
           ${d.id}, ${d.companyName}, ${d.industry}, ${d.stage},
@@ -423,7 +428,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           ${JSON.stringify(d.links ?? [])},
           ${JSON.stringify(d.operatorIds ?? [])},
           ${d.revenue}, ${d.ebitda}, ${d.askingPrice}, ${d.growthPct ?? null},
-          ${d.broker ?? ""}, ${d.source ?? ""},
+          ${d.broker ?? ""}, ${d.passReason ?? ""}, ${d.source ?? ""},
           ${JSON.stringify(d.drivers ?? {})},
           ${JSON.stringify(d.structure ?? {})},
           ${JSON.stringify(d.metrics ?? {})},
@@ -448,6 +453,7 @@ function rowToExec(r: Record<string, unknown>): Executive {
     industries: Array.isArray(r.industries)
       ? (r.industries as string[])
       : [],
+    photoUrl: String(r.photo_url ?? ""),
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
@@ -468,11 +474,11 @@ export async function saveExecutives(execs: Executive[]): Promise<void> {
       (e) => tx`
         INSERT INTO executives (
           id, name, current_title, target_role, stage, background,
-          notes, owner, industries, created_at, updated_at
+          notes, owner, industries, photo_url, created_at, updated_at
         ) VALUES (
           ${e.id}, ${e.name}, ${e.currentTitle}, ${e.targetRole},
           ${e.stage}, ${e.background}, ${e.notes}, ${e.owner},
-          ${JSON.stringify(e.industries ?? [])},
+          ${JSON.stringify(e.industries ?? [])}, ${e.photoUrl ?? ""},
           ${e.createdAt}, ${e.updatedAt}
         )`
     ),

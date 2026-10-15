@@ -114,6 +114,8 @@ export interface Deal {
   broker: string;
   /** How this target was sourced. */
   source: string;
+  /** Structured pass reason (set when stage = Passed). */
+  passReason?: string;
   contactName: string;
   contactEmail: string;
   notes: string;
@@ -151,6 +153,8 @@ export interface Executive {
   owner: string;
   /** Industry / sector expertise, e.g. ["Industrial Services", "Healthcare"]. */
   industries: string[];
+  /** Optional photo URL (initials avatar otherwise). */
+  photoUrl?: string;
   createdAt: string;
   updatedAt: string;
 }

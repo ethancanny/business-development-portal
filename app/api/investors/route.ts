@@ -33,6 +33,7 @@ function clean(body: Record<string, unknown>): InvestorInput {
     status: s("status"),
     notes: s("notes"),
     source: s("source"),
+    photoUrl: s("photoUrl"),
   };
 }
 

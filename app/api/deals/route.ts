@@ -136,6 +136,7 @@ export async function POST(req: NextRequest) {
     growthPct: body.growthPct === null || body.growthPct === undefined || body.growthPct === "" ? null : Math.max(-60, Math.min(150, Number(body.growthPct) || 0)) || null,
     askingPrice: body.askingPrice === null || body.askingPrice === undefined || body.askingPrice === "" ? null : Number(body.askingPrice) || null,
     broker: String(body.broker ?? "").trim(),
+    passReason: String(body.passReason ?? "").trim(),
     source: String(body.source ?? "").trim(),
     drivers: parseDrivers(body.drivers),
     structure: parseStructure(body.structure),
