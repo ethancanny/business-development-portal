@@ -2,6 +2,10 @@
 
 import { useMemo, useState } from "react";
 import type { Deal, Executive } from "@/lib/types";
+import PersonAvatar from "@/components/PersonAvatar";
+import SectorChip, { StageChip } from "@/components/SectorChip";
+import { agingColor } from "@/lib/sector-colors";
+import { dealFocusSector } from "@/lib/valuation";
 
 type SortKey =
   | "name"
@@ -90,7 +94,10 @@ export default function ExecTable({
                 className="cursor-pointer border-b border-slate-100 transition hover:bg-slate-50 last:border-0 dark:border-white/5 dark:hover:bg-white/5"
               >
                 <td className="px-3 py-2.5 font-semibold text-slate-900 dark:text-white">
-                  {e.name}
+                  <span className="flex items-center gap-2">
+                    <PersonAvatar name={e.name} />
+                    {e.name}
+                  </span>
                 </td>
                 <td className="px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
                   {e.currentTitle || "—"}
@@ -99,20 +106,30 @@ export default function ExecTable({
                   {e.targetRole || "—"}
                 </td>
                 <td className="px-3 py-2.5">
-                  <span className="rounded-full bg-[#0d1f3c] px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
-                    {e.stage}
-                  </span>
+                  <StageChip stage={e.stage} />
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
                   {e.owner || <span className="text-slate-400">Unclaimed</span>}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-slate-500 dark:text-white/40">
+                <td
+                  className="whitespace-nowrap px-3 py-2.5"
+                  style={{
+                    color: agingColor(
+                      Math.floor((Date.now() - new Date(e.updatedAt).getTime()) / 86400000),
+                      60,
+                      90
+                    ),
+                  }}
+                  title="No-touch decay — amber at 60 days, red at 90"
+                >
                   {fmtDateShort(e.updatedAt)}
                 </td>
                 <td className="px-3 py-2.5">
                   {e.industries && e.industries.length > 0 ? (
-                    <span className="text-xs text-slate-500 dark:text-white/50">
-                      {e.industries.join(", ")}
+                    <span className="flex flex-wrap gap-1">
+                      {e.industries.map((ind) => (
+                        <SectorChip key={ind} sector={dealFocusSector(ind) ?? ind} />
+                      ))}
                     </span>
                   ) : (
                     <span className="text-xs text-slate-400">—</span>

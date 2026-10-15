@@ -4,7 +4,19 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Deal, Executive, MiMultiple } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
-import { estimateMultiple, isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
+import { dealFocusSector, estimateMultiple, isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
+import CompanyLogo from "@/components/CompanyLogo";
+import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
+import { agingColor } from "@/lib/sector-colors";
+
+/** A deal's website, when one of its links is plainly the company site. */
+export function dealWebsite(d: Deal): string | undefined {
+  const links = d.links ?? [];
+  const named = links.find((l) => /website|web site|site|homepage/i.test(l.label || ""));
+  if (named?.url) return named.url;
+  if (links.length === 1 && /^https?:\/\//i.test(links[0].url)) return links[0].url;
+  return undefined;
+}
 
 type SortKey = "companyName" | "industry" | "stage" | "dealValue" | "ebitda" | "estMultiple" | "owner" | "updatedAt";
 
@@ -77,10 +89,25 @@ export default function DealTable({
 
   const opName = (id: string) => execs.find((e) => e.id === id)?.name ?? "—";
 
+  const legendSectors = useMemo(() => {
+    const seen: string[] = [];
+    for (const d of deals) {
+      const s = dealFocusSector(d.industry);
+      if (s && !seen.includes(s)) seen.push(s);
+    }
+    return seen;
+  }, [deals]);
+
   const thCls =
     "cursor-pointer select-none whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-800 dark:text-white/50 dark:hover:text-white";
 
   return (
+    <div>
+      {legendSectors.length > 1 && (
+        <div className="mb-2 px-1">
+          <SectorLegend sectors={legendSectors} />
+        </div>
+      )}
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-[#132847]">
       <table className="w-full min-w-[900px] border-collapse text-sm">
         <thead>
@@ -108,31 +135,44 @@ export default function DealTable({
               className="cursor-pointer border-b border-slate-100 transition hover:bg-slate-50 last:border-0 dark:border-white/5 dark:hover:bg-white/5"
             >
               <td className="px-3 py-2.5">
-                <Link
-                  href={`/deals/${d.id}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="font-semibold text-slate-900 hover:underline dark:text-white"
-                >
-                  {d.companyName}
-                </Link>
-                {d.city && (
-                  <span className="block text-xs text-slate-400 dark:text-white/40">
-                    {d.city}
+                <span className="flex items-center gap-2">
+                  <CompanyLogo
+                    name={d.companyName}
+                    website={dealWebsite(d)}
+                    sector={dealFocusSector(d.industry) ?? d.industry}
+                  />
+                  <span>
+                    <Link
+                      href={`/deals/${d.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="font-semibold text-slate-900 hover:underline dark:text-white"
+                    >
+                      {d.companyName}
+                    </Link>
+                    {d.city && (
+                      <span className="block text-xs text-slate-400 dark:text-white/40">
+                        {d.city}
+                      </span>
+                    )}
                   </span>
-                )}
+                </span>
               </td>
               <td className="px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
-                {d.industry || "—"}
-                {d.industry && !isFocusDeal(d.industry) && (
-                  <span className="ml-1.5 inline-block rounded-full bg-slate-100 px-1.5 py-px align-middle text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-white/50">
-                    Non-focus
+                {d.industry ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
+                    {!isFocusDeal(d.industry) && (
+                      <span className="inline-block rounded-full bg-slate-100 px-1.5 py-px align-middle text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-white/50">
+                        Non-focus
+                      </span>
+                    )}
                   </span>
+                ) : (
+                  "—"
                 )}
               </td>
               <td className="px-3 py-2.5">
-                <span className="rounded-full bg-[#0d1f3c] px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
-                  {d.stage}
-                </span>
+                <StageChip stage={d.stage} />
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700 dark:text-[#e8dfc8]">
                 {(() => {
@@ -176,7 +216,15 @@ export default function DealTable({
               <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
                 {d.owner || <span className="text-slate-400">Unclaimed</span>}
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-slate-500 dark:text-white/40">
+              <td
+                className="whitespace-nowrap px-3 py-2.5"
+                style={{
+                  color: agingColor(
+                    Math.floor((Date.now() - new Date(d.updatedAt).getTime()) / 86400000)
+                  ),
+                }}
+                title="Deal staleness — amber at 30 days untouched, red at 90"
+              >
                 {fmtDateShort(d.updatedAt)}
               </td>
               <td className="px-3 py-2.5">
@@ -211,6 +259,7 @@ export default function DealTable({
           )}
         </tbody>
       </table>
+    </div>
     </div>
   );
 }

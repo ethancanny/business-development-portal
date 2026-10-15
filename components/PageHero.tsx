@@ -1,19 +1,38 @@
+import { BANNER_DARK, BANNER_LIGHT } from "@/lib/sector-colors";
+
 interface PageHeroProps {
   eyebrow?: string;
   title: string;
   subtitle?: string;
 }
 
+/**
+ * Page banner. Height/layout are fixed (h-36 sm:h-44) — Ethan, Oct 14,
+ * 2026: do not change them. Theme-aware imagery via the app's `.dark`
+ * class: the desert photo in light mode, the uploaded night-sky photo
+ * in dark mode, with a deeper dark gradient (left + bottom) so titles
+ * stay readable over the stars. Both images lazy-load.
+ */
 export default function PageHero({ eyebrow, title, subtitle }: PageHeroProps) {
   return (
     <div className="relative h-36 overflow-hidden sm:h-44">
       <img
-        src="https://cannycapitalpartners.com/arizona-desert-hero.jpg"
+        src={BANNER_LIGHT}
         alt=""
-        className="absolute inset-0 h-full w-full object-cover"
+        loading="lazy"
+        className="absolute inset-0 h-full w-full object-cover dark:hidden"
+      />
+      <img
+        src={BANNER_DARK}
+        alt=""
+        loading="lazy"
+        className="absolute inset-0 hidden h-full w-full object-cover dark:block"
       />
       <div className="absolute inset-0 bg-gradient-to-r from-[#0d1f3c] via-[#0d1f3c]/55 to-[#0d1f3c]/10" />
       <div className="absolute inset-0 bg-gradient-to-t from-[#0d1f3c]/60 via-transparent to-transparent" />
+      {/* Dark mode only: extra depth over the night sky (~40–60%). */}
+      <div className="absolute inset-0 hidden bg-gradient-to-r from-[#040b1a]/60 via-[#040b1a]/25 to-transparent dark:block" />
+      <div className="absolute inset-0 hidden bg-gradient-to-t from-[#040b1a]/50 via-transparent to-transparent dark:block" />
       <div className="relative mx-auto flex h-full max-w-[1400px] flex-col justify-center px-4 sm:px-6">
         {eyebrow && (
           <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-[#d4b37a]">

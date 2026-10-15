@@ -1,3 +1,5 @@
+import { stageColor } from "@/lib/sector-colors";
+
 interface KanbanBoardProps<T> {
   stages: readonly string[];
   items: T[];
@@ -27,7 +29,13 @@ export default function KanbanBoard<T>({
             className="w-72 shrink-0 rounded-xl border border-slate-200 bg-slate-200/70 p-3 dark:border-white/10 dark:bg-[#132847]"
           >
             <div className="mb-3 flex items-center justify-between px-1">
-              <h3 className="text-sm font-semibold text-slate-700 dark:text-white">{stage}</h3>
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-white">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: stageColor(stage) }}
+                />
+                {stage}
+              </h3>
               <span className="rounded-full bg-slate-300 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-white/10 dark:text-[#c8bfa8]">
                 {column.length}
               </span>

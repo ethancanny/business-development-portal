@@ -4,7 +4,11 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Deal, Executive, MiMultiple } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
-import { resolveDealValue, type MarketRates } from "@/lib/valuation";
+import { dealFocusSector, resolveDealValue, type MarketRates } from "@/lib/valuation";
+import CompanyLogo from "@/components/CompanyLogo";
+import PersonAvatar from "@/components/PersonAvatar";
+import SectorChip, { StageChip } from "@/components/SectorChip";
+import { dealWebsite } from "@/components/DealTable";
 
 export interface Pairing {
   deal: Deal;
@@ -115,18 +119,23 @@ export default function PairingTable({
               className="cursor-pointer border-b border-slate-100 transition hover:bg-slate-50 last:border-0 dark:border-white/5 dark:hover:bg-white/5"
             >
               <td className="px-3 py-2.5">
-                <Link
-                  href={`/deals/${d.id}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="font-semibold text-slate-900 hover:underline dark:text-white"
-                >
-                  {d.companyName}
-                </Link>
+                <span className="flex items-center gap-2">
+                  <CompanyLogo
+                    name={d.companyName}
+                    website={dealWebsite(d)}
+                    sector={dealFocusSector(d.industry) ?? d.industry}
+                  />
+                  <Link
+                    href={`/deals/${d.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="font-semibold text-slate-900 hover:underline dark:text-white"
+                  >
+                    {d.companyName}
+                  </Link>
+                </span>
               </td>
               <td className="px-3 py-2.5">
-                <span className="rounded-full bg-[#0d1f3c] px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
-                  {d.stage}
-                </span>
+                <StageChip stage={d.stage} />
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700 dark:text-[#e8dfc8]">
                 {(() => {
@@ -137,17 +146,26 @@ export default function PairingTable({
                 })()}
               </td>
               <td className="px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
-                {d.industry || "—"}
+                {d.industry ? (
+                  <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
+                ) : (
+                  "—"
+                )}
               </td>
               <td className="px-3 py-2.5">
-                <span className="font-semibold text-slate-900 dark:text-white">
-                  {op.name}
-                </span>
-                {op.currentTitle && (
-                  <span className="block text-xs text-slate-500 dark:text-white/50">
-                    {op.currentTitle}
+                <span className="flex items-center gap-2">
+                  <PersonAvatar name={op.name} />
+                  <span>
+                    <span className="font-semibold text-slate-900 dark:text-white">
+                      {op.name}
+                    </span>
+                    {op.currentTitle && (
+                      <span className="block text-xs text-slate-500 dark:text-white/50">
+                        {op.currentTitle}
+                      </span>
+                    )}
                   </span>
-                )}
+                </span>
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
                 {d.owner || <span className="text-slate-400">Unclaimed</span>}
