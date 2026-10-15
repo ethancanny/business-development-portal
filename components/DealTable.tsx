@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Deal, Executive, MiMultiple } from "@/lib/types";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, uniqueStrings } from "@/lib/format";
 import { dealFocusSector, estimateMultiple, isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
 import CompanyLogo from "@/components/CompanyLogo";
 import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
@@ -230,7 +230,7 @@ export default function DealTable({
               <td className="px-3 py-2.5">
                 {d.operatorIds && d.operatorIds.length > 0 ? (
                   <span className="flex flex-wrap gap-1">
-                    {d.operatorIds.map((oid) => (
+                    {uniqueStrings(d.operatorIds).map((oid) => (
                       <span
                         key={oid}
                         className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-500/20 dark:text-violet-200"
@@ -349,7 +349,7 @@ export default function DealTable({
             </div>
             {d.operatorIds && d.operatorIds.length > 0 ? (
               <div className="mt-2 flex flex-wrap gap-1">
-                {d.operatorIds.map((oid) => (
+                {uniqueStrings(d.operatorIds).map((oid) => (
                   <span
                     key={oid}
                     className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-500/20 dark:text-violet-200"

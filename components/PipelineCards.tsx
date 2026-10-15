@@ -1,7 +1,7 @@
 "use client";
 
 import type { Deal, Executive, MiMultiple } from "@/lib/types";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney, uniqueStrings } from "@/lib/format";
 import {
   dealFocusSector,
   estimateMultiple,
@@ -170,7 +170,7 @@ export function ExecCardGrid({
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <StageChip stage={e.stage} />
-            {(e.industries ?? []).slice(0, 3).map((ind) => (
+            {uniqueStrings(e.industries ?? []).slice(0, 3).map((ind) => (
               <SectorChip key={ind} sector={dealFocusSector(ind) ?? ind} />
             ))}
           </div>

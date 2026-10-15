@@ -5,6 +5,7 @@ import type { Deal, Executive } from "@/lib/types";
 import PersonAvatar from "@/components/PersonAvatar";
 import SectorChip, { StageChip } from "@/components/SectorChip";
 import { agingColor } from "@/lib/sector-colors";
+import { uniqueStrings } from "@/lib/format";
 import { dealFocusSector } from "@/lib/valuation";
 
 type SortKey =
@@ -128,7 +129,7 @@ export default function ExecTable({
                 <td className="px-3 py-2.5">
                   {e.industries && e.industries.length > 0 ? (
                     <span className="flex flex-wrap gap-1">
-                      {e.industries.map((ind) => (
+                      {uniqueStrings(e.industries).map((ind) => (
                         <SectorChip key={ind} sector={dealFocusSector(ind) ?? ind} />
                       ))}
                     </span>
@@ -198,7 +199,7 @@ export default function ExecTable({
             </div>
             {e.industries && e.industries.length > 0 && (
               <div className="mt-2.5 flex flex-wrap gap-1">
-                {e.industries.map((ind) => (
+                {uniqueStrings(e.industries).map((ind) => (
                   <SectorChip key={ind} sector={dealFocusSector(ind) ?? ind} />
                 ))}
               </div>

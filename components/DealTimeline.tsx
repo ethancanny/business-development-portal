@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ActivityEvent, Deal, Interaction } from "@/lib/types";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, dedupeSourceTokens } from "@/lib/format";
 import { stageColor } from "@/lib/sector-colors";
 
 /**
@@ -173,7 +173,7 @@ export default function DealTimeline({
       labelCls: "bg-slate-200 text-slate-600 dark:bg-white/10 dark:text-white/60",
       dot: "#94A3B8",
       text: "Record created",
-      sub: deal.source ? `Sourced via ${deal.source}` : undefined,
+      sub: deal.source ? `Sourced via ${dedupeSourceTokens(deal.source)}` : undefined,
     });
 
     return list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
