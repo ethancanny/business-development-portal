@@ -7,7 +7,7 @@
  * page when the network is unreachable.
  */
 
-const CACHE = "ccp-shell-v1";
+const CACHE = "ccp-shell-v2";
 
 const SHELL_ASSETS = [
   "/offline",
