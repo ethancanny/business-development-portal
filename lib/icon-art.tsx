@@ -62,7 +62,7 @@ export async function iconResponse(
   emblemScale = 1
 ): Promise<ImageResponse> {
   const fonts = await loadFonts();
-  const box = Math.round(size * 0.76 * emblemScale);
+  const box = Math.round(size * 0.64 * emblemScale);
   return new ImageResponse(
     (
       <div
@@ -107,7 +107,7 @@ export async function iconResponse(
             style={{
               width: box,
               height: box,
-              borderWidth: Math.max(2, Math.round(size * 0.02 * emblemScale)),
+              borderWidth: Math.max(2, Math.round(box * 0.026)),
               borderStyle: "solid",
               borderColor: "#ffffff",
               display: "flex",
@@ -119,10 +119,10 @@ export async function iconResponse(
               style={{
                 fontFamily: fonts ? "Cormorant Garamond" : "serif",
                 fontWeight: 600,
-                fontSize: Math.round(size * 0.52 * emblemScale),
+                fontSize: Math.round(box * 0.684),
                 color: "#ffffff",
                 lineHeight: 1,
-                marginTop: Math.round(size * -0.026 * emblemScale),
+                marginTop: Math.round(box * -0.034),
               }}
             >
               C
