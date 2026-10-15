@@ -35,7 +35,7 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: "https://cannycapitalpartners.com/canny-favicon.png",
-    apple: "/apple-touch-icon-v3",
+    apple: "/apple-touch-icon-v4",
   },
 };
 
