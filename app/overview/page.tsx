@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import TaskList from "@/components/TaskList";
 import PageHero from "@/components/PageHero";
+import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
 import type { Investor } from "@/lib/investors-db";
@@ -146,6 +147,23 @@ export default function Overview() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pull-to-refresh (mobile PWA).
+  const { pull, refreshing } = usePullToRefresh(load);
+
+  // The FAB's "Add follow-up" lands here with ?newtask=1: scroll to the
+  // task form and focus its input.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("newtask") !== "1") return;
+    const t = setTimeout(() => {
+      const el = document.getElementById("overview-tasks");
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      const input = el.querySelector<HTMLInputElement>("input");
+      if (input) input.focus({ preventScroll: true });
+    }, 400);
+    return () => clearTimeout(t);
   }, []);
 
   const activeDeals = useMemo(
@@ -653,6 +671,13 @@ export default function Overview() {
         subtitle="The state of the firm's pipeline at a glance."
       />
       <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+      {(pull > 8 || refreshing) && (
+        <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center">
+          <span className="rounded-full bg-[#0d1f3c] px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg">
+            {pullPillLabel(pull, refreshing)}
+          </span>
+        </div>
+      )}
 
       {/* Stat cards — thin accent top border per card (navy/gold/
           sector tones; aging hues stay reserved for staleness). */}
@@ -883,7 +908,7 @@ export default function Overview() {
 
       {/* Tasks & follow-ups — directly below the Weekly summary's
           Important dates (Ethan, Oct 9, 2026) */}
-      <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
+      <section id="overview-tasks" className="mb-6 scroll-mt-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
         <h2 className="mb-4 text-base font-bold text-[#0d1f3c] dark:text-white">
           Tasks &amp; follow-ups
         </h2>
