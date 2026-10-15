@@ -61,7 +61,7 @@ export default function AnalyticsPage() {
   const [fitCounts, setFitCounts] = useState<Record<string, number>>({});
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [tab, setTab] = useState<"pipeline" | "sourcing" | "relationships" | "market">("pipeline");
-  const [winDays, setWinDays] = useState<30 | 90 | 365>(90);
+  const [winDays, setWinDays] = useState<30 | 90 | 365>(30);
 
   useEffect(() => {
     (async () => {

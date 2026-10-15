@@ -229,16 +229,6 @@ export default function Dashboard() {
           {(
             <div className="flex shrink-0 overflow-hidden rounded-lg border border-slate-200 dark:border-white/15">
               <button
-                onClick={() => setView("kanban")}
-                className={`px-3 py-2 text-sm font-semibold transition ${
-                  view === "kanban"
-                    ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
-                    : "bg-white text-slate-500 hover:bg-slate-100 dark:bg-transparent dark:text-white/60"
-                }`}
-              >
-                Kanban
-              </button>
-              <button
                 onClick={() => setView("table")}
                 className={`px-3 py-2 text-sm font-semibold transition ${
                   view === "table"
@@ -247,6 +237,16 @@ export default function Dashboard() {
                 }`}
               >
                 Table
+              </button>
+              <button
+                onClick={() => setView("kanban")}
+                className={`px-3 py-2 text-sm font-semibold transition ${
+                  view === "kanban"
+                    ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                    : "bg-white text-slate-500 hover:bg-slate-100 dark:bg-transparent dark:text-white/60"
+                }`}
+              >
+                Kanban
               </button>
             </div>
           )}

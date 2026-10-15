@@ -22,8 +22,8 @@ const KIND_META: Record<DealFlowKind, { label: string; cls: string }> = {
 };
 
 const STATUS_FILTERS: ("all" | DealFlowStatus)[] = [
-  "all",
   "new",
+  "all",
   "reviewed",
   "added",
   "dismissed",
