@@ -5,10 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
 import { fmtMoney } from "@/lib/format";
-import type { Deal, Executive } from "@/lib/types";
+import type { Deal, Executive, Interaction } from "@/lib/types";
 import type { Investor } from "@/lib/investors-db";
 import CompanyLogo from "@/components/CompanyLogo";
 import PersonAvatar from "@/components/PersonAvatar";
+import DirectoryGrid from "@/components/DirectoryGrid";
 import { ExecutiveModal } from "@/components/Modals";
 import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
 import { SECTOR_COLORS } from "@/lib/sector-colors";
@@ -59,15 +60,38 @@ export default function Directory() {
   const [sel, setSel] = useState<{ kind: string; id: string } | null>(null);
   const [execModal, setExecModal] = useState<{ exec: Executive | null } | null>(null);
   const [touchMode, setTouchMode] = useState(false);
+  // List | Grid view (Wave 3): List is the default; the choice
+  // persists in localStorage — it never reorders the control.
+  const [view, setView] = useState<"list" | "grid">("list");
+  const [interactions, setInteractions] = useState<Interaction[]>([]);
+
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem("ccp-dir-view");
+      if (v === "grid" || v === "list") setView(v);
+    } catch {
+      /* storage unavailable — stay on List */
+    }
+  }, []);
+
+  const chooseView = (v: "list" | "grid") => {
+    setView(v);
+    try {
+      window.localStorage.setItem("ccp-dir-view", v);
+    } catch {
+      /* non-fatal */
+    }
+  };
 
   useEffect(() => {
     (async () => {
       try {
-        const [meRes, dealsRes, execsRes, invRes] = await Promise.all([
+        const [meRes, dealsRes, execsRes, invRes, ixRes] = await Promise.all([
           fetch("/api/auth/me"),
           fetch("/api/deals"),
           fetch("/api/executives"),
           fetch("/api/investors"),
+          fetch("/api/interactions"),
         ]);
         if (meRes.status === 401 || dealsRes.status === 401) {
           router.replace("/login");
@@ -75,6 +99,10 @@ export default function Directory() {
         }
         if (dealsRes.ok) setDeals(await dealsRes.json());
         if (execsRes.ok) setExecs(await execsRes.json());
+        if (ixRes.ok) {
+          const ix = await ixRes.json();
+          if (Array.isArray(ix)) setInteractions(ix);
+        }
         if (invRes.ok) {
           const d = await invRes.json();
           if (Array.isArray(d.investors)) setInvestors(d.investors);
@@ -180,6 +208,57 @@ export default function Directory() {
     ? deals.filter((d) => (d.operatorIds ?? []).indexOf(selExec.id) >= 0)
     : [];
 
+  // Last touch (established semantics, same as Overview): the latest
+  // logged interaction for the record, falling back to the record's
+  // updatedAt. Investors have no interactions — updatedAt is their
+  // last-touch date. No record type carries a next-step field.
+  const lastTouchByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    interactions.forEach((ix) => {
+      const key = ix.dealId ? `deal:${ix.dealId}` : ix.execId ? `exec:${ix.execId}` : null;
+      if (!key) return;
+      const cur = m.get(key);
+      if (!cur || ix.occurredAt > cur) m.set(key, ix.occurredAt);
+    });
+    return m;
+  }, [interactions]);
+
+  const lastTouchFor = (kind: Entry["kind"], id: string): string | null => {
+    const rec =
+      kind === "operator"
+        ? execs.find((x) => x.id === id)
+        : kind === "business"
+          ? deals.find((x) => x.id === id)
+          : investors.find((x) => x.id === id);
+    const updated = rec?.updatedAt ?? null;
+    if (kind === "investor") return updated;
+    const ixMax = lastTouchByKey.get(`${kind === "operator" ? "exec" : "deal"}:${id}`) ?? null;
+    if (ixMax && updated) {
+      return new Date(ixMax).getTime() >= new Date(updated).getTime() ? ixMax : updated;
+    }
+    return ixMax ?? updated;
+  };
+
+  // One click behavior for list rows and grid cards alike (including
+  // the FAB "log a touch" mode, which opens the operator's record).
+  const handleEntryClick = (e: { kind: Entry["kind"]; id: string }, fromGrid = false) => {
+    if (touchMode && e.kind === "operator") {
+      const ex = execs.find((x) => x.id === e.id);
+      if (ex) {
+        setExecModal({ exec: ex });
+        return;
+      }
+    }
+    setSel({ kind: e.kind, id: e.id });
+    if (fromGrid) {
+      requestAnimationFrame(() => {
+        document
+          .getElementById("dir-profile")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  };
+
   const group = (kind: Entry["kind"]) => {
     const rows = filtered.filter((e) => e.kind === kind);
     if (rows.length === 0) return null;
@@ -191,16 +270,7 @@ export default function Directory() {
             return (
               <li key={`${e.kind}-${e.id}`}>
                 <button
-                  onClick={() => {
-                    if (touchMode && e.kind === "operator") {
-                      const ex = execs.find((x) => x.id === e.id);
-                      if (ex) {
-                        setExecModal({ exec: ex });
-                        return;
-                      }
-                    }
-                    setSel({ kind: e.kind, id: e.id });
-                  }}
+                  onClick={() => handleEntryClick(e)}
                   className={`w-full rounded-xl border px-3 py-2.5 text-left transition ${
                     active
                       ? "border-[#b8975a] bg-[#b8975a]/10 ring-1 ring-[#b8975a]"
@@ -268,7 +338,9 @@ export default function Directory() {
         {loading ? (
           <p className="text-sm text-slate-400 dark:text-white/40">Loading directory…</p>
         ) : (
-          <div className="grid items-start gap-6 lg:grid-cols-[380px_1fr]">
+          <div
+            className={`grid items-start gap-6 ${view === "list" ? "lg:grid-cols-[380px_1fr]" : ""}`}
+          >
             <div>
               {touchMode && (
                 <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[#b8975a]/50 bg-[#b8975a]/10 px-3.5 py-2.5">
@@ -289,7 +361,7 @@ export default function Directory() {
                 placeholder="Search people, companies, industries…"
                 className="mb-4 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-[#0d1f3c] outline-none placeholder:text-slate-300 focus:border-[#b8975a] dark:border-white/10 dark:bg-[#132847]/60 dark:text-white dark:placeholder:text-white/30"
               />
-              <div className="mb-4 flex gap-2">
+              <div className="mb-4 flex flex-wrap gap-2">
                 {(
                   [
                     ["operator", "Operators"],
@@ -309,6 +381,26 @@ export default function Directory() {
                     {label} · {entries.filter((e) => e.kind === k).length}
                   </button>
                 ))}
+                <div className="ml-auto flex shrink-0 overflow-hidden rounded-lg border border-slate-200 dark:border-white/15">
+                  {(
+                    [
+                      ["list", "List"],
+                      ["grid", "Grid"],
+                    ] as const
+                  ).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => chooseView(v)}
+                      className={`px-3 py-1.5 text-sm font-semibold transition ${
+                        view === v
+                          ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                          : "bg-white text-slate-500 hover:bg-slate-100 dark:bg-transparent dark:text-white/60"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
               {(() => {
                 const present: string[] = [];
@@ -322,7 +414,19 @@ export default function Directory() {
                   </div>
                 ) : null;
               })()}
-              {group(tab)}
+              {view === "list" ? (
+                group(tab)
+              ) : (
+                <DirectoryGrid
+                  entries={visible}
+                  execs={execs}
+                  deals={deals}
+                  investors={investors}
+                  selected={sel && sel.kind === tab ? sel : selected ? { kind: selected.kind, id: selected.id } : null}
+                  lastTouchFor={lastTouchFor}
+                  onSelect={(e) => handleEntryClick(e, true)}
+                />
+              )}
               {visible.length === 0 && (
                 <p className="text-sm text-slate-400 dark:text-white/40">
                   Nothing here matches that search.
@@ -330,7 +434,10 @@ export default function Directory() {
               )}
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 lg:sticky lg:top-4">
+            <div
+              id="dir-profile"
+              className="scroll-mt-20 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 lg:sticky lg:top-4"
+            >
               {!selected ? (
                 <p className="text-sm text-slate-400 dark:text-white/40">
                   No profiles yet — operators and businesses appear here as they enter the

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import KanbanBoard from "@/components/KanbanBoard";
 import DealTable from "@/components/DealTable";
 import ExecTable from "@/components/ExecTable";
+import { DealCardGrid, ExecCardGrid, PairingCardGrid } from "@/components/PipelineCards";
 import PairingTable, { type Pairing } from "@/components/PairingTable";
 import { DealModal, ExecutiveModal } from "@/components/Modals";
 import PageHero from "@/components/PageHero";
@@ -20,7 +21,7 @@ export default function Dashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"deals" | "execs" | "paired">("deals");
-  const [view, setView] = useState<"kanban" | "table">("table");
+  const [view, setView] = useState<"kanban" | "table" | "cards">("table");
   const [deals, setDeals] = useState<Deal[]>([]);
   const [execs, setExecs] = useState<Executive[]>([]);
   const [search, setSearch] = useState("");
@@ -248,6 +249,16 @@ export default function Dashboard() {
               >
                 Kanban
               </button>
+              <button
+                onClick={() => setView("cards")}
+                className={`px-3 py-2 text-sm font-semibold transition ${
+                  view === "cards"
+                    ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                    : "bg-white text-slate-500 hover:bg-slate-100 dark:bg-transparent dark:text-white/60"
+                }`}
+              >
+                Cards
+              </button>
             </div>
           )}
           <input
@@ -297,6 +308,13 @@ export default function Dashboard() {
               onSelect={(d) => setDealModal({ deal: d })}
               multiples={multiples}
               rates={{ prime: primeRate, sba: sbaRate }}
+            />
+          ) : view === "cards" ? (
+            <DealCardGrid
+              deals={filteredDeals}
+              multiples={multiples}
+              rates={{ prime: primeRate, sba: sbaRate }}
+              onSelect={(d) => setDealModal({ deal: d })}
             />
           ) : (
           <KanbanBoard<Deal>
@@ -363,6 +381,11 @@ export default function Dashboard() {
               deals={deals}
               onSelect={(e) => setExecModal({ exec: e })}
             />
+          ) : view === "cards" ? (
+            <ExecCardGrid
+              execs={filteredExecs}
+              onSelect={(e) => setExecModal({ exec: e })}
+            />
           ) : (
           <KanbanBoard<Executive>
             stages={EXEC_STAGES}
@@ -417,6 +440,13 @@ export default function Dashboard() {
                 onSelectDeal={(d) => setDealModal({ deal: d })}
                 multiples={multiples}
                 rates={{ prime: primeRate, sba: sbaRate }}
+              />
+            ) : view === "cards" ? (
+              <PairingCardGrid
+                pairings={filteredPairings}
+                multiples={multiples}
+                rates={{ prime: primeRate, sba: sbaRate }}
+                onSelectDeal={(d) => setDealModal({ deal: d })}
               />
             ) : (
               <KanbanBoard<Pairing>
