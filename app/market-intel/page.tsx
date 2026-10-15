@@ -21,6 +21,7 @@ import SizeProfileRow, { hasSizeProfile, SUBSECTOR_IDS_CSV } from "@/components/
 import CompanyTargets from "@/components/CompanyTargets";
 import IndustryExplorer from "@/components/IndustryExplorer";
 import FitTargets from "@/components/FitTargets";
+import SectorChip from "@/components/SectorChip";
 import { Section, SubSection, FullSection, EventStrip } from "@/components/market-sections";
 import UpdatesStrip from "@/components/UpdatesStrip";
 import ValleyDemographics from "@/components/ValleyDemographics";
@@ -1509,7 +1510,7 @@ export default function MarketIntelPage() {
                           </span>
                         )}
                       </td>
-                      <td className={td}>{a.industry && <span className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-xs text-[#8a6f3c] dark:text-[#d4b37a]">{a.industry}</span>}</td>
+                      <td className={td}>{a.industry ? <SectorChip sector={a.industry} /> : "—"}</td>
                       <td className={`${td} whitespace-nowrap`}>{a.dealValue ? fmtMoney(a.dealValue) : "—"}</td>
                       <td className={`${td} whitespace-nowrap`}>{a.announcedDate ? fmtDate(a.announcedDate) : "—"}</td>
                       <td className={td}>{a.sourceUrl ? <a href={a.sourceUrl} target="_blank" rel="noreferrer" className="text-[#8a6f3c] underline dark:text-[#d4b37a]">{a.publisher || "Link"}</a> : "—"}</td>
@@ -1572,7 +1573,7 @@ export default function MarketIntelPage() {
                           </span>
                         </td>
                         <td className={td}><span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-white/10">{f.form}</span></td>
-                        <td className={td}>{f.sector || "—"}</td>
+                        <td className={td}><SectorChip sector={f.sector} /></td>
                         <td className={`${td} whitespace-nowrap`}>{f.filingDate ? fmtDate(f.filingDate) : "—"}</td>
                         <td className={`${td} max-w-md`}>
                           <span>{f.summary || "—"}</span>
