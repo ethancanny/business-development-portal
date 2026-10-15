@@ -107,7 +107,7 @@ export async function iconResponse(
             style={{
               width: box,
               height: box,
-              borderWidth: Math.max(3, Math.round(size * 0.042 * emblemScale)),
+              borderWidth: Math.max(2, Math.round(size * 0.02 * emblemScale)),
               borderStyle: "solid",
               borderColor: "#ffffff",
               display: "flex",
@@ -119,10 +119,10 @@ export async function iconResponse(
               style={{
                 fontFamily: fonts ? "Cormorant Garamond" : "serif",
                 fontWeight: 600,
-                fontSize: Math.round(size * 0.58 * emblemScale),
+                fontSize: Math.round(size * 0.52 * emblemScale),
                 color: "#ffffff",
                 lineHeight: 1,
-                marginTop: Math.round(size * -0.03 * emblemScale),
+                marginTop: Math.round(size * -0.026 * emblemScale),
               }}
             >
               C
