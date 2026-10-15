@@ -2,6 +2,8 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { MiCompany } from "@/lib/types";
+import CompanyLogo from "@/components/CompanyLogo";
+import SectorChip from "@/components/SectorChip";
 
 /** Named company targets for ONE focus industry, built from public
  * registry spines (USASpending recipients, AZ ROC, NPPES, SAM.gov).
@@ -237,12 +239,13 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
                   }`}
                 >
                   <td className={`${td} font-medium`}>
+                    <span className="mr-2 inline-flex align-middle"><CompanyLogo name={c.name} website={c.website} sector={c.sector} /></span>
                     {c.name}
                     {fit.fit && <span className="ml-2 rounded bg-[#b8975a] px-1.5 py-0.5 text-[10px] font-bold text-white">★ FIT</span>}
                     {c.status === "keep" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">KEPT</span>}
                     {c.status === "added" && <span className="ml-2 rounded bg-[#b8975a]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">IN PIPELINE</span>}
                   </td>
-                  {multi && <td className={td}>{c.sector || "—"}</td>}
+                  {multi && <td className={td}><SectorChip sector={c.sector} /></td>}
                   <td className={td}>{c.city || "—"}</td>
                   <td className={td}>{c.subsector || "—"}</td>
                   <td className={td}>{yearOf(c.formedDate) || "—"}</td>
