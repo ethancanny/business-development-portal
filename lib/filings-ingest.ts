@@ -172,7 +172,12 @@ async function enrichFormDs(): Promise<number> {
       const xmlItem =
         items.find((i) => i.name.toLowerCase().endsWith(".xml") && !i.name.toLowerCase().includes("index")) ??
         items.find((i) => i.name.toLowerCase().endsWith(".xml"));
-      if (!xmlItem) continue;
+      if (!xmlItem) {
+        // No XML in the filing package (paper-era / alternate format) —
+        // mark it so it stops consuming the enrichment queue.
+        await updateFilingDetails(f.id, { details: JSON.stringify({ unenrichable: true }) });
+        continue;
+      }
       const xmlRes = await fetch(`https://www.sec.gov/Archives/edgar/data/${f.cik}/${adsh}/${xmlItem.name}`, {
         headers: EDGAR_UA,
         signal: AbortSignal.timeout(15000),
