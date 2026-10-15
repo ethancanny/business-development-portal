@@ -236,6 +236,9 @@ export default function MarketIntelPage() {
   const [acquisitions, setAcquisitions] = useState<MiAcquisition[]>([]);
   const [filings, setFilings] = useState<MiFiling[]>([]);
   const [filingCat, setFilingCat] = useState("all");
+  const [filingWindow, setFilingWindow] = useState(7);
+  const [showDismissed, setShowDismissed] = useState(false);
+  const [showOtherD, setShowOtherD] = useState(false);
   const [sectorView, setSectorView] = useState<"trend" | "share">("share");
   const [hoverSlug, setHoverSlug] = useState<string | null>(null);
   // Row hover highlighting for the data tables — hover only, painted from
@@ -925,11 +928,15 @@ export default function MarketIntelPage() {
     );
   }, [obs, countyPermits, fiveYearCutoff]);
 
-  const weekCutoff = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const filingCutoff = new Date(Date.now() - filingWindow * 864e5).toISOString().slice(0, 10);
+  const acqWeekCutoff = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
   const filteredFilings = (filingCat === "all" ? filings : filings.filter((f) => f.category === filingCat))
-    .filter((f) => f.filingDate && f.filingDate >= weekCutoff)
+    .filter((f) => f.filingDate && f.filingDate >= filingCutoff)
+    .filter((f) => showDismissed || f.status !== "dismissed")
+    .filter((f) => showOtherD || f.category !== "form_d" || f.tag !== "Other")
     .slice()
     .sort((x, y) => (y.filingDate || "").localeCompare(x.filingDate || ""));
+  const cleanCo = (n: string) => n.replace(/\s*\(CIK\s+\d+\)\s*$/i, "").replace(/\s*\([A-Z][A-Z0-9.\-]{0,5}\)\s*$/, "").trim();
   // The Acquisitions tab is a ledger of actual Arizona deals (Ethan, Oct 8):
   // true acquisitions ONLY — expansions, contracts, IPOs, relocations,
   // investments and policy stories live in their own sections, not here.
@@ -944,7 +951,7 @@ export default function MarketIntelPage() {
         a.status !== "dismissed" &&
         a.eventType === "acquisition" &&
         a.announcedDate &&
-        a.announcedDate >= weekCutoff &&
+        a.announcedDate >= acqWeekCutoff &&
         !JUNK.test(a.headline || a.target || "")
     )
     .filter((a) => AZ_DEAL_PLACE.test(`${a.headline || ""} ${a.target || ""} ${a.targetLocation || ""}`))
@@ -1521,36 +1528,72 @@ export default function MarketIntelPage() {
 
         {tab === "filings" && (
           <div>
-            <div className="mb-3 flex flex-wrap gap-2">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
               {[["all", "All"], ["acquisition", "M&A 8-Ks"], ["form_d", "Form D"], ["expansion", "Expansion"], ["bankruptcy", "Bankruptcies"]].map(([v, l]) => (
                 <button key={v} onClick={() => setFilingCat(v)} className={tabBtn(filingCat === v)}>{l}</button>
               ))}
+              <span className="ml-auto flex flex-wrap items-center gap-2">
+                <span className="text-xs text-slate-400 dark:text-white/40">Last</span>
+                {[7, 30, 90].map((d) => (
+                  <button key={d} onClick={() => setFilingWindow(d)} className={tabBtn(filingWindow === d)}>{d} days</button>
+                ))}
+                <button onClick={() => setShowDismissed((v) => !v)} className={tabBtn(showDismissed)}>Show dismissed</button>
+                <button onClick={() => setShowOtherD((v) => !v)} className={tabBtn(showOtherD)}>Show &lsquo;Other&rsquo; Form Ds</button>
+              </span>
             </div>
             <div className={tableWrap}>
               <table className="w-full border-collapse bg-white dark:bg-[#132847]/40">
                 <thead><tr className="border-b border-slate-200 dark:border-white/10">
-                  <th className={th}>Company</th><th className={th}>Form</th><th className={th}>Filed</th><th className={th}>Summary</th><th className={th}></th>
+                  <th className={th}>Company</th><th className={th}>Form</th><th className={th}>Sector</th><th className={th}>Filed</th><th className={th}>What happened</th><th className={th}></th>
                 </tr></thead>
                 <tbody>
-                  {filteredFilings.filter((f) => f.status !== "dismissed").map((f) => (
-                    <tr key={f.id} {...rowProps(`filing:${f.id}`)}>
-                      <td className={td}>
-                        {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="font-medium text-[#8a6f3c] underline dark:text-[#d4b37a]">{f.company}</a> : <span className="font-medium">{f.company}</span>}
-                        <span className="block text-xs">
-                          {f.azCompany && <span className="mr-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-emerald-700 dark:text-emerald-400">AZ company</span>}
-                          {f.majorEvent && <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-red-700 dark:text-red-400">Major event</span>}
-                        </span>
-                      </td>
-                      <td className={td}><span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-white/10">{f.form}</span></td>
-                      <td className={td}>{f.filingDate ? fmtDate(f.filingDate) : "—"}</td>
-                      <td className={`${td} max-w-md truncate`}>{f.summary || "—"}</td>
-                      <td className={`${td} whitespace-nowrap`}>
-                        <button onClick={() => setStatus("filings", f.id, "keep")} className="mr-2 text-xs text-emerald-600 dark:text-emerald-400">Keep</button>
-                        <button onClick={() => setStatus("filings", f.id, "dismissed")} className="text-xs text-slate-400">Dismiss</button>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredFilings.length === 0 && <tr><td className={td} colSpan={5}>No filings in the last 7 days.</td></tr>}
+                  {filteredFilings.map((f) => {
+                    let fd: { industryGroup?: string; relatedPersons?: string[]; totalOffering?: number | null; totalSold?: number | null; firstSale?: string; chapter?: string; subV?: boolean; docketNumber?: string } | null = null;
+                    try { fd = f.details ? JSON.parse(f.details) : null; } catch { fd = null; }
+                    const tagCls = f.tag === "Competing capital"
+                      ? "bg-violet-500/15 text-violet-700 dark:text-violet-300"
+                      : f.tag === "Operating company raise"
+                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                        : f.tag === "Distress / asset sale"
+                          ? "bg-red-500/15 text-red-700 dark:text-red-400"
+                          : f.tag === "Possible exit buyer"
+                            ? "bg-sky-500/15 text-sky-700 dark:text-sky-300"
+                            : "bg-slate-500/15 text-slate-500 dark:text-white/50";
+                    return (
+                      <tr key={f.id} {...rowProps(`filing:${f.id}`)} style={{ ...rowStyle(`filing:${f.id}`), opacity: f.status === "dismissed" ? 0.55 : undefined }}>
+                        <td className={td}>
+                          {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="font-medium text-[#8a6f3c] underline dark:text-[#d4b37a]">{cleanCo(f.company)}</a> : <span className="font-medium">{cleanCo(f.company)}</span>}
+                          <span className="mt-1 flex flex-wrap gap-1 text-xs">
+                            {f.tag && <span className={`rounded-full px-1.5 py-0.5 ${tagCls}`}>{f.tag}</span>}
+                            {f.azCompany && <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-emerald-700 dark:text-emerald-400">AZ company</span>}
+                            {f.majorEvent && <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-red-700 dark:text-red-400">Major event</span>}
+                            {f.status === "dismissed" && <span className="rounded-full bg-slate-500/15 px-1.5 py-0.5 text-slate-500 dark:text-white/50">Dismissed</span>}
+                            {f.status === "keep" && <span className="rounded-full bg-[#b8975a]/20 px-1.5 py-0.5 text-[#8a6f3c] dark:text-[#d4b37a]">Kept</span>}
+                          </span>
+                        </td>
+                        <td className={td}><span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-white/10">{f.form}</span></td>
+                        <td className={td}>{f.sector || "—"}</td>
+                        <td className={`${td} whitespace-nowrap`}>{f.filingDate ? fmtDate(f.filingDate) : "—"}</td>
+                        <td className={`${td} max-w-md`}>
+                          <span>{f.summary || "—"}</span>
+                          {f.category === "form_d" && fd && (fd.industryGroup || (fd.relatedPersons && fd.relatedPersons.length > 0)) && (
+                            <span className="mt-0.5 block text-xs text-slate-400 dark:text-white/40">
+                              {fd.industryGroup ? `Industry: ${fd.industryGroup}` : ""}{fd.firstSale ? ` · First sale: ${fd.firstSale}` : ""}{fd.relatedPersons && fd.relatedPersons.length > 0 ? ` · Related: ${fd.relatedPersons.join(", ")}` : ""}
+                            </span>
+                          )}
+                          {f.category === "bankruptcy" && fd && fd.docketNumber && (
+                            <span className="mt-0.5 block text-xs text-slate-400 dark:text-white/40">Docket {fd.docketNumber} · U.S. Bankruptcy Court, D. Arizona</span>
+                          )}
+                          {f.why && <span className="mt-0.5 block text-xs italic text-[#8a6f3c] dark:text-[#d4b37a]">Why this matters: {f.why}</span>}
+                        </td>
+                        <td className={`${td} whitespace-nowrap`}>
+                          {f.status !== "keep" && <button onClick={() => setStatus("filings", f.id, "keep")} className="mr-2 text-xs text-emerald-600 dark:text-emerald-400">Keep</button>}
+                          {f.status !== "dismissed" && <button onClick={() => setStatus("filings", f.id, "dismissed")} className="text-xs text-slate-400">Dismiss</button>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredFilings.length === 0 && <tr><td className={td} colSpan={6}>No filings in the last {filingWindow} days.</td></tr>}
                 </tbody>
               </table>
             </div>
