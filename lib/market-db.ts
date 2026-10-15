@@ -651,25 +651,9 @@ export async function getUpdates(): Promise<UpdateItem[]> {
       ts: String(listAgg[0]?.latest ?? cutoff),
     });
   }
-  // Count exactly what the Acquisitions tab shows: announced in
-  // the last 7 days, not dismissed, Arizona place in the
-  // headline/target/location. (Oct 11, 2026 fix — this used to
-  // count created_at, so every re-ingested old story counted as
-  // new: the card claimed +20 while the tab showed 1.)
-  const cutoffDate = cutoff.slice(0, 10);
-  const AZ_PLACE = "\\y(arizona|phoenix|scottsdale|tempe|mesa|tucson|chandler|gilbert|glendale|peoria|surprise|flagstaff|yuma|prescott|avondale|goodyear|buckeye|queen creek|maricopa|pinal|sedona|lake havasu)\\y";
-  const acqAgg = (await db`SELECT COUNT(*)::int AS n, MAX(announced_date) AS latest FROM mi_acquisitions WHERE event_type = 'acquisition' AND status <> 'dismissed' AND announced_date >= ${cutoffDate} AND (COALESCE(headline, '') || ' ' || COALESCE(target, '') || ' ' || COALESCE(target_location, '')) ~* ${AZ_PLACE}`) as unknown as Record<string, unknown>[];
-  const acqCount = Number(acqAgg[0]?.n ?? 0);
-  if (acqCount > 0) {
-    const acqLatest = (await db`SELECT headline, target FROM mi_acquisitions WHERE event_type = 'acquisition' AND status <> 'dismissed' AND announced_date >= ${cutoffDate} AND (COALESCE(headline, '') || ' ' || COALESCE(target, '') || ' ' || COALESCE(target_location, '')) ~* ${AZ_PLACE} ORDER BY announced_date DESC LIMIT 1`) as unknown as Record<string, unknown>[];
-    const latestLabel = String(acqLatest[0]?.headline || acqLatest[0]?.target || "");
-    items.push({
-      kind: "acquisition",
-      title: `+${acqCount} local acquisitions`,
-      detail: latestLabel ? `Latest: ${latestLabel}` : "Announced in the last 7 days",
-      ts: String(acqAgg[0]?.latest ?? cutoffDate),
-    });
-  }
+  // The "+N local acquisitions" tile was REMOVED Oct 14, 2026 (Ethan):
+  // replaced by the Competing Buyers table in the Acquisitions & Filings
+  // tab (see getCompetingBuyers) and the tab's filings badge.
   const multRows = (await db`SELECT industry, size_band, period, ev_ebitda_median, ev_revenue_median, created_at FROM mi_multiples ORDER BY industry ASC, size_band ASC, period ASC`) as unknown as Record<string, unknown>[];
   const multKeys: string[] = [];
   const multGroups = new Map<string, Record<string, unknown>[]>();
@@ -1083,6 +1067,65 @@ export async function getEntities(status?: string): Promise<MiEntity[]> {
 export async function logSync(job: string, status: "ok" | "error" | "skipped", added: number, message: string): Promise<void> {
   await ensureSchema();
   await sql()`INSERT INTO mi_sync_log (id, job, status, added, message) VALUES (${newId()}, ${job}, ${status}, ${added}, ${message})`;
+}
+
+/** Latest sync-log row per job — feeds the Market Intel "Updated" labels
+ * and the >48h / >7d staleness warnings on tabs and tiles (Oct 14, 2026
+ * restructure replaced the Data freshness section with per-surface labels). */
+export async function getSyncLogLatestByJob(): Promise<MiSyncLog[]> {
+  await ensureSchema();
+  const rows = await sql()`SELECT DISTINCT ON (job) * FROM mi_sync_log ORDER BY job, ran_at DESC`;
+  return rows.map((r) => ({
+    id: str(r.id), job: str(r.job), ranAt: String(r.ran_at),
+    status: str(r.status) as MiSyncLog["status"], added: Number(r.added ?? 0),
+    message: str(r.message),
+  }));
+}
+
+export interface CompetingBuyer {
+  acquirer: string;
+  dealCount: number;
+  totalValue: number | null;
+  deals: { target: string; headline: string; industry: string; dealValue: number | null; announcedDate: string }[];
+}
+
+/** Competing buyers (Ethan, Oct 14, 2026): acquirers with 2+ Arizona deals
+ * in the acquisitions feed over the last 12 months — the repeat buyers and
+ * PE platforms most likely to bid against Canny on add-ons. Replaces the
+ * old "+N local acquisitions" Updates tile. */
+export async function getCompetingBuyers(): Promise<CompetingBuyer[]> {
+  await ensureSchema();
+  const db = sql();
+  const since = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+  const rows = (await db`
+    SELECT acquirer, target, headline, industry, deal_value, announced_date
+    FROM mi_acquisitions
+    WHERE event_type = 'acquisition' AND status <> 'dismissed'
+      AND acquirer IS NOT NULL AND acquirer <> '' AND announced_date >= ${since}
+    ORDER BY announced_date DESC`) as unknown as Record<string, unknown>[];
+  const groups = new Map<string, CompetingBuyer>();
+  for (const r of rows) {
+    const name = String(r.acquirer).trim();
+    if (!name) continue;
+    const key = name.toUpperCase();
+    let g = groups.get(key);
+    if (!g) {
+      g = { acquirer: name, dealCount: 0, totalValue: null, deals: [] };
+      groups.set(key, g);
+    }
+    const dv = numOrNull(r.deal_value);
+    g.dealCount += 1;
+    if (dv !== null) g.totalValue = (g.totalValue ?? 0) + dv;
+    g.deals.push({
+      target: String(r.target ?? ""), headline: String(r.headline ?? ""),
+      industry: String(r.industry ?? ""), dealValue: dv,
+      announcedDate: String(r.announced_date ?? ""),
+    });
+  }
+  return Array.from(groups.values())
+    .filter((g) => g.dealCount >= 2)
+    .sort((a, b) => b.dealCount - a.dealCount || (b.totalValue ?? 0) - (a.totalValue ?? 0))
+    .slice(0, 12);
 }
 
 export async function getSyncLog(limit = 20): Promise<MiSyncLog[]> {

@@ -16,6 +16,8 @@ import {
   setCompanyStatus,
   getMultiples,
   getSyncLog,
+  getSyncLogLatestByJob,
+  getCompetingBuyers,
   getWarn,
   setAcquisitionStatus,
   updateAcquisitionSummary,
@@ -40,6 +42,8 @@ const DATASETS = [
   "warn",
   "entities",
   "sync-log",
+  "sync-status",
+  "competing-buyers",
 ] as const;
 
 export async function GET(
@@ -119,6 +123,10 @@ export async function GET(
         return NextResponse.json(await getEntities(sp.get("status") ?? undefined));
       case "sync-log":
         return NextResponse.json(await getSyncLog());
+      case "sync-status":
+        return NextResponse.json(await getSyncLogLatestByJob());
+      case "competing-buyers":
+        return NextResponse.json(await getCompetingBuyers());
       default:
         return NextResponse.json({ error: "Unknown dataset" }, { status: 404 });
     }
