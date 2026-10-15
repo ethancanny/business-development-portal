@@ -1,23 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import TaskList from "@/components/TaskList";
 import PageHero from "@/components/PageHero";
-import { DEAL_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type Task } from "@/lib/types";
+import { DEAL_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
+import type { Investor } from "@/lib/investors-db";
 import { fmtMoney } from "@/lib/format";
+import { isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
 
-const TargetMap = dynamic(() => import("@/components/TargetMap"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex h-72 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 sm:h-80 dark:border-white/10 dark:bg-[#0d1f3c]">
-      <p className="text-sm text-slate-400 dark:text-white/40">Loading map…</p>
-    </div>
-  ),
-});
+/** Fit-target spine sectors (same four as Market Intel's Fit Targets). */
+const FIT_SECTORS = [
+  "Aerospace & Defense",
+  "Healthcare",
+  "Advanced Manufacturing",
+  "Specialty Trades & Construction",
+];
 
 const TERMINAL_STAGES = ["Closed Won", "Passed"];
 
@@ -59,13 +59,19 @@ export default function Overview() {
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [flow, setFlow] = useState<DealFlowItem[]>([]);
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
+  const [investors, setInvestors] = useState<Investor[]>([]);
+  const [multiples, setMultiples] = useState<MiMultiple[]>([]);
+  const [rates, setRates] = useState<MarketRates>({});
+  const [fitCounts, setFitCounts] = useState<Record<string, number | null>>({});
   const [weekTab, setWeekTab] = useState<"this" | "last">("this");
+  const [includeNonFocus, setIncludeNonFocus] = useState(false);
+  const [showOtherCal, setShowOtherCal] = useState(false);
 
   const load = async () => {
     try {
       const calFrom = new Date(Date.now() - 16 * 86400000).toISOString();
       const calTo = new Date(Date.now() + 28 * 86400000).toISOString();
-      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes, calRes] = await Promise.all([
+      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes, calRes, invRes, multRes, ratesRes] = await Promise.all([
         fetch("/api/auth/me"),
         fetch("/api/deals"),
         fetch("/api/executives"),
@@ -73,6 +79,9 @@ export default function Overview() {
         fetch("/api/interactions"),
         fetch("/api/deal-flow"),
         fetch(`/api/calendar?from=${encodeURIComponent(calFrom)}&to=${encodeURIComponent(calTo)}`),
+        fetch("/api/investors"),
+        fetch("/api/market/multiples"),
+        fetch("/api/market/rates"),
       ]);
       if (
         meRes.status === 401 ||
@@ -95,10 +104,38 @@ export default function Overview() {
           setCalEvents(cal.events.filter((e: CalendarEvent) => !e.dismissed));
         }
       }
+      if (invRes.ok) {
+        const inv = await invRes.json();
+        if (Array.isArray(inv)) setInvestors(inv);
+      }
+      if (multRes.ok) {
+        const mult = await multRes.json();
+        if (Array.isArray(mult)) setMultiples(mult);
+      }
+      if (ratesRes.ok) {
+        const rd = await ratesRes.json().catch(() => null);
+        setRates({ prime: rd?.prime?.value ?? null, sba: rd?.sba?.value ?? null });
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  // Fit-target counts per sector for the density view.
+  useEffect(() => {
+    let live = true;
+    for (const s of FIT_SECTORS) {
+      fetch(`/api/market/companies?sector=${encodeURIComponent(s)}&limit=1`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { fitTotal?: number } | null) => {
+          if (live && d) setFitCounts((c) => ({ ...c, [s]: d.fitTotal ?? 0 }));
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     load();
@@ -109,9 +146,16 @@ export default function Overview() {
     () => deals.filter((d) => !TERMINAL_STAGES.includes(d.stage)),
     [deals]
   );
+  // Active pipeline value (Oct 14, 2026): sum of resolved values —
+  // stated price, else the market-multiple estimate — over ACTIVE
+  // deals only (Passed / Closed Won excluded).
   const pipelineValue = useMemo(
-    () => activeDeals.reduce((s, d) => s + (d.dealValue || 0), 0),
-    [activeDeals]
+    () =>
+      activeDeals.reduce(
+        (s, d) => s + (resolveDealValue(d, multiples, rates).value ?? 0),
+        0
+      ),
+    [activeDeals, multiples, rates]
   );
   const myClaims = useMemo(
     () =>
@@ -131,10 +175,10 @@ export default function Overview() {
         stage,
         value: deals
           .filter((d) => d.stage === stage)
-          .reduce((s, d) => s + (d.dealValue || 0), 0),
+          .reduce((s, d) => s + (resolveDealValue(d, multiples, rates).value ?? 0), 0),
         count: deals.filter((d) => d.stage === stage).length,
       })),
-    [deals]
+    [deals, multiples, rates]
   );
   const maxStageValue = Math.max(1, ...valueByStage.map((s) => s.value));
 
@@ -164,12 +208,19 @@ export default function Overview() {
     };
     const newDeals = deals
       .filter((d) => inWin(d.createdAt))
-      .sort((a, b) => (b.dealValue || 0) - (a.dealValue || 0));
+      .sort(
+        (a, b) =>
+          (resolveDealValue(b, multiples, rates).value ?? 0) -
+          (resolveDealValue(a, multiples, rates).value ?? 0)
+      );
     const newExecs = execs.filter((e) => inWin(e.createdAt));
     const flowNew = flow.filter((f) => inWin(f.createdAt));
     return {
       newDeals,
-      newDealsValue: newDeals.reduce((s, d) => s + (d.dealValue || 0), 0),
+      newDealsValue: newDeals.reduce(
+        (s, d) => s + (resolveDealValue(d, multiples, rates).value ?? 0),
+        0
+      ),
       newExecs,
       flowForSale: flowNew.filter((f) => f.kind === "business_for_sale").length,
       flowOperators: flowNew.filter((f) => f.kind === "operator_available").length,
@@ -180,23 +231,71 @@ export default function Overview() {
       closedWon: deals.filter((d) => d.stage === "Closed Won" && inWin(d.updatedAt)).length,
       passed: deals.filter((d) => d.stage === "Passed" && inWin(d.updatedAt)).length,
     };
-  }, [weekWindow, deals, execs, flow, interactions, tasks]);
+  }, [weekWindow, deals, execs, flow, interactions, tasks, multiples, rates]);
 
   // Upcoming important dates for the weekly summary (Ethan, Oct 9, 2026):
   // the next 14 days of Outlook events mirrored into the portal. (The
   // earlier "Activity highlights" lines were removed at Ethan's request —
   // the summary is counts + important dates, with Tasks & follow-ups
   // directly below.)
+  // Oct 14, 2026: Important Dates shows only meetings linked to a
+  // Directory contact or a deal — an attendee matching a deal contact
+  // or an operator/investor, or the event title naming the company or
+  // person — and each links to that profile. Everything else drops
+  // into a collapsed "Other calendar items" list.
+  const eventLink = (e: CalendarEvent): { href: string; label: string } | null => {
+    const title = (e.title || "").toLowerCase();
+    const attendees = (e.attendees ?? []).map((a) => a.toLowerCase());
+    const attendeeHas = (needle: string) =>
+      !!needle && attendees.some((a) => a.includes(needle.toLowerCase()));
+    for (const d of deals) {
+      if (attendeeHas(d.contactEmail) || attendeeHas(d.contactName))
+        return { href: `/deals/${d.id}`, label: d.companyName };
+      if (d.companyName && d.companyName.length >= 4 && title.includes(d.companyName.toLowerCase()))
+        return { href: `/deals/${d.id}`, label: d.companyName };
+    }
+    for (const x of execs) {
+      if (x.name && (attendeeHas(x.name) || (x.name.length >= 4 && title.includes(x.name.toLowerCase()))))
+        return { href: `/directory?q=${encodeURIComponent(x.name)}`, label: x.name };
+    }
+    for (const inv of investors) {
+      if (inv.name && (attendeeHas(inv.name) || attendeeHas(inv.email) || (inv.name.length >= 4 && title.includes(inv.name.toLowerCase()))))
+        return { href: `/directory?q=${encodeURIComponent(inv.name)}`, label: inv.name };
+    }
+    return null;
+  };
+
   const calSummary = useMemo(() => {
     const nowMs = Date.now();
-    const upcoming = calEvents
-      .filter((e) => {
-        const t = new Date(e.startsAt).getTime();
-        return t >= nowMs - 3600000 && t < nowMs + 14 * 86400000;
-      })
-      .slice(0, 6);
-    return { upcoming };
-  }, [calEvents]);
+    const upcomingAll = calEvents.filter((e) => {
+      const t = new Date(e.startsAt).getTime();
+      return t >= nowMs - 3600000 && t < nowMs + 14 * 86400000;
+    });
+    const linked: { e: CalendarEvent; href: string; label: string }[] = [];
+    const other: CalendarEvent[] = [];
+    for (const e of upcomingAll) {
+      const link = eventLink(e);
+      if (link) linked.push({ e, href: link.href, label: link.label });
+      else other.push(e);
+    }
+    return { linked: linked.slice(0, 6), other };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calEvents, deals, execs, investors]);
+
+  // Operators tile: interviewing now, paired to a deal, and new
+  // candidates this week (Monday → now).
+  const operatorStats = useMemo(() => {
+    const pairedIds = new Set<string>();
+    deals.forEach((d) => (d.operatorIds ?? []).forEach((id) => pairedIds.add(id)));
+    const now = new Date();
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    return {
+      interviewing: execs.filter((e) => e.stage === "Interview").length,
+      paired: execs.filter((e) => pairedIds.has(e.id)).length,
+      newThisWeek: execs.filter((e) => new Date(e.createdAt) >= monday).length,
+    };
+  }, [execs, deals]);
 
   const dismissEvent = async (eventId: string) => {
     setCalEvents((prev) => prev.filter((e) => e.eventId !== eventId));
@@ -248,23 +347,92 @@ export default function Overview() {
     });
   }, [activeDeals, interactions]);
 
+  // Pipeline analytics (reworked Oct 14, 2026). Scope: non-focus
+  // deals are excluded unless the toggle includes them. Avg deal
+  // value averages only deals that HAVE a value; pipeline EBITDA
+  // reports its coverage; the close rate stays "—" until at least 5
+  // deals have closed or been passed.
+  const scopedDeals = useMemo(
+    () => (includeNonFocus ? deals : deals.filter((d) => isFocusDeal(d.industry))),
+    [deals, includeNonFocus]
+  );
+  const nonFocusCount = useMemo(
+    () => deals.filter((d) => !isFocusDeal(d.industry)).length,
+    [deals]
+  );
+
   const analytics = useMemo(() => {
     const thirty = new Date();
     thirty.setDate(thirty.getDate() - 30);
     const cutoff = thirty.toISOString();
-    const added30 = deals.filter((d) => d.createdAt >= cutoff).length;
-    const ebitdaSum = activeDeals.reduce((s, d) => s + (d.ebitda || 0), 0);
+    const added30 = scopedDeals.filter((d) => d.createdAt >= cutoff).length;
+    const scopedActive = scopedDeals.filter((d) => !TERMINAL_STAGES.includes(d.stage));
+    const valued = scopedActive
+      .map((d) => resolveDealValue(d, multiples, rates).value)
+      .filter((v): v is number => v !== null);
     const avgValue =
-      activeDeals.length > 0 ? pipelineValue / activeDeals.length : 0;
-    const closed = deals.filter((d) => TERMINAL_STAGES.includes(d.stage));
-    const won = closed.filter((d) => d.stage === "Closed Won").length;
+      valued.length > 0 ? valued.reduce((s, v) => s + v, 0) / valued.length : null;
+    const ebitdaDeals = scopedActive.filter((d) => d.ebitda != null);
+    const ebitdaSum = ebitdaDeals.reduce((s, d) => s + (d.ebitda || 0), 0);
+    const closedPassed = scopedDeals.filter((d) => TERMINAL_STAGES.includes(d.stage));
+    const won = closedPassed.filter((d) => d.stage === "Closed Won").length;
+    const winRate =
+      closedPassed.length >= 5 ? Math.round((won / closedPassed.length) * 100) : null;
+
+    // Stage-to-stage conversion, funnel-style from current stages
+    // (no stage history is kept): a deal counts as having reached
+    // every stage up to its own; Closed Won counts as reaching all.
+    // Passed deals sit outside the funnel.
+    const ACTIVE_STAGES = DEAL_STAGES.filter((s) => !TERMINAL_STAGES.includes(s));
+    const reached = ACTIVE_STAGES.map((_, i) =>
+      scopedDeals.filter((d) => {
+        if (d.stage === "Closed Won") return true;
+        const idx = (ACTIVE_STAGES as readonly string[]).indexOf(d.stage);
+        return idx >= i;
+      }).length
+    );
+    const conversions = ACTIVE_STAGES.slice(0, -1).map((s, i) => ({
+      from: s,
+      to: ACTIVE_STAGES[i + 1],
+      of: reached[i],
+      n: reached[i + 1],
+      pct: reached[i] > 0 ? Math.round((reached[i + 1] / reached[i]) * 100) : null,
+    }));
+
+    // Pass reasons, categorized from the passed deals' own notes —
+    // there is no structured pass-reason field yet.
+    const PASS_REASONS: { label: string; re: RegExp }[] = [
+      { label: "Valuation / price", re: /price|pricing|valuation|expensive|asking|multiple/i },
+      { label: "Margins / fit", re: /margin|fit|profile|thesis/i },
+      { label: "Size / scale", re: /too small|too large|size|scale/i },
+      { label: "Timing / readiness", re: /timing|not ready|too early|later/i },
+      { label: "Financials / diligence", re: /financial|records|diligence|quality of earnings|qoe/i },
+    ];
+    const passedDeals = scopedDeals.filter((d) => d.stage === "Passed");
+    const reasonCounts = new Map<string, number>();
+    for (const d of passedDeals) {
+      const hit = PASS_REASONS.find((r) => r.re.test(d.notes || ""));
+      const label = hit ? hit.label : "Not specified in notes";
+      reasonCounts.set(label, (reasonCounts.get(label) ?? 0) + 1);
+    }
+    const passReasons = Array.from(reasonCounts.entries())
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
+
     return {
       added30,
-      ebitdaSum,
       avgValue,
-      winRate: closed.length > 0 ? Math.round((won / closed.length) * 100) : null,
+      valuedCount: valued.length,
+      activeCount: scopedActive.length,
+      ebitdaSum,
+      ebitdaCount: ebitdaDeals.length,
+      winRate,
+      closedPassedCount: closedPassed.length,
+      conversions,
+      passReasons,
+      passedCount: passedDeals.length,
     };
-  }, [deals, activeDeals, pipelineValue]);
+  }, [scopedDeals, multiples, rates]);
 
   if (loading) {
     return (
@@ -274,10 +442,20 @@ export default function Overview() {
     );
   }
 
-  const stats = [
-    { label: "Active pipeline value", value: fmtMoney(pipelineValue) },
-    { label: "Active targets", value: String(activeDeals.length) },
-    { label: "My claims", value: String(myClaims) },
+  const stats: {
+    label: string;
+    value: string;
+    alert?: boolean;
+    sub?: string;
+    href?: string;
+  }[] = [
+    { label: "Active pipeline value", value: fmtMoney(pipelineValue), href: "/pipeline" },
+    { label: "Active targets", value: String(activeDeals.length), href: "/pipeline" },
+    {
+      label: "Deals & operators I've claimed",
+      value: String(myClaims),
+      href: "/pipeline",
+    },
     {
       label: "Open follow-ups",
       value: String(openTasks.length),
@@ -300,24 +478,63 @@ export default function Overview() {
 
       {/* Stat cards */}
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {stats.map((s) => (
-          <div
-            key={s.label}
-            className="rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]"
+        {stats.map((s) => {
+          const card = (
+            <>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-white/50">
+                {s.label}
+              </p>
+              <p
+                className={`mt-1 text-2xl font-bold ${
+                  s.alert ? "text-red-600 dark:text-red-400" : "text-[#0d1f3c] dark:text-white"
+                }`}
+              >
+                {s.value}
+              </p>
+              {s.sub && <p className="mt-0.5 text-xs text-red-500">{s.sub}</p>}
+            </>
+          );
+          const cls =
+            "rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]";
+          return s.href ? (
+            <Link key={s.label} href={s.href} className={`${cls} block transition hover:border-[#b8975a]/60`}>
+              {card}
+            </Link>
+          ) : (
+            <div key={s.label} className={cls}>
+              {card}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Operators tile */}
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-[#132847]">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-white/50">
+            Operators
+          </p>
+          <Link
+            href="/directory"
+            className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
           >
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-white/50">
-              {s.label}
-            </p>
-            <p
-              className={`mt-1 text-2xl font-bold ${
-                s.alert ? "text-red-600 dark:text-red-400" : "text-[#0d1f3c] dark:text-white"
-              }`}
-            >
-              {s.value}
-            </p>
-            {s.sub && <p className="mt-0.5 text-xs text-red-500">{s.sub}</p>}
+            Open Directory →
+          </Link>
+        </div>
+        <div className="mt-2 grid grid-cols-3 gap-3">
+          <div>
+            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{operatorStats.interviewing}</p>
+            <p className="text-xs text-slate-500 dark:text-white/50">Interviewing</p>
           </div>
-        ))}
+          <div>
+            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{operatorStats.paired}</p>
+            <p className="text-xs text-slate-500 dark:text-white/50">Paired to a deal</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">{operatorStats.newThisWeek}</p>
+            <p className="text-xs text-slate-500 dark:text-white/50">New candidates this week</p>
+          </div>
+        </div>
       </div>
 
       {/* Weekly summary */}
@@ -373,57 +590,85 @@ export default function Overview() {
             </span>
           ))}
         </div>
-        {weekTab === "this" && calSummary.upcoming.length > 0 && (
+        {weekTab === "this" && (calSummary.linked.length > 0 || calSummary.other.length > 0) && (
           <div className="mt-4">
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
               Important dates
             </p>
-            <ul className="space-y-1.5">
-              {calSummary.upcoming.map((e) => {
-                const d = new Date(e.startsAt);
-                return (
-                  <li
-                    key={e.eventId}
-                    className="group flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-2.5 py-2 dark:border-white/5 dark:bg-white/[0.03]"
-                  >
-                    <div className="flex h-10 w-11 shrink-0 flex-col items-center justify-center rounded-md bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
-                      <span className="text-[9px] font-bold uppercase leading-none tracking-wider">
-                        {d.toLocaleDateString("en-US", { month: "short", timeZone: "America/Phoenix" })}
-                      </span>
-                      <span className="text-base font-bold leading-tight">
-                        {d.toLocaleDateString("en-US", { day: "numeric", timeZone: "America/Phoenix" })}
-                      </span>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      {e.webUrl ? (
-                        <a
-                          href={e.webUrl}
-                          target="_blank"
-                          rel="noreferrer"
+            {calSummary.linked.length > 0 ? (
+              <ul className="space-y-1.5">
+                {calSummary.linked.map(({ e, href, label }) => {
+                  const d = new Date(e.startsAt);
+                  return (
+                    <li
+                      key={e.eventId}
+                      className="group flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-2.5 py-2 dark:border-white/5 dark:bg-white/[0.03]"
+                    >
+                      <div className="flex h-10 w-11 shrink-0 flex-col items-center justify-center rounded-md bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
+                        <span className="text-[9px] font-bold uppercase leading-none tracking-wider">
+                          {d.toLocaleDateString("en-US", { month: "short", timeZone: "America/Phoenix" })}
+                        </span>
+                        <span className="text-base font-bold leading-tight">
+                          {d.toLocaleDateString("en-US", { day: "numeric", timeZone: "America/Phoenix" })}
+                        </span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <Link
+                          href={href}
                           className="block truncate text-sm font-semibold text-[#0d1f3c] hover:underline dark:text-white"
                         >
                           {e.title}
-                        </a>
-                      ) : (
-                        <p className="truncate text-sm font-semibold text-[#0d1f3c] dark:text-white">{e.title}</p>
-                      )}
-                      <p className="truncate text-xs text-slate-400 dark:text-white/40">
-                        {fmtWhen(e.startsAt, e.allDay)}
-                        {e.location ? <> · {renderLoc(e.location)}</> : null}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => dismissEvent(e.eventId)}
-                      title="Dismiss"
-                      aria-label="Dismiss event"
-                      className="shrink-0 rounded px-1.5 text-lg leading-none text-slate-300 opacity-0 transition hover:text-red-400 group-hover:opacity-100 dark:text-white/25"
-                    >
-                      ×
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+                        </Link>
+                        <p className="truncate text-xs text-slate-400 dark:text-white/40">
+                          {fmtWhen(e.startsAt, e.allDay)}
+                          {e.location ? <> · {renderLoc(e.location)}</> : null}
+                          {" · "}
+                          <Link href={href} className="font-medium text-[#8a6f3c] hover:underline dark:text-[#d4b37a]">
+                            {label} ↗
+                          </Link>
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => dismissEvent(e.eventId)}
+                        title="Dismiss"
+                        aria-label="Dismiss event"
+                        className="shrink-0 rounded px-1.5 text-lg leading-none text-slate-300 opacity-0 transition hover:text-red-400 group-hover:opacity-100 dark:text-white/25"
+                      >
+                        ×
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-xs text-slate-400 dark:text-white/40">
+                No upcoming meetings linked to a Directory contact or deal.
+              </p>
+            )}
+            {calSummary.other.length > 0 && (
+              <div className="mt-2">
+                <button
+                  onClick={() => setShowOtherCal((v) => !v)}
+                  className="text-xs font-semibold text-slate-500 hover:underline dark:text-white/50"
+                  aria-expanded={showOtherCal}
+                >
+                  {showOtherCal ? "▾" : "▸"} Other calendar items ({calSummary.other.length})
+                </button>
+                {showOtherCal && (
+                  <ul className="mt-1.5 space-y-1">
+                    {calSummary.other.map((e) => (
+                      <li
+                        key={e.eventId}
+                        className="flex items-baseline justify-between gap-3 px-1 py-0.5 text-xs text-slate-500 dark:text-white/50"
+                      >
+                        <span className="min-w-0 truncate">{e.title}</span>
+                        <span className="shrink-0">{fmtWhen(e.startsAt, e.allDay)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -517,20 +762,73 @@ export default function Overview() {
           )}
         </section>
 
-        {/* Target map */}
+        {/* Fit-target density by sector (replaces the "Where we're
+            looking" map, Oct 14, 2026) */}
         <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
-          <h2 className="mb-4 text-base font-bold text-[#0d1f3c] dark:text-white">
-            Where we&apos;re looking
-          </h2>
-          <TargetMap deals={deals} />
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-base font-bold text-[#0d1f3c] dark:text-white">
+              Fit targets by sector
+            </h2>
+            <Link
+              href="/market-intel#fit-targets"
+              className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+            >
+              Open Market Intel →
+            </Link>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            {FIT_SECTORS.map((sector) => {
+              const count = fitCounts[sector];
+              const maxFit = Math.max(
+                1,
+                ...FIT_SECTORS.map((s) => fitCounts[s] ?? 0)
+              );
+              return (
+                <div key={sector}>
+                  <div className="mb-1 flex items-baseline justify-between text-xs">
+                    <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">{sector}</span>
+                    <span className="text-slate-500 dark:text-white/50">
+                      {count === null || count === undefined ? "…" : count.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-[#0d1f3c] to-[#b8975a]"
+                      style={{ width: `${(((count ?? 0) / maxFit) * 100).toFixed(1)}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-xs text-slate-400 dark:text-white/40">
+            {FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0).toLocaleString()} fit
+            targets across the focus-sector spines — live from Market Intel.
+          </p>
         </section>
       </div>
 
       {/* Pipeline analytics */}
       <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#132847]">
-        <h2 className="mb-4 text-base font-bold text-[#0d1f3c] dark:text-white">
-          Pipeline analytics
-        </h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-bold text-[#0d1f3c] dark:text-white">
+            Pipeline analytics
+          </h2>
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 dark:text-white/60">
+            <input
+              type="checkbox"
+              checked={includeNonFocus}
+              onChange={(e) => setIncludeNonFocus(e.target.checked)}
+              className="h-3.5 w-3.5 accent-[#b8975a]"
+            />
+            Include non-focus deals
+            {!includeNonFocus && nonFocusCount > 0 && (
+              <span className="text-slate-400 dark:text-white/40">
+                ({nonFocusCount} excluded)
+              </span>
+            )}
+          </label>
+        </div>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
             <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
@@ -542,10 +840,13 @@ export default function Overview() {
           </div>
           <div>
             <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
-              {fmtMoney(analytics.avgValue)}
+              {analytics.avgValue === null ? "—" : fmtMoney(analytics.avgValue)}
             </p>
             <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
               Avg deal value
+            </p>
+            <p className="mt-0.5 text-[11px] text-slate-400 dark:text-white/40">
+              {analytics.valuedCount} of {analytics.activeCount} active deals have a value
             </p>
           </div>
           <div>
@@ -555,6 +856,9 @@ export default function Overview() {
             <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
               Pipeline EBITDA
             </p>
+            <p className="mt-0.5 text-[11px] text-slate-400 dark:text-white/40">
+              {analytics.ebitdaCount} of {analytics.activeCount} deals
+            </p>
           </div>
           <div>
             <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
@@ -563,8 +867,60 @@ export default function Overview() {
             <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">
               Close rate
             </p>
+            {analytics.winRate === null && (
+              <p className="mt-0.5 text-[11px] text-slate-400 dark:text-white/40">
+                Needs 5+ closed or passed deals ({analytics.closedPassedCount} so far)
+              </p>
+            )}
           </div>
         </div>
+
+        {/* Stage-to-stage conversion (funnel from current stages) */}
+        <div className="mt-5 border-t border-slate-100 pt-4 dark:border-white/10">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+            Stage-to-stage conversion
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {analytics.conversions.map((c) => (
+              <span
+                key={c.from}
+                className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
+              >
+                {c.from} → {c.to}:{" "}
+                <strong>{c.pct === null ? "—" : `${c.pct}%`}</strong>
+                <span className="text-slate-400 dark:text-white/40">
+                  {" "}({c.n} of {c.of})
+                </span>
+              </span>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+            Funnel from current stages — a deal counts at every stage up to its own;
+            Closed Won counts at all stages, Passed sits outside the funnel.
+          </p>
+        </div>
+
+        {/* Pass reasons, categorized from the passed deals' notes */}
+        {analytics.passedCount > 0 && (
+          <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
+              Pass reasons ({analytics.passedCount} passed)
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {analytics.passReasons.map((r) => (
+                <span
+                  key={r.label}
+                  className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                >
+                  {r.label} · {r.count}
+                </span>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
+              Categorized from deal notes — no structured pass-reason field yet.
+            </p>
+          </div>
+        )}
       </section>
 
 

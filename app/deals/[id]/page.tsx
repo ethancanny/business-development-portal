@@ -16,6 +16,8 @@ import type {
 } from "@/lib/types";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import PageHero from "@/components/PageHero";
+import type { MiMultiple } from "@/lib/types";
+import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 
 export default function DealDetailPage() {
   const params = useParams();
@@ -35,6 +37,8 @@ export default function DealDetailPage() {
   const [showContactForm, setShowContactForm] = useState(false);
   const [showIxForm, setShowIxForm] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [multiples, setMultiples] = useState<MiMultiple[]>([]);
+  const [rates, setRates] = useState<MarketRates>({});
 
   const load = async () => {
     try {
@@ -74,6 +78,14 @@ export default function DealDetailPage() {
       }
       if (ixRes.ok) setInteractions(await ixRes.json());
       if (attRes.ok) setAttachments(await attRes.json());
+      fetch("/api/market/multiples")
+        .then((r) => (r.ok ? r.json() : []))
+        .then((d) => setMultiples(Array.isArray(d) ? d : []))
+        .catch(() => {});
+      fetch("/api/market/rates")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => setRates({ prime: d?.prime?.value ?? null, sba: d?.sba?.value ?? null }))
+        .catch(() => {});
     } finally {
       setLoading(false);
     }
@@ -179,7 +191,12 @@ export default function DealDetailPage() {
                 Deal value
               </p>
               <p className="text-2xl font-bold text-[#0d1f3c] dark:text-white">
-                {fmtMoney(deal.dealValue)}
+                {(() => {
+                  const rv = resolveDealValue(deal, multiples, rates);
+                  return rv.value === null
+                    ? "—"
+                    : `${fmtMoney(rv.value)}${rv.estimated ? " est." : ""}`;
+                })()}
               </p>
               <button
                 onClick={() => setEditing(true)}

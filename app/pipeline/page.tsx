@@ -10,6 +10,7 @@ import { DealModal, ExecutiveModal } from "@/components/Modals";
 import PageHero from "@/components/PageHero";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type Executive, type MiMultiple } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
+import { resolveDealValue } from "@/lib/valuation";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -143,6 +144,14 @@ export default function Dashboard() {
     setDealModal(null);
     setExecModal(null);
     load();
+  };
+
+  // The one Value shown everywhere: stated price (structure sum →
+  // asking price → recorded value), else the market-multiple
+  // estimate labeled "est.", else "—" — never $0.
+  const valueLabel = (d: Deal) => {
+    const rv = resolveDealValue(d, multiples, { prime: primeRate, sba: sbaRate });
+    return rv.value === null ? "—" : `${fmtMoney(rv.value)}${rv.estimated ? " est." : ""}`;
   };
 
   if (loading) {
@@ -285,7 +294,7 @@ export default function Dashboard() {
                 <p className="text-sm font-semibold text-slate-900 dark:text-white">{d.companyName}</p>
                 {d.industry && <p className="text-xs text-slate-500 dark:text-[#c8bfa8]">{d.industry}</p>}
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-sm font-medium text-slate-700 dark:text-[#e8dfc8]">{fmtMoney(d.dealValue)}</span>
+                  <span className="text-sm font-medium text-slate-700 dark:text-[#e8dfc8]">{valueLabel(d)}</span>
                 </div>
                 {d.operatorIds && d.operatorIds.length > 0 ? (
                   <div className="mt-1.5 flex flex-wrap gap-1">
@@ -374,6 +383,8 @@ export default function Dashboard() {
               <PairingTable
                 pairings={filteredPairings}
                 onSelectDeal={(d) => setDealModal({ deal: d })}
+                multiples={multiples}
+                rates={{ prime: primeRate, sba: sbaRate }}
               />
             ) : (
               <KanbanBoard<Pairing>
@@ -388,7 +399,7 @@ export default function Dashboard() {
                     <p className="text-sm font-semibold text-slate-900 dark:text-white">{d.companyName}</p>
                     {d.industry && <p className="text-xs text-slate-500 dark:text-[#c8bfa8]">{d.industry}</p>}
                     <div className="mt-2 flex items-center justify-between">
-                      <span className="text-sm font-medium text-slate-700 dark:text-[#e8dfc8]">{fmtMoney(d.dealValue)}</span>
+                      <span className="text-sm font-medium text-slate-700 dark:text-[#e8dfc8]">{valueLabel(d)}</span>
                     </div>
                     <div className="mt-1.5 rounded-lg bg-violet-50 px-2 py-1.5 dark:bg-violet-500/10">
                       <p className="text-xs font-semibold text-violet-800 dark:text-violet-200">
