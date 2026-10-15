@@ -242,6 +242,28 @@ export function ensureSchema(): Promise<void> {
         )`;
       await db`ALTER TABLE mi_filings ADD COLUMN IF NOT EXISTS az_company BOOLEAN NOT NULL DEFAULT FALSE`;
       await db`ALTER TABLE mi_filings ADD COLUMN IF NOT EXISTS major_event BOOLEAN NOT NULL DEFAULT FALSE`;
+      // Filings rework (Ethan, Oct 14, 2026): sector/tag/why carry the
+      // triage classification; details holds the JSON payload (Form D
+      // fields, 8-K items, bankruptcy chapter/court, keep-link target).
+      await db`ALTER TABLE mi_filings ADD COLUMN IF NOT EXISTS sector TEXT NOT NULL DEFAULT ''`;
+      await db`ALTER TABLE mi_filings ADD COLUMN IF NOT EXISTS tag TEXT NOT NULL DEFAULT ''`;
+      await db`ALTER TABLE mi_filings ADD COLUMN IF NOT EXISTS why TEXT NOT NULL DEFAULT ''`;
+      await db`ALTER TABLE mi_filings ADD COLUMN IF NOT EXISTS details TEXT NOT NULL DEFAULT ''`;
+      await db`ALTER TABLE mi_filings ADD COLUMN IF NOT EXISTS sic TEXT NOT NULL DEFAULT ''`;
+      // EDGAR filer profiles, cached per CIK: principal-place state,
+      // SIC, and sector mapping — one submissions-API call per filer,
+      // ever, instead of one per filing run.
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_filer_profiles (
+          cik TEXT PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          sic TEXT NOT NULL DEFAULT '',
+          sic_desc TEXT NOT NULL DEFAULT '',
+          biz_state TEXT NOT NULL DEFAULT '',
+          mail_state TEXT NOT NULL DEFAULT '',
+          sector TEXT NOT NULL DEFAULT '',
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`;
       await db`
         CREATE TABLE IF NOT EXISTS mi_warn (
           id TEXT PRIMARY KEY,

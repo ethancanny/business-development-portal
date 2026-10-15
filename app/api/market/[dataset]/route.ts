@@ -115,7 +115,11 @@ export async function GET(
         return NextResponse.json(await getAcquisitions(sp.get("status") ?? undefined));
       case "filings":
         return NextResponse.json(
-          await getFilings(sp.get("category") ?? undefined, sp.get("status") ?? undefined)
+          await getFilings(
+            sp.get("category") ?? undefined,
+            sp.get("status") ?? undefined,
+            sp.get("days") ? Number(sp.get("days")) : undefined
+          )
         );
       case "warn":
         return NextResponse.json(await getWarn(Number(sp.get("limit") ?? 100)));

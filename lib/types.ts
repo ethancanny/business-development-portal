@@ -395,6 +395,17 @@ export interface MiFiling {
   majorEvent: boolean;
   status: "new" | "keep" | "dismissed";
   createdAt: string;
+  /** Focus sector the filer maps to ("" = none / unmapped). */
+  sector: string;
+  /** Triage tag: "Competing capital" | "Operating company raise" | "Other"
+   * | "Possible exit buyer" | "Competing platform" | "Distress / asset sale" | "". */
+  tag: string;
+  /** "Why this matters" one-liner shown under the summary. */
+  why: string;
+  /** JSON payload: Form D fields / 8-K items / bankruptcy chapter+court /
+   * keep-link target. "" when empty. */
+  details: string;
+  sic: string;
 }
 
 export interface MiWarnNotice {
