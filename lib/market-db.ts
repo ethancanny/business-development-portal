@@ -1021,6 +1021,13 @@ export async function getFilings(category?: string, status?: string, days?: numb
   await db`UPDATE mi_filings SET status = 'dismissed'
     WHERE status = 'new' AND category <> 'bankruptcy' AND (
       form IN ('10-K', '10-Q') OR company ~* '\\y(Funding|Receivables|Trust|Issuer)\\y')`;
+  // Pre-rework SEC rows (inserted before Oct 15, 2026) that carry no
+  // sector and no tag were never verified under the new gates — retire
+  // them so the tab only shows classified filings. (Form D rows are
+  // exempt: their classification lands via the enrichment pass.)
+  await db`UPDATE mi_filings SET status = 'dismissed'
+    WHERE status = 'new' AND category IN ('acquisition', 'expansion')
+      AND sector = '' AND tag = '' AND created_at < '2026-10-15T00:00:00Z'`;
   const cutoff = days && days > 0 ? new Date(Date.now() - days * 864e5).toISOString().slice(0, 10) : null;
   let rows;
   if (category && category !== "all" && status && status !== "all")
