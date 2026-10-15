@@ -3,10 +3,11 @@ import { ImageResponse } from "next/og";
 /**
  * iOS splash screens (apple-touch-startup-image). The [size] param is
  * "<width>x<height>" in device pixels, e.g. /splash/1170x2532.
- * Purely the cacti / night-sky photo, full-bleed — no logo, no rule, no
- * navy treatment (Ethan, Oct 14 2026: "make the app background purely
- * the cacti with the night sky... and the splash screen as well").
- * Navy remains only as the paint color behind the image while it loads.
+ * Purely the cacti / night-sky photo, full-bleed — no logo, no rule
+ * (Ethan, Oct 14 2026: the photo is the mobile app's loading image).
+ * The photo is an <img> with objectFit "cover": satori's background
+ * pipeline tiled the image vertically on tall canvases (verified in
+ * the rendered PNG), the img path does not.
  */
 const PHOTO = "https://cannycapitalpartners.com/arizona-desert-landscape.jpg";
 const NAVY = "#0d1f3c";
@@ -31,11 +32,15 @@ export async function GET(
           height: "100%",
           display: "flex",
           backgroundColor: NAVY,
-          backgroundImage: `url(${PHOTO})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
         }}
-      />
+      >
+        <img
+          src={PHOTO}
+          width={w}
+          height={h}
+          style={{ objectFit: "cover" }}
+        />
+      </div>
     ),
     {
       width: w,
