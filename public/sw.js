@@ -12,10 +12,10 @@ const CACHE = "ccp-shell-v1";
 const SHELL_ASSETS = [
   "/offline",
   "/manifest.webmanifest",
-  "/icon-192-v2",
-  "/icon-512-v2",
-  "/icon-maskable-v2",
-  "/apple-touch-icon-v2",
+  "/icon-192-v3",
+  "/icon-512-v3",
+  "/icon-maskable-v3",
+  "/apple-touch-icon-v3",
 ];
 
 self.addEventListener("install", (event) => {
@@ -105,8 +105,8 @@ self.addEventListener("push", (event) => {
   const title = data.title || "Canny Capital Portal";
   const options = {
     body: data.body || "",
-    icon: "/icon-192-v2",
-    badge: "/icon-192-v2",
+    icon: "/icon-192-v3",
+    badge: "/icon-192-v3",
     tag: data.tag || undefined,
     data: { url: data.url || "/overview" },
   };

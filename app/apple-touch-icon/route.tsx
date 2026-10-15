@@ -26,7 +26,7 @@ export async function GET() {
         src={PHOTO}
         width={size}
         height={size}
-        style={{ objectFit: "contain" }}
+        style={{ objectFit: "cover" }}
       />
       </div>
     ),

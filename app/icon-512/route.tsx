@@ -30,7 +30,7 @@ export async function GET(req: Request) {
         src={PHOTO}
         width={size}
         height={size}
-        style={{ objectFit: "contain" }}
+        style={{ objectFit: "cover" }}
       />
         )}
       </div>
