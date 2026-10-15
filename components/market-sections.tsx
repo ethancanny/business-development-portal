@@ -6,9 +6,11 @@ import { fmtDate } from "@/lib/format";
 
 /** Section primitives for Market Intel, extracted from the page file
  * (Oct 9, 2026) to keep page.tsx under the GitHub push channel's size cap.
- * Behavior is unchanged: collapsible Section/SubSection with the light
- * open-header tint, the always-open FullSection showcase wrapper, and the
- * major-events highlight strip. */
+ * Behavior: collapsible Section/SubSection, the always-open FullSection
+ * showcase wrapper, and the major-events highlight strip. Header hover
+ * tint applies whether the section is open or closed (Ethan, Oct 14:
+ * hovering an open header to collapse it must still show the highlight —
+ * the open state previously dropped the hover classes entirely). */
 
 /** Stored rows ingested before RSS entity decoding may contain &amp; etc. */
 function decodeEntities(s: string): string {
@@ -42,10 +44,8 @@ export function Section({
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg border-b-2 px-2 pb-2 text-left transition-colors duration-200 ${
-          open
-            ? "border-[#b8975a]"
-            : "border-[#b8975a]/50 hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05]"
+        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg border-b-2 px-2 pb-2 text-left transition-colors duration-200 hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05] ${
+          open ? "border-[#b8975a]" : "border-[#b8975a]/50"
         }`}
       >
         <span>
@@ -81,11 +81,7 @@ export function SubSection({
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className={`-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 ${
-          open
-            ? ""
-            : "hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05]"
-        }`}
+        className="-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05]"
       >
         <span className="text-base font-bold text-[#0d1f3c] dark:text-white">{title}</span>
         <span className="text-lg leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
