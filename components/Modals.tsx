@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { DEAL_STAGES, EXEC_STAGES, PARTNER_NAMES, type Deal, type DealDrivers, type Executive, type MiMultiple } from "@/lib/types";
 import { fmtMoney, fmtDate } from "@/lib/format";
-import { DRIVER_DEFS, estimateMultiple, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
+import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, estimateMultiple, isFocusDeal, matchGroup, resolveDealValue, resolveStatedPrice, resolveStructure, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
 
 function fmtMultRange(lo: number, hi: number): string {
   return lo.toFixed(1) === hi.toFixed(1)
@@ -77,23 +77,64 @@ function EstimateBody({ est }: { est: MultipleEstimate }) {
   const effectiveVerdict =
     Math.abs(est.gapEffectiveX) < 0.05
       ? "Effective pricing matches the market's effective pricing."
-      : `Effective sits ${est.gapEffectiveX > 0 ? "+" : "−"}${Math.abs(est.gapEffectiveX).toFixed(2)}× ${est.gapEffectiveX > 0 ? "above" : "below"} the market's effective pricing${est.gapEffectiveDollars !== null ? ` — about ${fmtMoney(Math.abs(Math.round(est.gapEffectiveDollars)))} ${est.gapEffectiveX > 0 ? "more" : "less"} on this EBITDA` : ""}.`;
+      : `Effective sits ${est.gapEffectiveX > 0 ? "+" : "−"}${Math.abs(est.gapEffectiveX).toFixed(2)}× ${est.gapEffectiveX > 0 ? "above" : "below"} the market's effective pricing${est.gapEffectiveDollars !== null ? ` — about ${fmtMoney(Math.abs(Math.round(est.gapEffectiveDollars)))} ${est.gapEffectiveX > 0 ? "more" : "less"} on this ${est.lens === "Revenue" ? "revenue" : "EBITDA"}` : ""}.`;
+  const signed = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(2)}×`;
+  const headlineMid = (est.headlineLow + est.headlineHigh) / 2;
   return (
     <div className="text-sm">
+      {/* Three-line summary (Oct 14, 2026): headline vs market,
+          effective vs market, largest driver — always visible; the
+          full narrative lives behind Details in the synthesis panel. */}
+      <div className="mb-2 rounded-2xl border border-[#b8975a]/40 bg-[#b8975a]/5 px-4 py-3 dark:bg-[#b8975a]/10">
+        <p className="text-[13px] font-medium text-slate-800 dark:text-[#e8dfc8]">
+          {est.headlineLocked ? (
+            <>
+              Headline <strong>{headlineMid.toFixed(2)}×</strong> vs market{" "}
+              <strong>{est.marketMid.toFixed(2)}×</strong> ({signed(est.gapHeadlineX)})
+            </>
+          ) : (
+            <>
+              Headline — no stated price; shown at the market multiple{" "}
+              <strong>{est.marketMid.toFixed(2)}×</strong>
+            </>
+          )}
+        </p>
+        <p className="mt-0.5 text-[13px] font-medium text-slate-800 dark:text-[#e8dfc8]">
+          Effective <strong>{est.effMid.toFixed(2)}×</strong> vs market estimate{" "}
+          <strong>{est.estimateEffMid.toFixed(2)}×</strong> ({signed(est.gapEffectiveX)}
+          {est.gapEffectiveDollars !== null
+            ? ` ≈ ${fmtMoney(Math.abs(Math.round(est.gapEffectiveDollars)))} ${est.gapEffectiveX > 0 ? "over" : "under"}`
+            : ""})
+        </p>
+        <p className="mt-0.5 text-[13px] font-medium text-slate-800 dark:text-[#e8dfc8]">
+          {est.largestDriver ? (
+            <>
+              Largest driver: {est.largestDriver.label}{" "}
+              <strong>{signed(est.largestDriver.adj)}</strong>
+            </>
+          ) : (
+            <>Largest driver: none recorded</>
+          )}
+          <span className="ml-2 text-xs font-normal text-slate-400 dark:text-white/40">
+            Lens: {est.lens} multiple
+          </span>
+        </p>
+      </div>
       <div className="space-y-2">
         <MultBubble
           step="Market"
           title="Market — unadjusted"
-          caption={`${est.group ?? "All industries"} · ${est.band}`}
+          caption={est.baseSource}
           value={`${est.base.toFixed(2)}×`}
+          sub={`${est.baseIsBlend ? "⚠ All-industry blend — no published median for this industry in the band. " : ""}Backed by ${est.compSupport} published/logged comps · confidence ${est.confidence}`}
           dot="bg-slate-400"
         />
         <MultBubble
           step="Market multiple"
           title="Market multiple — after drivers & growth"
           caption="The headline multiple the market would price this business at"
-          value={`${est.marketMid.toFixed(2)}×`}
-          sub={`Range ${fmtMultRange(est.cashEqLow, est.cashEqHigh)}${est.evLow !== null && est.evHigh !== null ? ` ≈ ${fmtMoneyRange(est.evLow, est.evHigh)}` : ""}`}
+          value={fmtMultRange(est.cashEqLow, est.cashEqHigh)}
+          sub={`Point estimate ${est.marketMid.toFixed(1)}× · confidence ${est.confidence}${est.evLow !== null && est.evHigh !== null ? ` · ≈ ${fmtMoneyRange(est.evLow, est.evHigh)}` : ""}`}
           dot="bg-[#b8975a]"
           emphasize
         />
@@ -215,6 +256,143 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
   );
 }
 
+/** Comp log prompt (Oct 14, 2026): when a deal is passed or reaches a
+ * closing stage, offer to log it as a comp. The row lands in
+ * mi_multiples as sourceReport "Canny Comp Log"; once a group + size
+ * band has ≥5 entries, the valuation engine blends their median into
+ * the base multiple for that group/band. */
+function CompLogSection({ deal, onLogged }: { deal: Deal; onLogged: () => void }) {
+  const now = new Date();
+  const group0 = matchGroup(deal.industry) ?? deal.industry;
+  const stated = resolveStatedPrice(deal);
+  const { mix, amountsTotal } = resolveStructure(deal, matchGroup(deal.industry));
+  const structure0 =
+    `${mix.cash}% cash · ${mix.seller}% seller note · ${mix.earnout}% earnout · ${mix.rollover}% rollover` +
+    (amountsTotal ? ` (stated ${fmtMoney(amountsTotal)})` : "");
+  const [industry, setIndustry] = useState(group0);
+  const [sizeBand, setSizeBand] = useState(bandForDeal(deal));
+  const [period, setPeriod] = useState(`${now.getFullYear()}-Q${Math.floor(now.getMonth() / 3) + 1}`);
+  const [price, setPrice] = useState(stated ? String(Math.round(stated)) : "");
+  const [revenue, setRevenue] = useState(deal.revenue ? String(deal.revenue) : "");
+  const [ebitda, setEbitda] = useState(deal.ebitda ? String(deal.ebitda) : "");
+  const [structure, setStructure] = useState(structure0);
+  const [source, setSource] = useState(`Canny comp log — ${deal.companyName} (${deal.stage})`);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState("");
+
+  const priceN = Number(price) || 0;
+  const revN = Number(revenue) || 0;
+  const ebitdaN = Number(ebitda) || 0;
+  const evEbitda = priceN > 0 && ebitdaN > 0 ? priceN / ebitdaN : null;
+  const evRevenue = priceN > 0 && revN > 0 ? priceN / revN : null;
+
+  const save = async () => {
+    setBusy(true);
+    setErr("");
+    const notes =
+      `Comp: ${deal.companyName} (${deal.stage}) · Revenue ${revN ? fmtMoney(revN) : "—"} · ` +
+      `EBITDA ${ebitdaN ? fmtMoney(ebitdaN) : "—"} · Price ${priceN ? fmtMoney(priceN) : "—"} · ` +
+      `Structure: ${structure} · Source: ${source}`;
+    const res = await fetch("/api/market/multiples", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceReport: "Canny Comp Log",
+        period,
+        industry,
+        sizeBand,
+        evEbitdaLow: null,
+        evEbitdaHigh: null,
+        evEbitdaMedian: evEbitda ? Math.round(evEbitda * 100) / 100 : null,
+        evRevenueMedian: evRevenue ? Math.round(evRevenue * 100) / 100 : null,
+        notes,
+      }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      setDone(true);
+      onLogged();
+    } else {
+      setErr("Could not save the comp — try again.");
+    }
+  };
+
+  const groups = VALUATION_GROUPS.includes(industry) ? VALUATION_GROUPS : [industry, ...VALUATION_GROUPS];
+
+  return (
+    <div className="rounded-xl border border-[#b8975a]/50 bg-[#b8975a]/5 p-3 dark:bg-[#b8975a]/10">
+      <p className="text-sm font-semibold text-slate-900 dark:text-white">
+        📒 Log this deal as a comp
+      </p>
+      <p className="mt-0.5 text-xs text-slate-500 dark:text-white/50">
+        {deal.companyName} is {deal.stage === "Passed" ? "passed" : "at a closing stage"}. Logging it
+        feeds the base multiple for its sector and size band once the log has 5+ entries there.
+      </p>
+      {done ? (
+        <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+          ✓ Logged to the Canny Comp Log ({industry}, {sizeBand}).
+        </p>
+      ) : (
+        <div className="mt-2 flex flex-col gap-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Sector / industry group">
+              <select className={inputCls} value={industry} onChange={(e) => setIndustry(e.target.value)}>
+                {groups.map((g) => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Size band">
+              <select className={inputCls} value={sizeBand} onChange={(e) => setSizeBand(e.target.value)}>
+                {VALUATION_BANDS.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Price (USD)">
+              <input type="number" min="0" className={inputCls} value={price} onChange={(e) => setPrice(e.target.value)} placeholder="—" />
+            </Field>
+            <Field label="Revenue (USD)">
+              <input type="number" min="0" className={inputCls} value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="—" />
+            </Field>
+            <Field label="EBITDA (USD)">
+              <input type="number" min="0" className={inputCls} value={ebitda} onChange={(e) => setEbitda(e.target.value)} placeholder="—" />
+            </Field>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-white/50">
+            {evEbitda !== null && <>EV/EBITDA <strong>{evEbitda.toFixed(2)}×</strong></>}
+            {evEbitda !== null && evRevenue !== null && " · "}
+            {evRevenue !== null && <>EV/Revenue <strong>{evRevenue.toFixed(2)}×</strong></>}
+            {evEbitda === null && evRevenue === null && "Enter a price plus revenue or EBITDA to compute the comp multiples."}
+          </p>
+          <Field label="Structure">
+            <input className={inputCls} value={structure} onChange={(e) => setStructure(e.target.value)} />
+          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Source">
+              <input className={inputCls} value={source} onChange={(e) => setSource(e.target.value)} />
+            </Field>
+            <Field label="Period">
+              <input className={inputCls} value={period} onChange={(e) => setPeriod(e.target.value)} />
+            </Field>
+          </div>
+          {err && <p className="text-xs font-medium text-red-600 dark:text-red-300">{err}</p>}
+          <button
+            onClick={save}
+            disabled={busy || !industry || !sizeBand || !period}
+            className="self-start rounded-lg bg-[#0d1f3c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1a3455] disabled:opacity-50 dark:bg-[#b8975a] dark:text-[#0d1f3c] dark:hover:bg-[#d4b37a]"
+          >
+            {busy ? "Saving…" : "Save comp"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------- Deal modal ----------------
 
 function DupeWarning({
@@ -325,7 +503,8 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
   // recomputes live as financials, drivers and structure are recorded.
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [rates, setRates] = useState<MarketRates>({});
-  useEffect(() => {
+  const [showSynthesis, setShowSynthesis] = useState(false);
+  const loadMultiples = () => {
     fetch("/api/market/multiples")
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setMultiples(Array.isArray(d) ? d : []))
@@ -334,6 +513,10 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setRates({ prime: d?.prime?.value ?? null, sba: d?.sba?.value ?? null }))
       .catch(() => {});
+  };
+  useEffect(() => {
+    loadMultiples();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setDriver = (key: keyof DealDrivers, v: string) =>
@@ -447,10 +630,28 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
 
       {!editing && deal ? (
         <div className="flex flex-col divide-y divide-slate-100 dark:divide-white/10">
-          <DetailRow label="Industry" value={deal.industry} />
+          <DetailRow
+            label="Industry"
+            value={
+              <>
+                {deal.industry}
+                {deal.industry && !isFocusDeal(deal.industry) && (
+                  <span className="ml-1.5 inline-block rounded-full bg-slate-100 px-1.5 py-px align-middle text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-white/50">
+                    Non-focus
+                  </span>
+                )}
+              </>
+            }
+          />
           <DetailRow label="City" value={deal.city} />
           <DetailRow label="Stage" value={deal.stage} />
-          <DetailRow label="Deal value" value={fmtMoney(deal.dealValue)} />
+          <DetailRow
+            label="Deal value"
+            value={(() => {
+              const rv = resolveDealValue(deal, multiples, rates);
+              return rv.value === null ? "—" : `${fmtMoney(rv.value)}${rv.estimated ? " est." : ""}`;
+            })()}
+          />
           <DetailRow
             label="Revenue"
             value={deal.revenue != null ? fmtMoney(deal.revenue) : "—"}
@@ -528,10 +729,33 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
           )}
           {deal.synthesis && (
             <div className="mult-bubble mb-3 rounded-2xl border border-[#b8975a]/40 bg-[#b8975a]/5 px-4 py-3 dark:bg-[#b8975a]/10">
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8a6f3c] dark:text-[#d4b37a]">
-                Synthesis{deal.synthesis.author ? ` — ${deal.synthesis.author}` : ""} · {fmtDate(deal.synthesis.updatedAt)}
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700 dark:text-[#e8dfc8]">{deal.synthesis.text}</p>
+              <button
+                onClick={() => setShowSynthesis((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 text-left"
+                aria-expanded={showSynthesis}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8a6f3c] dark:text-[#d4b37a]">
+                  Synthesis{deal.synthesis.author ? ` — ${deal.synthesis.author}` : ""} · {fmtDate(deal.synthesis.updatedAt)}
+                </span>
+                <span className="shrink-0 text-xs font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">
+                  {showSynthesis ? "Hide details ▴" : "Details ▾"}
+                </span>
+              </button>
+              {showSynthesis && (
+                <>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700 dark:text-[#e8dfc8]">{deal.synthesis.text}</p>
+                  {viewEst && viewEst.sourcesUsed.length > 0 && (
+                    <p className="mt-2 border-t border-[#b8975a]/25 pt-2 text-xs text-slate-500 dark:text-white/50">
+                      Sources: {viewEst.sourcesUsed.join(" · ")}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {(deal.stage === "Passed" || deal.stage === "Closed Won") && (
+            <div className="py-3">
+              <CompLogSection deal={deal} onLogged={loadMultiples} />
             </div>
           )}
           <div className="flex gap-2 pt-4">
@@ -851,6 +1075,9 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
               </button>
             </div>
           </Field>
+          {!isNew && (form.stage === "Passed" || form.stage === "Closed Won") && (
+            <CompLogSection deal={formDeal} onLogged={loadMultiples} />
+          )}
           <div className="flex gap-2 pt-1">
             <button
               onClick={save}
