@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "@/components/ThemeProvider";
+import { IconAuditTrail, IconSettings } from "@/components/icons";
 
 const NAV = [
   { href: "/overview", label: "Overview" },
@@ -11,17 +12,49 @@ const NAV = [
   { href: "/activity", label: "Activity" },
   { href: "/market-intel", label: "Market Intel" },
   { href: "/directory", label: "Directory" },
+  { href: "/calendar", label: "Calendar" },
 ];
 
-const CALENDAR = { href: "/calendar", label: "Calendar" };
-const AUDIT = { href: "/audit-trail", label: "Audit Trail" };
-const SETTINGS = { href: "/settings", label: "Settings" };
+// Ethan (Oct 14): Audit Trail and Settings live under an "Other" tab so
+// the header never crowds. Calendar keeps its own tab.
+const OTHER = [
+  { href: "/audit-trail", label: "Audit Trail", Icon: IconAuditTrail },
+  { href: "/settings", label: "Settings", Icon: IconSettings },
+];
 
 export default function SiteHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const { theme, toggle } = useTheme();
   const [userName, setUserName] = useState("");
+  const [otherOpen, setOtherOpen] = useState(false);
+  const otherRef = useRef<HTMLDivElement | null>(null);
+
+  // The Other menu closes on navigation, outside click, and Escape.
+  useEffect(() => {
+    setOtherOpen(false);
+  }, [pathname]);
+  useEffect(() => {
+    if (!otherOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (otherRef.current && !otherRef.current.contains(e.target as Node)) {
+        setOtherOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOtherOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [otherOpen]);
+
+  const otherActive = OTHER.some(
+    (item) => pathname === item.href || pathname.startsWith(item.href + "/")
+  );
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -94,12 +127,67 @@ export default function SiteHeader() {
           </Link>
           <nav className="hidden items-center gap-1 md:flex">
             {NAV.map((item) => navLink(item.href, item.label))}
+            <div className="relative" ref={otherRef}>
+              <button
+                type="button"
+                onClick={() => setOtherOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={otherOpen}
+                className={`flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1.5 text-[13px] font-semibold transition xl:px-3 xl:text-sm ${
+                  otherActive
+                    ? "bg-[#b8975a] text-[#0d1f3c]"
+                    : "text-[#e8dfc8] hover:bg-white/10 hover:text-white"
+                }`}
+              >
+                Other
+                <svg
+                  viewBox="0 0 20 20"
+                  className={`h-3.5 w-3.5 transition-transform ${otherOpen ? "rotate-180" : ""}`}
+                  fill="currentColor"
+                  aria-hidden
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08Z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+              {otherOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-0 top-full z-50 mt-2 min-w-48 overflow-hidden rounded-xl border border-[#b8975a]/30 bg-[#16305a] py-1.5 shadow-xl shadow-black/30"
+                >
+                  {OTHER.map((item) => {
+                    const active =
+                      pathname === item.href ||
+                      pathname.startsWith(item.href + "/");
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        role="menuitem"
+                        onClick={() => setOtherOpen(false)}
+                        className={`flex items-center gap-2.5 px-3.5 py-2 text-sm font-medium transition ${
+                          active
+                            ? "text-[#d4b37a]"
+                            : "text-[#e8dfc8] hover:bg-white/10 hover:text-white"
+                        }`}
+                      >
+                        <item.Icon className="h-4.5 w-4.5 shrink-0" />
+                        {item.label}
+                        {active && (
+                          <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#b8975a]" />
+                        )}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </nav>
         </div>
         <div className="hidden shrink-0 items-center gap-2 md:flex xl:gap-3">
-          {navLink(CALENDAR.href, CALENDAR.label)}
-          {navLink(AUDIT.href, AUDIT.label)}
-          {navLink(SETTINGS.href, SETTINGS.label)}
           <span className="hidden h-5 w-px bg-[#b8975a]/40 sm:block" />
           {userName && (
             <span className="hidden text-xs text-[#c8bfa8] sm:block">
