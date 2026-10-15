@@ -1,20 +1,18 @@
 import { ImageResponse } from "next/og";
 
 /**
- * 512×512 maskable PWA icon. Android may crop the canvas to a circle,
- * so the photo is inset on a solid-navy field and the wordmark is kept
- * inside the center ~55% — well within the maskable safe zone.
+ * 512×512 maskable PWA icon: PURELY the cacti / night-sky photo,
+ * zoomed out — the full image fit inside the square ("contain"), so
+ * Android's circle/squircle crop still shows the whole scene; navy
+ * night fills the letterbox and any crop margin (Ethan, Oct 14 2026:
+ * the home-screen cover is just the photo, almost the full image).
+ * No wordmark. Rendered at request time by next/og.
  */
 const PHOTO = "https://cannycapitalpartners.com/arizona-desert-landscape.jpg";
-const LOGO = "https://cannycapitalpartners.com/canny-logo-white.png";
 const NAVY = "#0d1f3c";
-const LOGO_RATIO = 503 / 89;
 
 export async function GET() {
   const size = 512;
-  const inset = Math.round(size * 0.1); // navy border behind the photo edges
-  const logoW = Math.round(size * 0.52);
-  const logoH = Math.round(logoW / LOGO_RATIO);
   return new ImageResponse(
     (
       <div
@@ -23,24 +21,12 @@ export async function GET() {
           height: "100%",
           display: "flex",
           backgroundColor: NAVY,
-          padding: inset,
+          backgroundImage: `url(${PHOTO})`,
+          backgroundSize: "contain",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
         }}
-      >
-        <div
-          style={{
-            width: "100%",
-            height: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundImage: `url(${PHOTO})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-          }}
-        >
-          <img src={LOGO} width={logoW} height={logoH} />
-        </div>
-      </div>
+      />
     ),
     {
       width: size,

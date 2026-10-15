@@ -1,19 +1,17 @@
 import { ImageResponse } from "next/og";
 
 /**
- * 180×180 Apple touch icon (iOS Home Screen): wordmark over the
- * night-sky photo. iOS applies its own corner rounding, so the art is
- * full-bleed like the standard PWA icons.
+ * 180×180 Apple touch icon (iOS Home Screen): PURELY the cacti /
+ * night-sky photo, zoomed out — the (nearly) full image fit inside
+ * the square, navy night filling the letterbox (Ethan, Oct 14 2026).
+ * iOS applies its own corner rounding. No wordmark. Rendered at
+ * request time by next/og.
  */
 const PHOTO = "https://cannycapitalpartners.com/arizona-desert-landscape.jpg";
-const LOGO = "https://cannycapitalpartners.com/canny-logo-white.png";
 const NAVY = "#0d1f3c";
-const LOGO_RATIO = 503 / 89;
 
 export async function GET() {
   const size = 180;
-  const logoW = Math.round(size * 0.62);
-  const logoH = Math.round(logoW / LOGO_RATIO);
   return new ImageResponse(
     (
       <div
@@ -21,16 +19,13 @@ export async function GET() {
           width: "100%",
           height: "100%",
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
           backgroundColor: NAVY,
           backgroundImage: `url(${PHOTO})`,
-          backgroundSize: "cover",
+          backgroundSize: "contain",
           backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
         }}
-      >
-        <img src={LOGO} width={logoW} height={logoH} />
-      </div>
+      />
     ),
     {
       width: size,
