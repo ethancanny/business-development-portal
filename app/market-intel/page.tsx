@@ -27,7 +27,7 @@ import { Section, SubSection, FullSection, EventStrip } from "@/components/marke
 import UpdatesStrip from "@/components/UpdatesStrip";
 import ValleyDemographics from "@/components/ValleyDemographics";
 import { useTheme } from "@/components/ThemeProvider";
-import { fmtMoney, fmtDate } from "@/lib/format";
+import { fmtMoney, fmtDate, uniqueStrings } from "@/lib/format";
 import type {
   MiAcquisition,
   MiFiling,
@@ -1593,7 +1593,7 @@ export default function MarketIntelPage() {
                           <span>{f.summary || "—"}</span>
                           {f.category === "form_d" && fd && (fd.industryGroup || (fd.relatedPersons && fd.relatedPersons.length > 0)) && (
                             <span className="mt-0.5 block text-xs text-slate-400 dark:text-white/40">
-                              {fd.industryGroup ? `Industry: ${fd.industryGroup}` : ""}{fd.firstSale ? ` · First sale: ${fd.firstSale}` : ""}{fd.relatedPersons && fd.relatedPersons.length > 0 ? ` · Related: ${fd.relatedPersons.join(", ")}` : ""}
+                              {fd.industryGroup ? `Industry: ${fd.industryGroup}` : ""}{fd.firstSale ? ` · First sale: ${fd.firstSale}` : ""}{fd.relatedPersons && fd.relatedPersons.length > 0 ? ` · Related: ${uniqueStrings(fd.relatedPersons).join(", ")}` : ""}
                             </span>
                           )}
                           {f.category === "bankruptcy" && fd && fd.docketNumber && (
