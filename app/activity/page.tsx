@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
+import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import type { DealFlowItem, DealFlowKind, DealFlowStatus } from "@/lib/types";
 
 const KIND_META: Record<DealFlowKind, { label: string; cls: string }> = {
@@ -54,6 +55,9 @@ export default function ActivityPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Pull-to-refresh (mobile PWA).
+  const { pull, refreshing } = usePullToRefresh(load);
 
   const filtered = useMemo(
     () => (filter === "all" ? items : items.filter((i) => i.status === filter)),
@@ -143,6 +147,13 @@ export default function ActivityPage() {
         subtitle="Fresh businesses for sale, operators on the market, and local notes — triage them into the pipeline."
       />
       <main className="mx-auto max-w-[1100px] px-4 py-6 sm:px-6">
+        {(pull > 8 || refreshing) && (
+          <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center">
+            <span className="rounded-full bg-[#0d1f3c] px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg">
+              {pullPillLabel(pull, refreshing)}
+            </span>
+          </div>
+        )}
         <div className="mb-4 flex flex-wrap items-center gap-2">
           {STATUS_FILTERS.map((s) => (
             <button

@@ -177,6 +177,48 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
     }
   }
 
+  /** Expanded profile + actions, shared by the desktop detail row and
+   * the mobile card. `touch` enlarges the action buttons to ≥44px. */
+  function detailBlock(c: MiCompany, isFit: boolean, touch: boolean) {
+    const fit = fitOf(c);
+    const btnBase = touch
+      ? "flex min-h-[44px] items-center rounded-lg px-3.5 py-2 text-xs font-semibold disabled:opacity-50"
+      : "rounded-lg px-3 py-1.5 text-xs disabled:opacity-50";
+    return (
+      <>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-slate-700 dark:text-white/80 md:grid-cols-3">
+          {c.address && <p><span className="text-slate-400 dark:text-white/40">Address </span>{c.address}{c.zip ? `, ${c.zip}` : ""}</p>}
+          {c.contactName && <p><span className="text-slate-400 dark:text-white/40">Contact </span>{c.contactName}{c.contactTitle ? ` — ${c.contactTitle}` : ""}</p>}
+          {c.phone && <p><span className="text-slate-400 dark:text-white/40">Phone </span>{c.phone}</p>}
+          {c.website && <p><span className="text-slate-400 dark:text-white/40">Web </span><a className="underline" href={c.website.startsWith("http") ? c.website : `https://${c.website}`} target="_blank" rel="noreferrer">{c.website}</a></p>}
+          {c.formedDate && <p><span className="text-slate-400 dark:text-white/40">On file since </span>{c.formedDate}</p>}
+          {c.signalValue ? <p><span className="text-slate-400 dark:text-white/40">{c.signalLabel} </span>{fmtMoney(c.signalValue)}</p> : null}
+          {profileDetails(c).map(([k, v]) => (
+            <p key={k}><span className="text-slate-400 dark:text-white/40">{k} </span>{v}</p>
+          ))}
+          <p><span className="text-slate-400 dark:text-white/40">Source </span>{c.sourceUrl ? <a className="underline" href={c.sourceUrl} target="_blank" rel="noreferrer">{c.source}</a> : c.source}</p>
+        </div>
+        {isFit && (
+          <p className="mt-2 rounded-lg bg-[#b8975a]/15 px-2.5 py-1.5 text-xs font-medium text-[#8a6f3c] dark:text-[#d4b37a]">
+            ★ Acquisition fit — {fit.why || "established, right-sized target in a focus sector"}
+          </p>
+        )}
+        {profileNote(c) && <p className="mt-2 text-xs text-slate-500 dark:text-white/50">{profileNote(c)}</p>}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {c.status !== "added" ? (
+            <button disabled={busy === c.id} onClick={() => addToPipeline(c)} className={`${btnBase} bg-[#b8975a] font-semibold text-white`}>＋ Add to pipeline</button>
+          ) : (
+            <span className={`${btnBase} bg-[#b8975a]/15 font-semibold text-[#8a6f3c] dark:text-[#d4b37a]`}>✓ In pipeline</span>
+          )}
+          {c.status !== "keep" && c.status !== "added" && (
+            <button disabled={busy === c.id} onClick={() => setStatus(c, "keep")} className={`${btnBase} border border-slate-300 font-medium text-slate-600 dark:border-white/20 dark:text-white/70`}>Keep</button>
+          )}
+          <button disabled={busy === c.id} onClick={() => setStatus(c, "dismissed")} className={`${btnBase} border border-slate-300 font-medium text-slate-600 dark:border-white/20 dark:text-white/70`}>Dismiss</button>
+        </div>
+      </>
+    );
+  }
+
   return (
     <div className="mb-5 mt-5">
       <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -209,7 +251,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
             : "No fits among the top companies loaded by size signal — fits exist further down this industry's registry."}
         </p>
       )}
-      <div className="max-h-96 overflow-auto rounded-xl border border-slate-200 dark:border-white/10">
+      <div className="hidden max-h-96 overflow-auto rounded-xl border border-slate-200 dark:border-white/10 md:block">
         <table className="tbl-grad w-full border-collapse bg-white dark:bg-[#132847]/40">
           <thead>
             <tr>
@@ -255,35 +297,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
                 {openId === c.id && (
                   <tr key={`${c.id}-detail`} className="border-t border-slate-100 bg-slate-50/60 dark:border-white/5 dark:bg-white/5">
                     <td colSpan={multi ? 7 : 6} className="px-3 py-3">
-                      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-slate-700 dark:text-white/80 md:grid-cols-3">
-                        {c.address && <p><span className="text-slate-400 dark:text-white/40">Address </span>{c.address}{c.zip ? `, ${c.zip}` : ""}</p>}
-                        {c.contactName && <p><span className="text-slate-400 dark:text-white/40">Contact </span>{c.contactName}{c.contactTitle ? ` — ${c.contactTitle}` : ""}</p>}
-                        {c.phone && <p><span className="text-slate-400 dark:text-white/40">Phone </span>{c.phone}</p>}
-                        {c.website && <p><span className="text-slate-400 dark:text-white/40">Web </span><a className="underline" href={c.website.startsWith("http") ? c.website : `https://${c.website}`} target="_blank" rel="noreferrer">{c.website}</a></p>}
-                        {c.formedDate && <p><span className="text-slate-400 dark:text-white/40">On file since </span>{c.formedDate}</p>}
-                        {c.signalValue ? <p><span className="text-slate-400 dark:text-white/40">{c.signalLabel} </span>{fmtMoney(c.signalValue)}</p> : null}
-                        {profileDetails(c).map(([k, v]) => (
-                          <p key={k}><span className="text-slate-400 dark:text-white/40">{k} </span>{v}</p>
-                        ))}
-                        <p><span className="text-slate-400 dark:text-white/40">Source </span>{c.sourceUrl ? <a className="underline" href={c.sourceUrl} target="_blank" rel="noreferrer">{c.source}</a> : c.source}</p>
-                      </div>
-                      {fit.fit && (
-                        <p className="mt-2 rounded-lg bg-[#b8975a]/15 px-2.5 py-1.5 text-xs font-medium text-[#8a6f3c] dark:text-[#d4b37a]">
-                          ★ Acquisition fit — {fit.why || "established, right-sized target in a focus sector"}
-                        </p>
-                      )}
-                      {profileNote(c) && <p className="mt-2 text-xs text-slate-500 dark:text-white/50">{profileNote(c)}</p>}
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {c.status !== "added" ? (
-                          <button disabled={busy === c.id} onClick={() => addToPipeline(c)} className="rounded-lg bg-[#b8975a] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">＋ Add to pipeline</button>
-                        ) : (
-                          <span className="rounded-lg bg-[#b8975a]/15 px-3 py-1.5 text-xs font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">✓ In pipeline</span>
-                        )}
-                        {c.status !== "keep" && c.status !== "added" && (
-                          <button disabled={busy === c.id} onClick={() => setStatus(c, "keep")} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 disabled:opacity-50 dark:border-white/20 dark:text-white/70">Keep</button>
-                        )}
-                        <button disabled={busy === c.id} onClick={() => setStatus(c, "dismissed")} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 disabled:opacity-50 dark:border-white/20 dark:text-white/70">Dismiss</button>
-                      </div>
+                      {detailBlock(c, fit.fit, false)}
                     </td>
                   </tr>
                 )}
@@ -292,6 +306,63 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
             })}
           </tbody>
         </table>
+      </div>
+      {/* Mobile: stacked cards (same rows; tap expands the profile). */}
+      <div className="space-y-2.5 md:hidden">
+        {visible.slice(0, 300).map((c) => {
+          const fit = fitOf(c);
+          const open = openId === c.id;
+          return (
+            <div
+              key={c.id}
+              className={`overflow-hidden rounded-xl border bg-white shadow-sm dark:bg-[#132847]/40 ${
+                fit.fit
+                  ? "border-[#b8975a]/50 dark:border-[#b8975a]/40"
+                  : "border-slate-200 dark:border-white/10"
+              }`}
+            >
+              <button
+                onClick={() => setOpenId(open ? null : c.id)}
+                aria-expanded={open}
+                className="flex min-h-[44px] w-full items-center gap-2 p-3.5 text-left"
+              >
+                <CompanyLogo name={c.name} website={c.website} sector={c.sector} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">
+                    {c.name}
+                    {fit.fit && <span className="ml-2 rounded bg-[#b8975a] px-1.5 py-0.5 text-[10px] font-bold text-white">★ FIT</span>}
+                    {c.status === "keep" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">KEPT</span>}
+                    {c.status === "added" && <span className="ml-2 rounded bg-[#b8975a]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">IN PIPELINE</span>}
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-white/50">
+                    {[c.city, c.subsector, yearOf(c.formedDate) ? `since ${yearOf(c.formedDate)}` : ""]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </span>
+                </span>
+                <span className="whitespace-nowrap text-sm font-semibold text-slate-800 dark:text-[#e8dfc8]">
+                  {c.signalValue ? fmtMoney(c.signalValue) : c.employees ? `${c.employees.toLocaleString()} emp` : "—"}
+                </span>
+                <span className="text-slate-400 dark:text-white/40">{open ? "▾" : "▸"}</span>
+              </button>
+              {multi && (
+                <div className="px-3.5 pb-2">
+                  <SectorChip sector={c.sector} />
+                </div>
+              )}
+              {open && (
+                <div className="border-t border-slate-100 bg-slate-50/60 px-3.5 py-3 dark:border-white/5 dark:bg-white/5">
+                  {detailBlock(c, fit.fit, true)}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {visible.length === 0 && (
+          <p className="rounded-xl border border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-400 dark:border-white/10 dark:bg-[#132847]/40 dark:text-white/40">
+            No companies match.
+          </p>
+        )}
       </div>
       {visible.length > 300 && <p className="mt-1 text-xs text-slate-400 dark:text-white/30">Showing the top 300 — search to narrow the list.</p>}
       <p className="mt-1 text-xs text-slate-400 dark:text-white/30">

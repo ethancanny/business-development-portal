@@ -92,7 +92,8 @@ export default function PairingTable({
     "cursor-pointer select-none whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-800 dark:text-white/50 dark:hover:text-white";
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-[#132847]">
+    <div>
+    <div className="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-[#132847] md:block">
       <table className="tbl-grad w-full min-w-[960px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-slate-200 dark:border-white/10">
@@ -193,6 +194,72 @@ export default function PairingTable({
           )}
         </tbody>
       </table>
+    </div>
+    {/* Mobile: stacked cards (same pairings; tap opens the deal). */}
+    <div className="space-y-2.5 md:hidden">
+      {sorted.map(({ deal: d, operator: op, isMatch }) => {
+        const rv = resolveDealValue(d, multiples, rates);
+        return (
+          <div
+            key={`${d.id}-${op.id}`}
+            onClick={() => onSelectDeal(d)}
+            className="cursor-pointer rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm transition active:bg-slate-50 dark:border-white/10 dark:bg-[#132847] dark:active:bg-white/5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className="flex min-w-0 items-center gap-2">
+                <CompanyLogo
+                  name={d.companyName}
+                  website={dealWebsite(d)}
+                  sector={dealFocusSector(d.industry) ?? d.industry}
+                />
+                <Link
+                  href={`/deals/${d.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="min-w-0 truncate font-semibold text-slate-900 hover:underline dark:text-white"
+                >
+                  {d.companyName}
+                </Link>
+              </span>
+              <span className="whitespace-nowrap font-semibold text-slate-800 dark:text-[#e8dfc8]">
+                {rv.value === null ? "—" : `${fmtMoney(rv.value)}${rv.estimated ? " est." : ""}`}
+              </span>
+            </div>
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+              {d.industry && (
+                <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
+              )}
+              <StageChip stage={d.stage} />
+              {isMatch && (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
+                  ✓ industry match
+                </span>
+              )}
+            </div>
+            <div className="mt-2.5 flex items-center gap-2 border-t border-slate-100 pt-2.5 dark:border-white/5">
+              <PersonAvatar name={op.name} photoUrl={op.photoUrl} />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">
+                  {op.name}
+                </span>
+                {op.currentTitle && (
+                  <span className="block truncate text-xs text-slate-500 dark:text-white/50">
+                    {op.currentTitle}
+                  </span>
+                )}
+              </span>
+              <span className="ml-auto whitespace-nowrap text-xs text-slate-500 dark:text-white/50">
+                {d.owner || "Unclaimed"}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+      {sorted.length === 0 && (
+        <p className="rounded-xl border border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-400 dark:border-white/10 dark:bg-[#132847] dark:text-white/40">
+          No pairings yet — pair operators from a deal.
+        </p>
+      )}
+    </div>
     </div>
   );
 }

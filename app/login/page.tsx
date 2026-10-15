@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { startAuthentication } from "@simplewebauthn/browser";
 import { useTheme } from "@/components/ThemeProvider";
 
 export default function LoginPage() {
@@ -11,6 +12,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,6 +35,44 @@ export default function LoginPage() {
       setError("Network error. Please try again.");
     }
     setBusy(false);
+  };
+
+  const submitPasskey = async () => {
+    setError("");
+    if (!email.trim()) {
+      setError("Enter your email first, then use the passkey button.");
+      return;
+    }
+    setPasskeyBusy(true);
+    try {
+      const optRes = await fetch("/api/webauthn/auth/options", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const options = await optRes.json().catch(() => ({}));
+      if (!optRes.ok) {
+        setError(options.error || "No passkey available for this account.");
+        setPasskeyBusy(false);
+        return;
+      }
+      const response = await startAuthentication({ optionsJSON: options });
+      const verRes = await fetch("/api/webauthn/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, response }),
+      });
+      if (verRes.ok) {
+        router.replace("/overview");
+        router.refresh();
+      } else {
+        const data = await verRes.json().catch(() => ({}));
+        setError(data.error || "Passkey sign-in failed. Try your password.");
+      }
+    } catch {
+      setError("Passkey sign-in was cancelled or is not available here.");
+    }
+    setPasskeyBusy(false);
   };
 
   return (
@@ -100,6 +140,27 @@ export default function LoginPage() {
             {busy ? "Signing in…" : "Sign in"}
           </button>
         </form>
+
+        <div className="mt-6 flex items-center gap-3">
+          <span className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
+          <span className="text-xs font-medium text-slate-400 dark:text-white/40">
+            or
+          </span>
+          <span className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
+        </div>
+
+        <button
+          type="button"
+          onClick={submitPasskey}
+          disabled={passkeyBusy}
+          className="mt-4 w-full rounded-lg border border-[#0d1f3c]/25 px-4 py-2.5 text-sm font-semibold text-[#0d1f3c] transition hover:border-[#b8975a] disabled:opacity-50 dark:border-white/25 dark:text-[#e8dfc8] dark:hover:border-[#b8975a]"
+        >
+          {passkeyBusy ? "Waiting for passkey…" : "Sign in with a passkey"}
+        </button>
+        <p className="mt-2 text-center text-xs text-slate-400 dark:text-white/40">
+          Uses Face ID, Touch ID, or your device PIN. Add a passkey from
+          Settings after signing in.
+        </p>
       </div>
     </div>
   );

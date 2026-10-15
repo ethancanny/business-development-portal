@@ -62,7 +62,8 @@ export default function ExecTable({
     "cursor-pointer select-none whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-800 dark:text-white/50 dark:hover:text-white";
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-[#132847]">
+    <div>
+    <div className="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-[#132847] md:block">
       <table className="tbl-grad w-full min-w-[900px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-slate-200 dark:border-white/10">
@@ -166,6 +167,77 @@ export default function ExecTable({
           )}
         </tbody>
       </table>
+    </div>
+    {/* Mobile: stacked cards (same sorted data; tap opens the profile). */}
+    <div className="space-y-2.5 md:hidden">
+      {sorted.map((e) => {
+        const paired = pairedDeals(e.id);
+        return (
+          <div
+            key={e.id}
+            onClick={() => onSelect(e)}
+            className="cursor-pointer rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm transition active:bg-slate-50 dark:border-white/10 dark:bg-[#132847] dark:active:bg-white/5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className="flex min-w-0 items-center gap-2">
+                <PersonAvatar name={e.name} photoUrl={e.photoUrl} size={32} />
+                <span className="min-w-0">
+                  <span className="block truncate font-semibold text-slate-900 dark:text-white">
+                    {e.name}
+                  </span>
+                  {(e.currentTitle || e.targetRole) && (
+                    <span className="block truncate text-xs text-slate-500 dark:text-white/50">
+                      {e.currentTitle}
+                      {e.currentTitle && e.targetRole ? " → " : ""}
+                      {e.targetRole}
+                    </span>
+                  )}
+                </span>
+              </span>
+              <StageChip stage={e.stage} />
+            </div>
+            {e.industries && e.industries.length > 0 && (
+              <div className="mt-2.5 flex flex-wrap gap-1">
+                {e.industries.map((ind) => (
+                  <SectorChip key={ind} sector={dealFocusSector(ind) ?? ind} />
+                ))}
+              </div>
+            )}
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-white/50">
+              <span>{e.owner || "Unclaimed"}</span>
+              <span
+                style={{
+                  color: agingColor(
+                    Math.floor((Date.now() - new Date(e.updatedAt).getTime()) / 86400000),
+                    60,
+                    90
+                  ),
+                }}
+              >
+                Updated {fmtDateShort(e.updatedAt)}
+              </span>
+            </div>
+            {paired.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {paired.map((d) => (
+                  <span
+                    key={d.id}
+                    className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-500/20 dark:text-violet-200"
+                  >
+                    ◈ {d.companyName}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {sorted.length === 0 && (
+        <p className="rounded-xl border border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-400 dark:border-white/10 dark:bg-[#132847] dark:text-white/40">
+          No candidates match.
+        </p>
+      )}
+    </div>
     </div>
   );
 }
