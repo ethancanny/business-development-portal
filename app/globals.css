@@ -2,6 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+/* PWA / mobile shell (CRM Phase 2): never scroll sideways on phones,
+   no grey tap flash, and safe-area helpers for notch / home bar. */
+html,
+body {
+  overflow-x: clip;
+}
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.pl-safe {
+  padding-left: env(safe-area-inset-left);
+}
+.pr-safe {
+  padding-right: env(safe-area-inset-right);
+}
+
 /* Data-table gradients (Ethan, Oct 14, 2026 — "bring back those
    gradients"): a soft navy-to-gold wash behind the table body and a
    navy gradient band across the header row. Add class "tbl-grad" to a
