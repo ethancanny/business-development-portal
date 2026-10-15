@@ -156,7 +156,7 @@ function formdSector(group: string): string {
  * amounts, first-sale date and related persons; classify fund vs
  * operating company and tag accordingly (Ethan, Oct 14, 2026). */
 async function enrichFormDs(): Promise<number> {
-  const pending = await getFilingsNeedingDetails(20);
+  const pending = await getFilingsNeedingDetails(12);
   let done = 0;
   for (const f of pending) {
     if (!f.cik || !f.accession) continue;
@@ -251,10 +251,10 @@ async function ingestCourtBankruptcies(): Promise<number> {
       `https://www.courtlistener.com/api/rest/v4/search/?type=r&court=arb&filed_after=${since}&order_by=dateFiled%20desc&page_size=100`;
     let reported = 0;
     const results: Record<string, unknown>[] = [];
-    for (let page = 0; page < 3 && url; page++) {
+    for (let page = 0; page < 2 && url; page++) {
       const res: Response = await fetch(url, {
         headers: { "User-Agent": "CannyCapitalPortal/1.0 (ethan@cannycapitalpartners.com)" },
-        signal: AbortSignal.timeout(25000),
+        signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) {
         await logSync("bankruptcy-xcheck", "error", 0, `CourtListener HTTP ${res.status}`);
