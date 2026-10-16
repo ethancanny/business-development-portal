@@ -617,6 +617,40 @@ export async function countFits(sector?: string): Promise<number> {
  * stamps inside details are touched — fit / fitWhy / fitUnscored /
  * estRevenue; every other details key (consolidation, members, enrichment)
  * is preserved. Returns the next offset, or -1 when the sector is done. */
+function rowToCompanyInput(r: Record<string, unknown>): CompanyInput {
+  return {
+    dedupKey: str(r.dedup_key), name: str(r.name), sector: str(r.sector),
+    subsector: str(r.subsector), naics: str(r.naics), city: str(r.city),
+    state: str(r.state), address: str(r.address), zip: str(r.zip),
+    contactName: str(r.contact_name), contactTitle: str(r.contact_title),
+    phone: str(r.phone), website: str(r.website), formedDate: str(r.formed_date),
+    employees: numOrNull(r.employees), signalValue: numOrNull(r.signal_value),
+    signalLabel: str(r.signal_label), source: str(r.source), sourceUrl: str(r.source_url),
+    details: str(r.details),
+  };
+}
+
+/** Re-judge ONE company row's fit stamps in place. Returns the new
+ * details JSON and whether the fit stamps changed. Non-JSON details
+ * pass through untouched, as at import. */
+function judgeDetails(input: CompanyInput): { details: string; changed: boolean } {
+  const { fit, why, unscored, estRevenue } = computeFit(input);
+  let d: Record<string, unknown> = {};
+  try {
+    d = input.details ? (JSON.parse(input.details) as Record<string, unknown>) : {};
+  } catch {
+    return { details: input.details ?? "", changed: false };
+  }
+  const before = JSON.stringify({ f: d.fit, w: d.fitWhy, u: d.fitUnscored, e: d.estRevenue });
+  if (fit) { d.fit = true; d.fitWhy = why; } else { delete d.fit; delete d.fitWhy; }
+  if (unscored) d.fitUnscored = true; else delete d.fitUnscored;
+  if (typeof estRevenue === "number") d.estRevenue = estRevenue;
+  else if (estRevenue === null) delete d.estRevenue;
+  else if (typeof d.revenueEstimate === "number") d.estRevenue = d.revenueEstimate;
+  const after = JSON.stringify({ f: d.fit, w: d.fitWhy, u: d.fitUnscored, e: d.estRevenue });
+  return { details: JSON.stringify(d), changed: before !== after };
+}
+
 export async function rescoreCompanies(sector: string | undefined, offset: number, pageSize = 1500): Promise<{ processed: number; changed: number; nextOffset: number }> {
   await ensureSchema();
   await refreshHospitalityThresholds();
@@ -626,36 +660,40 @@ export async function rescoreCompanies(sector: string | undefined, offset: numbe
     : await db`SELECT * FROM mi_companies ORDER BY id LIMIT ${pageSize} OFFSET ${offset}`;
   let changed = 0;
   for (const r of rows) {
-    const input: CompanyInput = {
-      dedupKey: str(r.dedup_key), name: str(r.name), sector: str(r.sector),
-      subsector: str(r.subsector), naics: str(r.naics), city: str(r.city),
-      state: str(r.state), address: str(r.address), zip: str(r.zip),
-      contactName: str(r.contact_name), contactTitle: str(r.contact_title),
-      phone: str(r.phone), website: str(r.website), formedDate: str(r.formed_date),
-      employees: numOrNull(r.employees), signalValue: numOrNull(r.signal_value),
-      signalLabel: str(r.signal_label), source: str(r.source), sourceUrl: str(r.source_url),
-      details: str(r.details),
-    };
-    const { fit, why, unscored, estRevenue } = computeFit(input);
-    let d: Record<string, unknown> = {};
-    try {
-      d = input.details ? (JSON.parse(input.details) as Record<string, unknown>) : {};
-    } catch {
-      continue; // non-JSON details pass through untouched, as at import
-    }
-    const before = JSON.stringify({ f: d.fit, w: d.fitWhy, u: d.fitUnscored, e: d.estRevenue });
-    if (fit) { d.fit = true; d.fitWhy = why; } else { delete d.fit; delete d.fitWhy; }
-    if (unscored) d.fitUnscored = true; else delete d.fitUnscored;
-    if (typeof estRevenue === "number") d.estRevenue = estRevenue;
-    else if (estRevenue === null) delete d.estRevenue;
-    else if (typeof d.revenueEstimate === "number") d.estRevenue = d.revenueEstimate;
-    const after = JSON.stringify({ f: d.fit, w: d.fitWhy, u: d.fitUnscored, e: d.estRevenue });
-    if (before !== after) {
-      await db`UPDATE mi_companies SET details = ${JSON.stringify(d)} WHERE id = ${r.id}`;
+    const input = rowToCompanyInput(r as Record<string, unknown>);
+    const judged = judgeDetails(input);
+    if (judged.changed) {
+      await db`UPDATE mi_companies SET details = ${judged.details} WHERE id = ${r.id}`;
       changed++;
     }
   }
   return { processed: rows.length, changed, nextOffset: rows.length < pageSize ? -1 : offset + rows.length };
+}
+
+/** Targeted re-judge of specific company rows (used by enrichment
+ * stampers — e.g. the ADHS ingest — that change details inputs like
+ * adhsUnits on a known set of rows and need their fit stamps refreshed
+ * without paging the whole sector). Returns how many rows changed. */
+export async function rescoreCompaniesByIds(ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  await ensureSchema();
+  await refreshHospitalityThresholds();
+  const db = sql();
+  let changed = 0;
+  const CHUNK = 400;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const rows = await db.query(`SELECT * FROM mi_companies WHERE id = ANY($1)`, [chunk]);
+    for (const r of rows as Record<string, unknown>[]) {
+      const input = rowToCompanyInput(r);
+      const judged = judgeDetails(input);
+      if (judged.changed) {
+        await db`UPDATE mi_companies SET details = ${judged.details} WHERE id = ${r.id as string}`;
+        changed++;
+      }
+    }
+  }
+  return changed;
 }
 
 /** Companies held in the "unscored" bucket (no derivable revenue estimate —
