@@ -353,19 +353,34 @@ async function rebuildGroups(): Promise<number> {
   const entries: { key: string; g: { name: string; permits: Loc[]; licenses: Loc[] } }[] = [];
   groups.forEach((g, key) => entries.push({ key, g }));
   const keys: string[] = [];
-  for (const { key, g } of entries) {
-    keys.push(key);
-    const cities = Array.from(new Set([...g.permits, ...g.licenses].map((l: Loc) => l.city).filter(Boolean))).sort();
-    await db`
-      INSERT INTO mi_hospitality_groups (group_key, name, location_count, permit_ids, license_numbers, cities)
-      VALUES (${key}, ${g.name}, ${g.permits.length + g.licenses.length},
-              ${JSON.stringify(g.permits.map((l: Loc) => l.id))}::jsonb,
-              ${JSON.stringify(g.licenses.map((l: Loc) => l.id))}::jsonb,
-              ${JSON.stringify(cities)}::jsonb)
-      ON CONFLICT (group_key) DO UPDATE SET
-        name = EXCLUDED.name, location_count = EXCLUDED.location_count,
-        permit_ids = EXCLUDED.permit_ids, license_numbers = EXCLUDED.license_numbers,
-        cities = EXCLUDED.cities, updated_at = now()`;
+  const CHUNK = 200;
+  for (let i = 0; i < entries.length; i += CHUNK) {
+    const chunk = entries.slice(i, i + CHUNK);
+    const values: string[] = [];
+    const params: unknown[] = [];
+    chunk.forEach(({ key, g }, j) => {
+      keys.push(key);
+      const cities = Array.from(new Set([...g.permits, ...g.licenses].map((l: Loc) => l.city).filter(Boolean))).sort();
+      const b = j * 6;
+      values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}::jsonb, $${b + 5}::jsonb, $${b + 6}::jsonb)`);
+      params.push(
+        key,
+        g.name,
+        g.permits.length + g.licenses.length,
+        JSON.stringify(g.permits.map((l: Loc) => l.id)),
+        JSON.stringify(g.licenses.map((l: Loc) => l.id)),
+        JSON.stringify(cities)
+      );
+    });
+    await db.query(
+      `INSERT INTO mi_hospitality_groups (group_key, name, location_count, permit_ids, license_numbers, cities)
+       VALUES ${values.join(", ")}
+       ON CONFLICT (group_key) DO UPDATE SET
+         name = EXCLUDED.name, location_count = EXCLUDED.location_count,
+         permit_ids = EXCLUDED.permit_ids, license_numbers = EXCLUDED.license_numbers,
+         cities = EXCLUDED.cities, updated_at = now()`,
+      params
+    );
   }
   if (keys.length) {
     await db.query(`DELETE FROM mi_hospitality_groups WHERE group_key <> ALL($1)`, [keys]);
