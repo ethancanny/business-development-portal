@@ -415,19 +415,25 @@ export async function ingestHospitality(): Promise<number> {
   const sess = await envSession();
   let cursor = Number.parseInt((await getState("maricopa_zip_cursor")) ?? "0", 10) || 0;
   if (cursor < 0 || cursor >= MARICOPA_ZIPS.length) cursor = 0;
-  const pulled: { zip: string; rows: number }[] = [];
+  const pulled: { zip: string; rows: number; ids: string[] }[] = [];
   let permitsUpserted = 0;
   while (Date.now() < zipDeadline && pulled.length < MARICOPA_ZIPS.length) {
     const zip = MARICOPA_ZIPS[cursor];
     let rows: EnvPermitRow[] = [];
     try {
-      rows = await envSearchByZip(sess, zip);
+      const raw = await envSearchByZip(sess, zip);
+      // The county result set can list a permit twice (observed in ZIP
+      // 85008: FD2405645 / FD2405647) — dedupe on permit_id so counts
+      // reconcile against unique permits, which is what the DB holds.
+      const byId = new Map<string, EnvPermitRow>();
+      for (const r of raw) if (!byId.has(r.permitId)) byId.set(r.permitId, r);
+      rows = Array.from(byId.values());
     } catch {
-      pulled.push({ zip, rows: -1 });
+      pulled.push({ zip, rows: -1, ids: [] });
       cursor = (cursor + 1) % MARICOPA_ZIPS.length;
       continue;
     }
-    pulled.push({ zip, rows: rows.length });
+    pulled.push({ zip, rows: rows.length, ids: rows.map((r) => r.permitId) });
     for (const r of rows) {
       const a = parseAddress(r.businessAddressConcat ?? "", zip);
       await db`
@@ -448,19 +454,27 @@ export async function ingestHospitality(): Promise<number> {
   await setState("maricopa_zip_cursor", String(cursor));
   touched += permitsUpserted;
 
-  /* --- Maricopa xcheck: independent recount of the first ZIP pulled --- */
+  /* --- Maricopa xcheck: independent recount of the first ZIP pulled.
+   * All three legs count UNIQUE permit ids: the county can list a
+   * permit twice in one result set, and the DB leg counts how many of
+   * the pulled ids are actually stored (not a by-ZIP tally, since a
+   * permit's address ZIP can differ from the enumeration ZIP). --- */
   const firstOk = pulled.find((p) => p.rows >= 0);
   if (firstOk) {
     try {
-      const recount = await envSearchByZip(sess, firstOk.zip);
-      const inDb = await db`SELECT COUNT(*)::int AS n FROM mi_hospitality_permits WHERE zip = ${firstOk.zip}`;
+      const recountRaw = await envSearchByZip(sess, firstOk.zip);
+      const recountIds = new Set(recountRaw.map((r) => r.permitId));
+      const inDb = await db.query(
+        `SELECT COUNT(*)::int AS n FROM mi_hospitality_permits WHERE permit_id = ANY($1)`,
+        [firstOk.ids]
+      );
       const dbN = Number(inDb[0].n);
-      const agree = recount.length === firstOk.rows && dbN >= firstOk.rows;
+      const agree = recountIds.size === firstOk.rows && dbN === firstOk.rows;
       await logSync(
         "maricopa-permits-xcheck",
         agree ? "ok" : "error",
-        recount.length,
-        `ZIP ${firstOk.zip}: search returned ${firstOk.rows}, independent recount ${recount.length}, DB rows for ZIP ${dbN}` +
+        recountIds.size,
+        `ZIP ${firstOk.zip}: ${firstOk.rows} unique permits pulled, independent recount ${recountIds.size} unique, ${dbN} of the pulled ids stored` +
           (agree ? " — counts reconcile" : " — MISMATCH, investigate")
       );
     } catch (err) {
