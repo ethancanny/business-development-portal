@@ -395,7 +395,7 @@ async function upsertRegister(rows: AdhsLicenseRow[], ym: string): Promise<void>
         r.licenseNumber, r.facilityId, r.name, r.nameNorm, r.category, r.facilityType,
         r.subtype, r.bureau, r.capacity, r.address, r.city, r.state, r.zip, r.county,
         r.phone, r.ccn, r.effectiveDate, r.expirationDate, r.issueDate, ym,
-        JSON.stringify(months), ym
+        JSON.stringify(months), ym, ym
       );
     });
     await db.query(
