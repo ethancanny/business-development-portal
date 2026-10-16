@@ -1,21 +1,20 @@
 import { ImageResponse } from "next/og";
 
 /**
- * App-icon artwork (Ethan, Oct 14–15, 2026 — final): the cacti /
- * night-sky photo filling the square (cover), DIMMED under a navy
- * veil, with the firm's own mark over it in white — the serif C in
- * its square frame, lifted from the Canny logo and inverted to
- * white per Ethan's reference image ("This is the C that i want
- * with the box around it! Just make it white").
+ * App-icon artwork (Ethan, Oct 15, 2026 — his design): a deep-navy
+ * gradient square with the firm's serif C large in white and a
+ * short gold rule beneath it. Ethan supplied the design as a raster
+ * with hand-drawn edges and asked for the C "smoothened out" — so
+ * the glyph is set in Cormorant Garamond 600 (the portal's display
+ * serif, a clean vector outline) rather than traced from the image.
  *
- * The C is set in Cormorant Garamond 600 (the portal's display
- * serif), fetched as TTF from Google Fonts at render time and
- * cached at module scope. If the font fetch ever fails, the icon
- * still renders with a generic serif fallback rather than erroring.
+ * The font is fetched as TTF from Google Fonts at render time and
+ * cached at module scope. If the fetch ever fails, the icon still
+ * renders with a generic serif fallback rather than erroring.
+ * (Supersedes the v2–v7 photo + framed-mark artwork.)
  */
-const PHOTO = "https://cannycapitalpartners.com/arizona-desert-landscape.jpg";
-const NAVY = "#0d1f3c";
-const DIM = "rgba(5,10,22,0.70)";
+const NAVY_DEEP = "#0a1730";
+const GOLD = "#b8975a";
 
 type IconFont = {
   name: string;
@@ -62,7 +61,6 @@ export async function iconResponse(
   emblemScale = 1
 ): Promise<ImageResponse> {
   const fonts = await loadFonts();
-  const box = Math.round(size * 0.64 * emblemScale);
   return new ImageResponse(
     (
       <div
@@ -70,65 +68,34 @@ export async function iconResponse(
           width: "100%",
           height: "100%",
           display: "flex",
-          position: "relative",
-          backgroundColor: NAVY,
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: NAVY_DEEP,
+          backgroundImage:
+            "radial-gradient(ellipse 130% 100% at 50% 68%, #1d3563 0%, #13294e 48%, #0a1730 100%)",
         }}
       >
-        <img
-          src={PHOTO}
-          width={size}
-          height={size}
-          style={{ objectFit: "cover" }}
-        />
-        <div
+        <span
           style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: size,
-            height: size,
-            backgroundColor: DIM,
-            display: "flex",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: size,
-            height: size,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
+            fontFamily: fonts ? "Cormorant Garamond" : "serif",
+            fontWeight: 600,
+            fontSize: Math.round(size * 0.56 * emblemScale),
+            color: "#ffffff",
+            lineHeight: 1,
           }}
         >
-          <div
-            style={{
-              width: box,
-              height: box,
-              borderWidth: Math.max(2, Math.round(box * 0.026)),
-              borderStyle: "solid",
-              borderColor: "#ffffff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <span
-              style={{
-                fontFamily: fonts ? "Cormorant Garamond" : "serif",
-                fontWeight: 600,
-                fontSize: Math.round(box * 0.684),
-                color: "#ffffff",
-                lineHeight: 1,
-                marginTop: Math.round(box * -0.034),
-              }}
-            >
-              C
-            </span>
-          </div>
-        </div>
+          C
+        </span>
+        <div
+          style={{
+            width: Math.round(size * 0.14 * emblemScale),
+            height: Math.max(2, Math.round(size * 0.006 * emblemScale)),
+            backgroundColor: GOLD,
+            marginTop: Math.round(size * 0.055 * emblemScale),
+            display: "flex",
+          }}
+        />
       </div>
     ),
     {
