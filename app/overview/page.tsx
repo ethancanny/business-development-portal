@@ -973,7 +973,7 @@ export default function Overview() {
           </Link>
         </div>
         {showFullAnalytics && (
-          <div className="mt-5 border-t border-slate-100 pt-3 dark:border-white/10">
+          <div className="mt-5 hidden border-t border-slate-100 pt-3 md:block dark:border-white/10">
             <Link
               href="/analytics"
               className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
@@ -1490,12 +1490,12 @@ export default function Overview() {
           Sourcing | Relationships, one window selector, every chart
           footed with its data date and sample size. Scope: ALL deals
           (the non-focus toggle was removed later on Oct 14). */}
-      <section className="card-surface mt-6 p-5">
+      <section className="card-surface mt-6 hidden p-5 md:block">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
             Analytics
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* "View full analytics" moved under the Morning Brief in
                 Wave 1 — same gate (showFullAnalytics), one location. */}
             <div className="flex overflow-hidden rounded-lg border border-slate-200 dark:border-white/15">
