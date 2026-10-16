@@ -27,6 +27,12 @@ export default function FitTargets() {
   const [tab, setTab] = useState<string>("All");
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [unscored, setUnscored] = useState<Record<string, number | null>>({});
+  const [hosp, setHosp] = useState<{
+    minLocations: number;
+    hotelMinRevenue: number;
+    licenses: number;
+    groups: number;
+  } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -41,6 +47,24 @@ export default function FitTargets() {
         })
         .catch(() => undefined);
     }
+    fetch("/api/market/hospitality-settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (d: {
+          settings?: { minLocations: number; hotelMinRevenue: number };
+          meta?: { licenses: number; groups: number };
+        } | null) => {
+          if (live && d?.settings && d?.meta) {
+            setHosp({
+              minLocations: d.settings.minLocations,
+              hotelMinRevenue: d.settings.hotelMinRevenue,
+              licenses: d.meta.licenses,
+              groups: d.meta.groups,
+            });
+          }
+        }
+      )
+      .catch(() => undefined);
     return () => {
       live = false;
     };
@@ -70,6 +94,24 @@ export default function FitTargets() {
       {(tab === "All" || tab === "Healthcare") && (unscored["Healthcare"] ?? 0) > 0 && (
         <p className="mb-2 text-xs text-slate-500 dark:text-white/50">
           Healthcare: {(unscored["Healthcare"] ?? 0).toLocaleString()} companies are <span className="font-semibold">unscored</span> — no revenue estimate can be derived yet, so they are held out of fits until SBA loan / ADHS licensing data scores them. A healthcare fit now requires estimated revenue of at least $1M.
+        </p>
+      )}
+      {(tab === "All" || tab === "Hospitality") && hosp && (
+        <p className="mb-2 text-xs text-slate-500 dark:text-white/50">
+          Hospitality: fits are operator groups resolved from Maricopa County food-permit
+          records ({hosp.groups.toLocaleString()} groups) — a fit needs at least{" "}
+          {hosp.minLocations} locations, and revenue is modeled per location (low
+          confidence, inputs shown on each profile). Franchise / chain / institutional
+          operators are excluded by ownership.
+          {hosp.licenses === 0 && (
+            <>
+              {" "}
+              The AZ DLLC liquor-license feed is not connected yet (its public search was
+              retired), so the hotel/venue arm — a liquor-licensed venue at{" "}
+              ${(hosp.hotelMinRevenue / 1_000_000).toFixed(1)}M+ modeled revenue — is
+              armed and activates automatically when license data lands.
+            </>
+          )}
         </p>
       )}
       <CompanyTargets
