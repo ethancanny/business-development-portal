@@ -17,8 +17,10 @@ import CompanyLogo from "@/components/CompanyLogo";
 import LatestIntel from "@/components/LatestIntel";
 
 /** Fit-target sectors — all five focus sectors (Oct 14, 2026: the
- * density view includes Hospitality even at 0; there is no
- * hospitality spine yet, and 0 is the honest count). */
+ * density view includes Hospitality even at 0). The hospitality spine
+ * (Maricopa food permits; DLLC pending) landed Oct 15, 2026, so the
+ * Hospitality tile now carries a real fit count with its source list
+ * and last-updated date under it. */
 const FIT_SECTORS: readonly string[] = FOCUS_SECTOR_NAMES;
 
 const TERMINAL_STAGES = ["Closed Won", "Passed"];
@@ -68,6 +70,9 @@ export default function Overview() {
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [rates, setRates] = useState<MarketRates>({});
   const [fitCounts, setFitCounts] = useState<Record<string, number | null>>({});
+  // Hospitality spine meta (sources + last ingest) for the Sector
+  // Overview tile's source/date line (hospitality build §2).
+  const [hospMeta, setHospMeta] = useState<{ sources: string; updated: string } | null>(null);
   // Premium redesign Wave 1: market strip (latest + previous FRED
   // observations per series) and Top Signals (newest high-signal fits).
   const [rateStrip, setRateStrip] = useState<
@@ -185,6 +190,31 @@ export default function Overview() {
           if (live) setFitCounts((c) => ({ ...c, [s]: 0 }));
         });
     }
+    fetch("/api/market/hospitality-settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (d: {
+          meta?: { licenses: number; lastIngestAt: string | null };
+        } | null) => {
+          if (!live || !d?.meta) return;
+          const updated = d.meta.lastIngestAt
+            ? new Date(d.meta.lastIngestAt).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                timeZone: "America/Phoenix",
+              })
+            : "—";
+          setHospMeta({
+            sources:
+              d.meta.licenses > 0
+                ? "Maricopa Co. food permits · AZ DLLC liquor licenses"
+                : "Maricopa Co. food permits · AZ DLLC liquor (not yet connected)",
+            updated,
+          });
+        }
+      )
+      .catch(() => undefined);
     return () => {
       live = false;
     };
@@ -1358,18 +1388,17 @@ export default function Overview() {
                   <p className="font-display text-lg font-semibold leading-tight text-[#0d1f3c] dark:text-white">
                     {sector}
                   </p>
-                  {sector === "Hospitality" ? (
-                    <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
-                      No data source connected yet.
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-xs text-slate-500 dark:text-white/60">
-                      <span className="tnum font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
-                        {count === null || count === undefined
-                          ? "…"
-                          : count.toLocaleString()}
-                      </span>{" "}
-                      fit targets
+                  <p className="mt-1 text-xs text-slate-500 dark:text-white/60">
+                    <span className="tnum font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+                      {count === null || count === undefined
+                        ? "…"
+                        : count.toLocaleString()}
+                    </span>{" "}
+                    fit targets
+                  </p>
+                  {sector === "Hospitality" && hospMeta && (
+                    <p className="mt-1 text-[11px] leading-snug text-slate-400 dark:text-white/40">
+                      Sources: {hospMeta.sources} · Updated {hospMeta.updated}
                     </p>
                   )}
                 </div>
