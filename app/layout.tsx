@@ -102,7 +102,7 @@ export default function RootLayout({
         />
         <ThemeProvider>
           <SiteHeader />
-          <div className="page-pad">{children}</div>
+          <div className="page-pad overflow-x-clip">{children}</div>
           <PwaShell />
           <Fab />
           <MobileNav />

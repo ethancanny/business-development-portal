@@ -704,7 +704,7 @@ export default function CalendarPage() {
         <button onClick={() => moveCursor(-1)} className={navBtn} aria-label="Previous month">
           ‹
         </button>
-        <h3 className="min-w-[170px] text-center text-base font-bold text-[#0d1f3c] dark:text-white">
+        <h3 className="min-w-[128px] text-center text-base font-bold sm:min-w-[170px] text-[#0d1f3c] dark:text-white">
           {MONTHS[cursor.m]} {cursor.y}
         </h3>
         <button onClick={() => moveCursor(1)} className={navBtn} aria-label="Next month">

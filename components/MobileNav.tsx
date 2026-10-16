@@ -6,7 +6,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "@/components/ThemeProvider";
 import {
   IconActivity,
-  IconAnalytics,
   IconAuditTrail,
   IconCalendar,
   IconClose,
@@ -59,7 +58,6 @@ const MORE_LINKS: {
   Icon: (p: { className?: string }) => React.ReactNode;
 }[] = [
   { href: "/calendar", label: "Calendar", Icon: IconCalendar },
-  { href: "/analytics", label: "Analytics", Icon: IconAnalytics },
   { href: "/audit-trail", label: "Audit Trail", Icon: IconAuditTrail },
   { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
