@@ -207,6 +207,48 @@ export interface CompanyInput {
  * are replaced wholesale (triage status and first_seen are preserved by
  * dedup key); without it, rows upsert by (source, dedup_key). Used by the
  * weekly spine builders (SAM.gov, AZ ROC, NPPES, EPA FRS). */
+/* Hospitality fit thresholds are portal SETTINGS (Ethan, Oct 15, 2026 —
+ * §2 of the hospitality build): stored in mi_hospitality_state by the
+ * hospitality settings API, defaulting to 3 locations / $3M hotel-venue
+ * revenue. computeFit is synchronous, so the values live in a module
+ * cache refreshed (5-min TTL) by the async write paths before they
+ * judge rows. */
+export interface HospitalityThresholds {
+  minLocations: number;
+  hotelMinRevenue: number;
+}
+export const HOSPITALITY_THRESHOLDS_DEFAULT: HospitalityThresholds = {
+  minLocations: 3,
+  hotelMinRevenue: 3_000_000,
+};
+let hospitalityThreshCache: { value: HospitalityThresholds; at: number } | null = null;
+
+export function hospitalityThresholds(): HospitalityThresholds {
+  return hospitalityThreshCache?.value ?? HOSPITALITY_THRESHOLDS_DEFAULT;
+}
+
+export async function refreshHospitalityThresholds(force = false): Promise<HospitalityThresholds> {
+  if (!force && hospitalityThreshCache && Date.now() - hospitalityThreshCache.at < 300_000) {
+    return hospitalityThreshCache.value;
+  }
+  const value: HospitalityThresholds = { ...HOSPITALITY_THRESHOLDS_DEFAULT };
+  try {
+    const db = sql();
+    await db`CREATE TABLE IF NOT EXISTS mi_hospitality_state (
+      key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '', updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
+    const rows = await db`SELECT key, value FROM mi_hospitality_state WHERE key IN ('fit_min_locations', 'fit_hotel_min_revenue')`;
+    for (const r of rows) {
+      const n = Number(r.value);
+      if (str(r.key) === "fit_min_locations" && Number.isFinite(n) && n >= 1) value.minLocations = Math.round(n);
+      if (str(r.key) === "fit_hotel_min_revenue" && Number.isFinite(n) && n > 0) value.hotelMinRevenue = Math.round(n);
+    }
+  } catch {
+    // Settings table unreachable (e.g. pre-§1 dev database) — defaults apply.
+  }
+  hospitalityThreshCache = { value, at: Date.now() };
+  return value;
+}
+
 /** Acquisition-fit heuristic, computed at import so every spine (and the
  * weekly refresh) gets it for free. A "fit" is an established, right-sized
  * target — not a startup, not a whale. The reasoning is stored on the row
@@ -303,11 +345,51 @@ function computeFit(r: CompanyInput): { fit: boolean; why: string; unscored?: bo
     const fit = age !== null && age >= 7 && (n >= 2 || /General|Engineering/.test(r.subsector ?? ""));
     return { fit, why: fit ? `Licensed since ${yr} · ${n} license${n > 1 ? "s" : ""} on file${locBit}${evBit}` : "" };
   }
+  if (src.includes("Hospitality")) {
+    // Hospitality fit (Ethan, Oct 15, 2026 — hospitality build §2):
+    // operator groups resolved from county food-establishment permits
+    // (plus DLLC liquor licenses the day that route exists — the sync
+    // stamps liquorLicensedVenue only when license rows are present, so
+    // the hotel/venue arm activates automatically with the data).
+    // Thresholds are portal settings (see hospitalityThresholds above).
+    // Ownership exclusions are stamped by the hospitality sync from a
+    // conservative national-brand/institutional name match; "unknown"
+    // is NOT excluded. Revenue is a modeled estimate (locations ×
+    // per-location range by concept), always labeled low confidence.
+    const th = hospitalityThresholds();
+    const ownership = String(details.ownership ?? "unknown").toLowerCase();
+    if (
+      ownership === "franchise" ||
+      ownership === "chain" ||
+      ownership === "institutional" ||
+      ownership === "subsidiary"
+    ) {
+      return { fit: false, why: "", estRevenue: rev };
+    }
+    const locs = typeof details.locationCount === "number" ? details.locationCount : 0;
+    const concept = String(details.concept ?? "");
+    if (locs >= th.minLocations) {
+      return {
+        fit: true,
+        estRevenue: rev,
+        why: `${locs} locations${concept ? ` · ${concept.toLowerCase()}` : ""} · ${rev !== null ? `est. revenue ${money(rev)} (modeled, low confidence)` : "revenue not modeled"}`,
+      };
+    }
+    if (details.liquorLicensedVenue === true && rev !== null && rev >= th.hotelMinRevenue) {
+      return {
+        fit: true,
+        estRevenue: rev,
+        why: `Liquor-licensed ${concept ? concept.toLowerCase() : "venue"} · est. revenue ${money(rev)} (modeled, low confidence) · ${locs} location${locs === 1 ? "" : "s"}`,
+      };
+    }
+    return { fit: false, why: "", estRevenue: rev };
+  }
   return { fit: false, why: "" };
 }
 
 export async function importCompanies(source: string, rows: CompanyInput[], reset: boolean): Promise<{ received: number; total: number }> {
   await ensureSchema();
+  await refreshHospitalityThresholds();
   const db = sql();
   const filtered = rows.filter((r) => r && r.dedupKey && r.name && r.source === source);
   // Dedupe by dedupKey (last occurrence wins). A multi-row
@@ -537,6 +619,7 @@ export async function countFits(sector?: string): Promise<number> {
  * is preserved. Returns the next offset, or -1 when the sector is done. */
 export async function rescoreCompanies(sector: string | undefined, offset: number, pageSize = 1500): Promise<{ processed: number; changed: number; nextOffset: number }> {
   await ensureSchema();
+  await refreshHospitalityThresholds();
   const db = sql();
   const rows = sector
     ? await db`SELECT * FROM mi_companies WHERE sector = ${sector} ORDER BY id LIMIT ${pageSize} OFFSET ${offset}`
