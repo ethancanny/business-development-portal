@@ -361,7 +361,7 @@ export function ensureSchema(): Promise<void> {
             WHERE con.conrelid = 'mi_companies'::regclass
               AND con.contype = 'u'
               AND (
-                SELECT array_agg(a.attname ORDER BY a.attname)
+                SELECT array_agg(a.attname::text ORDER BY a.attname::text)
                 FROM unnest(con.conkey) AS k(attnum)
                 JOIN pg_attribute a
                   ON a.attrelid = con.conrelid AND a.attnum = k.attnum
