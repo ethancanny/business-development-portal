@@ -333,11 +333,55 @@ export function ensureSchema(): Promise<void> {
           last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE (source, dedup_key)
+          UNIQUE (source, dedup_key, sector)
         )`;
       await db`
         CREATE INDEX IF NOT EXISTS mi_companies_sector_idx
         ON mi_companies (sector, signal_value DESC)`;
+      // Fix A (Oct 16, 2026): widen the mi_companies unique key to include
+      // sector. CREATE TABLE IF NOT EXISTS does not migrate the live table,
+      // whose (source, dedup_key) key made dual-sector USASpending
+      // recipients (same UEI in A&D and Manufacturing) overwrite each
+      // other. Idempotent: discover the live constraint covering exactly
+      // (source, dedup_key) — name not assumed — drop it if present, and
+      // add the sector-wide key if absent. The old key already guarantees
+      // (source, dedup_key) uniqueness, so existing rows cannot violate
+      // the wider key. Runs inside one transaction under an advisory lock
+      // so concurrent cold starts cannot race the swap; both checks no-op
+      // once migrated.
+      await db.transaction([
+        db`SELECT pg_advisory_xact_lock(20261016)`,
+        db`
+          DO $$
+          DECLARE
+            old_constraint text;
+          BEGIN
+            SELECT con.conname INTO old_constraint
+            FROM pg_constraint con
+            WHERE con.conrelid = 'mi_companies'::regclass
+              AND con.contype = 'u'
+              AND (
+                SELECT array_agg(a.attname ORDER BY a.attname)
+                FROM unnest(con.conkey) AS k(attnum)
+                JOIN pg_attribute a
+                  ON a.attrelid = con.conrelid AND a.attnum = k.attnum
+              ) = ARRAY['dedup_key', 'source'];
+            IF old_constraint IS NOT NULL THEN
+              EXECUTE format(
+                'ALTER TABLE mi_companies DROP CONSTRAINT %I', old_constraint
+              );
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint
+              WHERE conrelid = 'mi_companies'::regclass
+                AND conname = 'mi_companies_source_dedup_key_sector_key'
+            ) THEN
+              ALTER TABLE mi_companies
+                ADD CONSTRAINT mi_companies_source_dedup_key_sector_key
+                UNIQUE (source, dedup_key, sector);
+            END IF;
+          END $$`,
+      ]);
     })().catch((err) => {
       schemaReady = null;
       throw err;

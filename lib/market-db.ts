@@ -472,7 +472,7 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
          contact_name, contact_title, phone, website, formed_date, employees, signal_value, signal_label,
          source, source_url, details, status, first_seen)
        VALUES ${values.join(", ")}
-       ON CONFLICT (source, dedup_key) DO UPDATE SET
+       ON CONFLICT (source, dedup_key, sector) DO UPDATE SET
          name = EXCLUDED.name, sector = EXCLUDED.sector, subsector = EXCLUDED.subsector, naics = EXCLUDED.naics,
          city = EXCLUDED.city, address = EXCLUDED.address, zip = EXCLUDED.zip, contact_name = EXCLUDED.contact_name,
          contact_title = EXCLUDED.contact_title, phone = EXCLUDED.phone, website = EXCLUDED.website,
