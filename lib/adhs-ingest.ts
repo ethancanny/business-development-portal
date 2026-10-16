@@ -753,19 +753,26 @@ async function runAdhsXcheck(
     SELECT count(*)::int AS n FROM mi_companies WHERE sector = 'Healthcare' AND source LIKE '%NPPES%'`;
   const nppesTotal = Number(nppesTotalRows[0]?.n ?? 0);
   if (nppesTotal === 0) problems.push("NPPES healthcare spine is empty — matching has no target universe");
-  const patterns: [string, string][] = [
-    ["nursing", "nursing"],
-    ["hospice", "hospice"],
-    ["home health", "home health"],
-    ["assisted living", "assisted"],
-    ["behavioral", "behavioral"],
+  // NPPES subsectors are NAICS-style labels: hospice folds into
+  // "Home Health Care Services" (no distinct label), and behavioral
+  // health sits under "Mental Health" / "Substance Abuse" wording —
+  // the patterns reflect the labels that actually exist.
+  const patterns: [string, string[]][] = [
+    ["nursing", ["nursing"]],
+    ["home health + hospice (NAICS 6216)", ["home health"]],
+    ["assisted living", ["assisted"]],
+    ["behavioral / mental health", ["behavioral", "mental", "substance"]],
   ];
   const nppesBits: string[] = [];
-  for (const [label, pat] of patterns) {
-    const rows = await db`
-      SELECT count(*)::int AS n FROM mi_companies
-      WHERE sector = 'Healthcare' AND source LIKE '%NPPES%' AND subsector ILIKE ${`%${pat}%`}`;
-    nppesBits.push(`${label} ${Number(rows[0]?.n ?? 0)}`);
+  for (const [label, pats] of patterns) {
+    let n = 0;
+    for (const pat of pats) {
+      const rows = await db`
+        SELECT count(*)::int AS n FROM mi_companies
+        WHERE sector = 'Healthcare' AND source LIKE '%NPPES%' AND subsector ILIKE ${`%${pat}%`}`;
+      n += Number(rows[0]?.n ?? 0);
+    }
+    nppesBits.push(`${label} ${n}`);
   }
   notes.push(`NPPES spine: ${nppesTotal} healthcare rows (subsector counts: ${nppesBits.join(" · ")}) vs ADHS ${parsedTotal} licensed facilities — different universes (NPPES counts individual practitioners), compared for spine health, not equality`);
 
