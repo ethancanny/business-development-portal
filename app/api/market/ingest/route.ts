@@ -10,7 +10,7 @@ import { getSessionUser } from "@/lib/auth";
  */
 export const maxDuration = 60;
 
-const SOURCES: IngestSource[] = ["indicators", "filings", "news", "econ_events", "bankruptcy_news", "warn", "entities", "multiples", "defense", "census", "county_permits", "permits_ci", "sector_counts", "commodity_spot", "susb_sizes", "intel_news", "hospitality", "all"];
+const SOURCES: IngestSource[] = ["indicators", "filings", "news", "econ_events", "bankruptcy_news", "warn", "entities", "multiples", "defense", "census", "county_permits", "permits_ci", "sector_counts", "commodity_spot", "susb_sizes", "intel_news", "hospitality", "adhs", "all"];
 
 function authorized(req: NextRequest): boolean {
   if (getSessionUser()) return true;
