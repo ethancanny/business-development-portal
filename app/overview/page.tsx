@@ -92,7 +92,12 @@ export default function Overview() {
   const [addedSignalIds, setAddedSignalIds] = useState<string[]>([]);
   const [addingSignalId, setAddingSignalId] = useState<string | null>(null);
   const [weekTab, setWeekTab] = useState<"this" | "last">("this");
-  const [showOtherCal, setShowOtherCal] = useState(false);
+  // Oct 17, 2026 (Ethan): the "Other calendar items" list starts
+  // EXPANDED — every synced calendar event must be visible in the
+  // Overview week view on load so smaller items (e.g. a Sunday
+  // meeting with someone outside the Directory) are never missed.
+  // The toggle still collapses it.
+  const [showOtherCal, setShowOtherCal] = useState(true);
   const [analyticsTab, setAnalyticsTab] = useState<"pipeline" | "sourcing" | "relationships">("pipeline");
   const [winDays, setWinDays] = useState<30 | 90 | 365>(30);
 
@@ -438,11 +443,14 @@ export default function Overview() {
   // the summary is counts + important dates. Oct 14, 2026: this
   // summary and Tasks & follow-ups are combined in the "Today &
   // this week" section directly under the Morning Brief.)
-  // Oct 14, 2026: Important Dates shows only meetings linked to a
+  // Oct 14, 2026: Important Dates headlines meetings linked to a
   // Directory contact or a deal — an attendee matching a deal contact
   // or an operator/investor, or the event title naming the company or
-  // person — and each links to that profile. Everything else drops
-  // into a collapsed "Other calendar items" list.
+  // person — and each links to that profile. Oct 17, 2026 (Ethan):
+  // ALL other synced events still appear in the "Other calendar
+  // items" list, which now renders expanded by default, and the
+  // linked list is no longer capped — every event in the window is
+  // visible so nothing on the calendar is missed.
   const eventLink = (e: CalendarEvent): { href: string; label: string } | null => {
     const title = (e.title || "").toLowerCase();
     const attendees = (e.attendees ?? []).map((a) => a.toLowerCase());
@@ -478,7 +486,7 @@ export default function Overview() {
       if (link) linked.push({ e, href: link.href, label: link.label });
       else other.push(e);
     }
-    return { linked: linked.slice(0, 6), other };
+    return { linked, other };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calEvents, deals, execs, investors]);
 
