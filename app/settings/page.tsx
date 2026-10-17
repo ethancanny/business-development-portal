@@ -2,6 +2,7 @@ import PageHero from "@/components/PageHero";
 import PushSettings from "@/components/PushSettings";
 import SecuritySettings from "@/components/SecuritySettings";
 import HospitalityFitSettings from "@/components/HospitalityFitSettings";
+import ChainFilterSettings from "@/components/ChainFilterSettings";
 
 /**
  * Settings (CRM Phase 2, Oct 2026): notifications (PushSettings) and
@@ -38,6 +39,20 @@ export default function SettingsPage() {
             hospitality target immediately.
           </p>
           <HospitalityFitSettings />
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Chain &amp; franchise filter
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            Canny targets independent, owner-operated businesses only. Companies
+            flagged as national chains or franchises never appear in Fits — they
+            collect in the Filtered Out view with their reason, and a “Not a
+            chain” override there is permanent. The brand list and thresholds
+            are settings, not code.
+          </p>
+          <ChainFilterSettings />
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
