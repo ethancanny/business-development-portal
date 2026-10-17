@@ -37,6 +37,42 @@ export interface CandidateSighting {
   date: string;
 }
 
+/** One scored component of a candidate's fit score (Build 2). The UI
+ * shows these beside the total so the score is never a black box. */
+export interface CandidateScoreComponent {
+  key: string;
+  label: string;
+  points: number;
+  max: number;
+  evidence: string[];
+}
+
+export interface CandidateScoreFactors {
+  total: number;
+  components: CandidateScoreComponent[];
+}
+
+/** A top-3 pairing between a candidate and a fit target or pipeline
+ * deal (Build 2). basis is the human-readable "why" string. */
+export interface CandidateMatch {
+  type: "company" | "deal";
+  id: string;
+  name: string;
+  sector: string;
+  relation: "same" | "adjacent" | "other";
+  city: string;
+  matchScore: number;
+  basis: string;
+}
+
+/** Conflict of interest flag (spec: flagged, never excluded). */
+export interface CandidateConflict {
+  type: "target_employer" | "deal_employer" | "competing_buyer";
+  name: string;
+  targetId?: string;
+  detail: string;
+}
+
 export interface OperatorCandidate {
   id: string;
   name: string;
@@ -58,6 +94,13 @@ export interface OperatorCandidate {
   nextStep: string;
   targetRole: string;
   sightings: CandidateSighting[];
+  /** Build 2 scoring/matching — null score means unscored (location
+   * unverified candidates are never scored, per spec). */
+  score: number | null;
+  scoreFactors: CandidateScoreFactors | null;
+  scoredAt: string;
+  matchedTargets: CandidateMatch[];
+  conflicts: CandidateConflict[];
   createdAt: string;
   updatedAt: string;
 }
@@ -146,6 +189,18 @@ async function ensure(): Promise<void> {
   )`;
   await q`CREATE UNIQUE INDEX IF NOT EXISTS operator_candidates_key_idx
     ON operator_candidates (dedup_key)`;
+  // Build 2: scoring + matching columns (additive; pre-Build-2 rows
+  // simply read as unscored until the first rescore run).
+  await q`ALTER TABLE operator_candidates ADD COLUMN IF NOT EXISTS score INTEGER`;
+  await q`ALTER TABLE operator_candidates ADD COLUMN IF NOT EXISTS score_factors JSONB`;
+  await q`ALTER TABLE operator_candidates ADD COLUMN IF NOT EXISTS scored_at TEXT NOT NULL DEFAULT ''`;
+  await q`ALTER TABLE operator_candidates ADD COLUMN IF NOT EXISTS matched_targets JSONB NOT NULL DEFAULT '[]'`;
+  await q`ALTER TABLE operator_candidates ADD COLUMN IF NOT EXISTS conflicts JSONB NOT NULL DEFAULT '[]'`;
+  await q`CREATE TABLE IF NOT EXISTS operator_match_state (
+    id TEXT PRIMARY KEY,
+    payload JSONB,
+    computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`;
   await q`CREATE TABLE IF NOT EXISTS candidate_audit (
     id TEXT PRIMARY KEY,
     candidate_id TEXT NOT NULL DEFAULT '',
@@ -241,6 +296,18 @@ function parseSightings(v: unknown): CandidateSighting[] {
     });
 }
 
+function parseJson<T>(v: unknown, fallback: T): T {
+  if (v === null || v === undefined) return fallback;
+  if (typeof v === "string") {
+    try {
+      return JSON.parse(v) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return v as T;
+}
+
 function rowToCandidate(r: Record<string, unknown>): OperatorCandidate {
   return {
     id: String(r.id),
@@ -264,6 +331,11 @@ function rowToCandidate(r: Record<string, unknown>): OperatorCandidate {
     nextStep: String(r.next_step ?? ""),
     targetRole: String(r.target_role ?? ""),
     sightings: parseSightings(r.sightings),
+    score: typeof r.score === "number" ? r.score : null,
+    scoreFactors: parseJson<CandidateScoreFactors | null>(r.score_factors, null),
+    scoredAt: String(r.scored_at ?? ""),
+    matchedTargets: parseJson<CandidateMatch[]>(r.matched_targets, []),
+    conflicts: parseJson<CandidateConflict[]>(r.conflicts, []),
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
@@ -358,6 +430,8 @@ export interface CandidateFilters {
   focusSector?: boolean;
   locationVerified?: boolean;
   q?: string;
+  /** "score" = best fit score first, unscored (null) last (Build 2). */
+  sort?: string;
 }
 
 export async function listCandidates(
@@ -380,6 +454,16 @@ export async function listCandidates(
         .toLowerCase()
         .includes(needle)
     );
+  }
+  if (filters.sort === "score") {
+    out = [...out].sort((a, b) => {
+      if (a.score === null && b.score === null)
+        return a.name.localeCompare(b.name);
+      if (a.score === null) return 1; // unscored always last
+      if (b.score === null) return -1;
+      if (b.score !== a.score) return b.score - a.score;
+      return a.name.localeCompare(b.name);
+    });
   }
   return out;
 }
@@ -460,6 +544,11 @@ export async function createOrMergeCandidate(
     nextStep: (input.nextStep ?? "").trim(),
     targetRole: (input.targetRole ?? "").trim(),
     sightings: [sighting],
+    score: null,
+    scoreFactors: null,
+    scoredAt: "",
+    matchedTargets: [],
+    conflicts: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -705,4 +794,124 @@ export async function deleteCandidate(
     prev
   );
   return prev;
+}
+
+/* ---------------- Build 2: scoring / matching persistence ---------------- */
+
+export interface ScoringWrite {
+  score: number | null;
+  scoreFactors: CandidateScoreFactors | null;
+  scoredAt: string;
+  matchedTargets: CandidateMatch[];
+  conflicts: CandidateConflict[];
+}
+
+/**
+ * Persist one candidate's score + matches + conflicts. Writes a
+ * candidate_audit "scored" entry (the authoritative record) but does
+ * NOT mirror to the Audit Trail per candidate — a bulk rescore would
+ * flood the trail; logScoringRun() writes one summary entry instead.
+ * Returns false when nothing actually changed.
+ */
+export async function applyScoring(
+  id: string,
+  write: ScoringWrite,
+  actor: string
+): Promise<boolean> {
+  await ensure();
+  const q = sql();
+  const prev = await getCandidate(id);
+  if (!prev) return false;
+  const changed =
+    prev.score !== write.score ||
+    JSON.stringify(prev.scoreFactors) !== JSON.stringify(write.scoreFactors) ||
+    JSON.stringify(prev.matchedTargets) !== JSON.stringify(write.matchedTargets) ||
+    JSON.stringify(prev.conflicts) !== JSON.stringify(write.conflicts);
+  if (!changed) return false;
+  await q`
+    UPDATE operator_candidates SET
+      score = ${write.score},
+      score_factors = ${write.scoreFactors ? JSON.stringify(write.scoreFactors) : null},
+      scored_at = ${write.scoredAt},
+      matched_targets = ${JSON.stringify(write.matchedTargets)},
+      conflicts = ${JSON.stringify(write.conflicts)},
+      updated_at = NOW()
+    WHERE id = ${id}`;
+  const next: OperatorCandidate = {
+    ...prev,
+    score: write.score,
+    scoreFactors: write.scoreFactors,
+    scoredAt: write.scoredAt,
+    matchedTargets: write.matchedTargets,
+    conflicts: write.conflicts,
+    updatedAt: new Date().toISOString(),
+  };
+  await writeAudit({
+    candidateId: id,
+    candidateName: prev.name,
+    actor,
+    action: "scored",
+    summary:
+      write.score === null
+        ? `${actor} rescored ${prev.name}: unscored (location unverified)`
+        : `${actor} rescored ${prev.name}: score ${write.score}/100, ${write.matchedTargets.length} match(es), ${write.conflicts.length} conflict flag(s)`,
+    before: prev,
+    after: next,
+  });
+  return true;
+}
+
+/** One Audit Trail summary line per bulk rescore run. */
+export async function logScoringRun(actor: string, message: string): Promise<void> {
+  try {
+    await logActivity({
+      type: "candidate.updated",
+      actor,
+      message,
+      dealId: null,
+      execId: null,
+      dealName: null,
+      execName: null,
+    });
+  } catch {
+    // Best-effort, same contract as the per-candidate trail mirrors.
+  }
+}
+
+/* -------- operator-needed snapshot (refreshed by every rescore) -------- */
+
+export interface OperatorNeededEntry {
+  type: "company" | "deal";
+  id: string;
+  name: string;
+  sector: string;
+  city: string;
+  bestMatchScore: number | null;
+}
+
+export interface MatchState {
+  computedAt: string;
+  strongThreshold: number;
+  poolCompanies: number;
+  poolDeals: number;
+  operatorNeededTotal: number;
+  operatorNeeded: OperatorNeededEntry[];
+}
+
+export async function saveMatchState(state: MatchState): Promise<void> {
+  await ensure();
+  const q = sql();
+  await q`
+    INSERT INTO operator_match_state (id, payload, computed_at)
+    VALUES ('latest', ${JSON.stringify(state)}, NOW())
+    ON CONFLICT (id) DO UPDATE SET
+      payload = EXCLUDED.payload, computed_at = NOW()`;
+}
+
+export async function getMatchState(): Promise<MatchState | null> {
+  await ensure();
+  const rows = await sql()`
+    SELECT payload FROM operator_match_state WHERE id = 'latest' LIMIT 1`;
+  if (!rows.length) return null;
+  return parseJson<MatchState | null>(rows[0].payload, null);
 }
