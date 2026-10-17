@@ -23,8 +23,14 @@
  *    Office of Tourism publishes both monthly (Airports-<Month>-
  *    <Year>.pdf, Arizona-Lodging-<Month>-<Year>.pdf, discovered from
  *    the Data & Trends index page). The PDFs use CID-encoded fonts;
- *    lib/pdf-text.ts decodes them via their ToUnicode CMaps. Both
- *    series verified digit-for-digit against the published reports.
+ *    lib/pdf-text.ts decodes them via their ToUnicode CMaps, and both
+ *    parsers are verified digit-for-digit against the published
+ *    reports. ACCESS BLOCKER (verified live Oct 17, 2026):
+ *    tourism.az.gov returns HTTP 403 to the portal's datacenter IPs
+ *    on every page and PDF (the DLLC pattern), so from the Vercel
+ *    runtime these two datasets are an explicit, logged gap; the
+ *    fetchers retry weekly (failRetryDays) and join the score
+ *    automatically if access ever opens.
  *  - Population growth: FRED AZPOP (Census estimates) — built.
  *  - New hotel permits: derived at compute time from mi_permits_ci.
  *
@@ -488,6 +494,8 @@ async function fetchAotAirports(): Promise<{ upserted: number; latestPeriod: str
   );
   let file = found.file;
   if (!file) {
+    if (found.diag.includes("HTTP 403"))
+      throw new Error(`tourism.az.gov blocks this runtime (HTTP 403 bot wall on every page + PDF — the DLLC pattern). Index scan: ${found.diag}`);
     const probed = await probeAot("airports");
     file = probed.file;
     if (!file) throw new Error(`AOT airports report unreachable from this runtime. Index scan: ${found.diag}. ${probed.diag}`);
@@ -531,6 +539,10 @@ async function fetchAotAirports(): Promise<{ upserted: number; latestPeriod: str
 
 async function xcheckAotAirports(): Promise<void> {
   const obs = await getTailwindObs("aot_airports");
+  if (!obs.length) {
+    await logSync("aot_airports-xcheck", "skipped", 0, "nothing to check — no observations stored because tourism.az.gov blocks the portal's datacenter IPs (HTTP 403; see the aot_airports fetch log). Verdict stands as an explicit gap, not a silent pass.");
+    return;
+  }
   const byKey = new Map<string, TailwindObsRow>();
   for (const r of obs) byKey.set(r.seriesKey, r); // ascending order → last write wins per key
   const ytd = byKey.get("phx_pax_ytd");
@@ -558,6 +570,8 @@ async function fetchAotLodging(): Promise<{ upserted: number; latestPeriod: stri
   const found = await discoverAot(/https?:\/\/[^\s"']*?Arizona-Lodging-([A-Za-z]+)-(\d{4})\.pdf/i, []);
   let file = found.file;
   if (!file) {
+    if (found.diag.includes("HTTP 403"))
+      throw new Error(`tourism.az.gov blocks this runtime (HTTP 403 bot wall on every page + PDF — the DLLC pattern). Index scan: ${found.diag}`);
     const probed = await probeAot("lodging");
     file = probed.file;
     if (!file) throw new Error(`AOT lodging report unreachable from this runtime. Index scan: ${found.diag}. ${probed.diag}`);
@@ -601,6 +615,10 @@ async function fetchAotLodging(): Promise<{ upserted: number; latestPeriod: stri
 
 async function xcheckAotLodging(): Promise<void> {
   const obs = await getTailwindObs("aot_lodging");
+  if (!obs.length) {
+    await logSync("aot_lodging-xcheck", "skipped", 0, "nothing to check — no observations stored because tourism.az.gov blocks the portal's datacenter IPs (HTTP 403; see the aot_lodging fetch log). Verdict stands as an explicit gap, not a silent pass.");
+    return;
+  }
   const byKey = new Map<string, TailwindObsRow>();
   for (const r of obs) byKey.set(r.seriesKey, r);
   const occY = byKey.get("occ_ytd");
@@ -675,6 +693,9 @@ async function xcheckFredPop(): Promise<void> {
 interface FetcherDef {
   name: string;
   guardDays: number;
+  /** After a failed attempt, wait this many days before retrying
+   * (for sources behind a bot wall — no point knocking daily). */
+  failRetryDays?: number;
   run: () => Promise<{ upserted: number; latestPeriod: string; note: string }>;
   xcheck: () => Promise<void>;
 }
@@ -683,8 +704,8 @@ const FETCHERS: FetcherDef[] = [
   { name: "city_tax", guardDays: 20, run: fetchCityTax, xcheck: xcheckCityTax },
   { name: "qcew_hosp", guardDays: 60, run: fetchQcewHosp, xcheck: xcheckQcewHosp },
   { name: "susb_frag", guardDays: 300, run: fetchSusbFrag, xcheck: xcheckSusbFrag },
-  { name: "aot_airports", guardDays: 20, run: fetchAotAirports, xcheck: xcheckAotAirports },
-  { name: "aot_lodging", guardDays: 20, run: fetchAotLodging, xcheck: xcheckAotLodging },
+  { name: "aot_airports", guardDays: 20, failRetryDays: 7, run: fetchAotAirports, xcheck: xcheckAotAirports },
+  { name: "aot_lodging", guardDays: 20, failRetryDays: 7, run: fetchAotLodging, xcheck: xcheckAotLodging },
   { name: "fred_pop", guardDays: 300, run: fetchFredPop, xcheck: xcheckFredPop },
 ];
 
@@ -696,7 +717,23 @@ export async function ingestTailwind(opts: TailwindIngestOpts = {}): Promise<num
       if (opts.failDataset === f.name) throw new Error("forced fetch failure (acceptance test hook)");
       const state = await getTailwindState<{ at: string }>(`fetch:${f.name}`).catch(() => null);
       const ageDays = state?.at ? (Date.now() - new Date(state.at).getTime()) / 86400000 : Infinity;
-      if (!opts.force && ageDays < f.guardDays) {
+      // Failure backoff: a source that failed more recently than its
+      // last success, within failRetryDays, is not knocked on again.
+      let backoff = false;
+      if (!opts.force && f.failRetryDays) {
+        const attempt = await getTailwindState<{ at: string }>(`attempt:${f.name}`).catch(() => null);
+        if (attempt?.at) {
+          const attemptAge = (Date.now() - new Date(attempt.at).getTime()) / 86400000;
+          const attemptIsLatest = !state?.at || new Date(attempt.at) > new Date(state.at);
+          if (attemptIsLatest && attemptAge < f.failRetryDays) {
+            backoff = true;
+            await logSync(f.name, "skipped", 0, `retry backoff — last attempt ${attempt.at.slice(0, 10)} failed (source unreachable from this runtime); next retry in ~${Math.ceil(f.failRetryDays - attemptAge)}d`);
+          }
+        }
+      }
+      if (backoff) {
+        // fall through to the cross-check below
+      } else if (!opts.force && ageDays < f.guardDays) {
         await logSync(f.name, "skipped", 0, `fresh — fetched ${state!.at.slice(0, 10)}, staleness guard ${f.guardDays}d (next due in ~${Math.ceil(f.guardDays - ageDays)}d)`);
       } else {
         const r = await f.run();
@@ -705,7 +742,9 @@ export async function ingestTailwind(opts: TailwindIngestOpts = {}): Promise<num
         await logSync(f.name, "ok", r.upserted, r.note);
       }
     } catch (e) {
-      await logSync(f.name, "error", 0, `fetch failed; previously stored observations and scores left untouched: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      await setTailwindState(`attempt:${f.name}`, { at: new Date().toISOString(), error: msg.slice(0, 300) }).catch(() => {});
+      await logSync(f.name, "error", 0, `fetch failed; previously stored observations and scores left untouched: ${msg}`);
     }
     try {
       await f.xcheck();
