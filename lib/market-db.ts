@@ -881,7 +881,7 @@ export async function runChainDetectionBatch(
     });
     await db.query(
       `UPDATE mi_companies AS c
-       SET is_chain = v.is_chain, chain_reason = v.reason, chain_suspect = v.suspect, updated_at = NOW()
+       SET is_chain = v.is_chain::boolean, chain_reason = v.reason, chain_suspect = v.suspect::boolean, updated_at = NOW()
        FROM (VALUES ${values.join(", ")}) AS v(id, is_chain, reason, suspect)
        WHERE c.id = v.id`,
       params
