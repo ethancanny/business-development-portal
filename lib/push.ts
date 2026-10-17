@@ -17,6 +17,7 @@ import {
   type PushLogStatus,
 } from "@/lib/push-db";
 import { logActivity } from "@/lib/db";
+import { computeBadgeCount } from "@/lib/badge";
 import type { ActivityEvent } from "@/lib/types";
 
 /**
@@ -112,7 +113,23 @@ async function deliver(
     });
     return { status: "failed", error: "no active subscriptions", delivered: 0 };
   }
-  const payload = JSON.stringify({ title, body, url, type });
+  // Every payload carries the CURRENT server-computed badge count
+  // (lib/badge) so the service worker can set the app icon from the
+  // push itself, even with no page open. Best-effort: a failed count
+  // never blocks the notification.
+  let badge: number | undefined;
+  try {
+    badge = (await computeBadgeCount()).count;
+  } catch {
+    badge = undefined;
+  }
+  const payload = JSON.stringify({
+    title,
+    body,
+    url,
+    type,
+    ...(badge !== undefined ? { badge } : {}),
+  });
   let delivered = 0;
   let firstError = "";
   for (const sub of subs) {
@@ -211,6 +228,41 @@ export async function sendToUser(userEmail: string, opts: SendOptions): Promise<
   const title = prefs.showDetails ? opts.detailTitle : opts.genericTitle;
   const body = prefs.showDetails ? opts.detailBody : opts.genericBody;
   return deliver(userEmail, type, opts.entityKey, title, body, opts.url);
+}
+
+/** Badge-only push: refreshes the app-icon badge on every subscribed
+ * device from the server-computed attention count, without showing a
+ * notification (the SW handles badgeOnly payloads silently). Used when
+ * the count changes away from a device — e.g. items marked read or
+ * triaged on desktop should clear the phone's badge. Best-effort and
+ * deliberately NOT written to push_log: it is not a notification.
+ * Platform note: delivery rides the same Web Push subscription; if a
+ * platform declines silent pushes, the badge still self-corrects on
+ * the next real push (payloads carry the count) and on next app open
+ * (the client recalcs on foreground). */
+export async function pushBadgeUpdate(userEmail: string): Promise<void> {
+  try {
+    await getVapid();
+    const subs = await listSubscriptions(userEmail);
+    if (!subs.length) return;
+    const { count } = await computeBadgeCount();
+    const payload = JSON.stringify({ badgeOnly: true, badge: count });
+    for (const sub of subs) {
+      try {
+        await webPush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          payload
+        );
+      } catch (err) {
+        const e = err as { statusCode?: number };
+        if (e.statusCode === 404 || e.statusCode === 410) {
+          await deleteSubscriptionByEndpoint(sub.endpoint).catch(() => undefined);
+        }
+      }
+    }
+  } catch {
+    /* badge sync is best-effort */
+  }
 }
 
 const DIGEST_TYPE_LABELS: Record<string, string> = {

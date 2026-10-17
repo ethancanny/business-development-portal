@@ -156,6 +156,19 @@ export function ensureSchema(): Promise<void> {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`;
+      // Badge read state (Oct 16, 2026): deal_flow.read_at — null means
+      // the Activity item is unread and counts toward the app-icon
+      // badge. One-time baseline, gated on the column being absent:
+      // rows that predate the column were already visible under the old
+      // UI, so they count as seen; unread accrues only for items that
+      // arrive after this ships.
+      const flowCol = await db`
+        SELECT 1 AS one FROM information_schema.columns
+        WHERE table_name = 'deal_flow' AND column_name = 'read_at'`;
+      if (!flowCol.length) {
+        await db`ALTER TABLE deal_flow ADD COLUMN read_at TIMESTAMPTZ`;
+        await db`UPDATE deal_flow SET read_at = created_at WHERE read_at IS NULL`;
+      }
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS revenue DOUBLE PRECISION`;
       await db`
@@ -816,6 +829,7 @@ function rowToFlow(r: Record<string, unknown>): DealFlowItem {
     relatedExecId: r.related_exec_id ? String(r.related_exec_id) : null,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
+    readAt: r.read_at ? iso(r.read_at) : null,
   };
 }
 
@@ -836,12 +850,12 @@ export async function saveDealFlow(items: DealFlowItem[]): Promise<void> {
         INSERT INTO deal_flow (
           id, kind, title, source, source_detail, spotted_at, why,
           industry, location, status, related_deal_id, related_exec_id,
-          created_at, updated_at
+          created_at, updated_at, read_at
         ) VALUES (
           ${f.id}, ${f.kind}, ${f.title}, ${f.source}, ${f.sourceDetail},
           ${f.spottedAt}, ${f.why}, ${f.industry}, ${f.location},
           ${f.status}, ${f.relatedDealId}, ${f.relatedExecId},
-          ${f.createdAt}, ${f.updatedAt}
+          ${f.createdAt}, ${f.updatedAt}, ${f.readAt}
         )`
     ),
   ]);

@@ -259,6 +259,9 @@ export interface DealFlowItem {
   relatedExecId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** ISO timestamp when the item was seen in the Activity list;
+   * null = unread (counts toward the app-icon badge). */
+  readAt: string | null;
 }
 
 export type ActivityType =
