@@ -800,8 +800,10 @@ const SECTOR_BUILDERS: { sector: string; builders: ((s: string) => Promise<Built
 export const TAILWIND_SECTORS = SECTOR_BUILDERS.map((s) => s.sector);
 
 function fingerprint(sector: string, comps: TailwindComponent[]): string {
+  // Covers everything the report displays (including status notes) so
+  // a wording/gap-reason correction also refreshes the stored row.
   const parts = comps.map((c) =>
-    [c.key, c.status, c.asOf ?? "", c.movementPct === null ? "" : c.movementPct.toFixed(3), c.valueText].join(":")
+    [c.key, c.status, c.asOf ?? "", c.movementPct === null ? "" : c.movementPct.toFixed(3), c.valueText, c.statusNote].join(":")
   );
   return createHash("sha256").update(`${sector}|${parts.join("|")}`).digest("hex").slice(0, 24);
 }
