@@ -2,15 +2,94 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   DESIGN TOKENS (Visual polish, Oct 17, 2026 — Ethan's premium
+   PE-portal spec). ONE source of truth for the app; the marketing
+   site (ethancanny/cannycapital, src/styles.css @theme) mirrors
+   these exact values. Change a value here, change it there.
+   tailwind.config.js exposes the same tokens as utilities
+   (navy-*, gold-*, shadow-card/nav/fab, rounded-nav/card).
+   ============================================================ */
+:root {
+  /* Brand */
+  --navy-950: #081426;
+  --navy-900: #0d1f3c; /* brand navy */
+  --navy-800: #12294d;
+  --navy-700: #16305a;
+  --navy-600: #1d3a66;
+  --navy-100: #dbe4f0;
+  --navy-50: #eef2f8;
+  --gold-700: #8a6f3c;
+  --gold-500: #b8975a; /* brand gold */
+  --gold-400: #d4b37a;
+  --gold-300: #e6cf9e;
+  --gold-gradient: linear-gradient(135deg, #dec084 0%, #b8975a 55%, #9c7c3f 100%);
+  --cream: #f7f4ec;
+  /* Text */
+  --ink: #16233c;
+  /* Caption/secondary text BEFORE: slate-400 #94a3b8 = 2.9:1 on
+     white (fails WCAG AA for small text). AFTER: #475569 (slate-600)
+     = 7.4:1 on white, ~7.0:1 on the warm page background. */
+  --caption: #475569;
+  --caption-dark: rgba(255, 255, 255, 0.72); /* ~7:1 on navy-800 */
+  /* Surfaces */
+  --page-bg: linear-gradient(180deg, #fbf8f2 0%, #f5f1e8 42%, #f1ebdf 100%);
+  --surface: #ffffff;
+  --border-card: rgba(13, 31, 60, 0.07);
+  /* Radii */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-nav: 24px;
+  /* Shadows (two-layer, navy-tinted) */
+  --shadow-card: 0 1px 2px rgba(13, 31, 60, 0.05), 0 12px 32px -20px rgba(13, 31, 60, 0.28);
+  --shadow-lift: 0 2px 4px rgba(13, 31, 60, 0.06), 0 20px 40px -20px rgba(13, 31, 60, 0.35);
+  --shadow-nav: 0 10px 36px -6px rgba(13, 31, 60, 0.28), 0 2px 10px rgba(13, 31, 60, 0.14);
+  --shadow-fab: 0 12px 26px -8px rgba(138, 111, 60, 0.55), 0 3px 8px rgba(13, 31, 60, 0.2);
+  --shadow-pop: 0 16px 44px -12px rgba(13, 31, 60, 0.35), 0 3px 10px rgba(13, 31, 60, 0.12);
+  /* Motion */
+  --dur-fast: 150ms;
+  --dur-med: 200ms;
+  --dur-pill: 250ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-std: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Type scale: 11 micro / 12 caption / 14 body / 16 md / 20 lg /
+     28 xl / 36 display — Tailwind's scale maps onto these. */
+  --tracking-label: 0.14em; /* reduced from the old 0.25em eyebrows */
+  /* Badges (§6) */
+  --badge-fit-bg: #f3ead8; --badge-fit-fg: #8a6f3c;
+  --badge-danger-bg: #fee2e2; --badge-danger-fg: #b91c1c;
+  --badge-warn-bg: #fef3c7; --badge-warn-fg: #92400e;
+  --badge-neutral-bg: #e8edf3; --badge-neutral-fg: #475569;
+}
+.dark {
+  --caption: var(--caption-dark);
+  --border-card: rgba(255, 255, 255, 0.1);
+  --page-bg: linear-gradient(180deg, #0f2547 0%, #0d1f3c 46%, #0a1730 100%);
+  --badge-fit-bg: rgba(184, 151, 90, 0.18); --badge-fit-fg: #e6cf9e;
+  --badge-danger-bg: rgba(220, 38, 38, 0.2); --badge-danger-fg: #fca5a5;
+  --badge-warn-bg: rgba(217, 119, 6, 0.2); --badge-warn-fg: #fcd34d;
+  --badge-neutral-bg: rgba(255, 255, 255, 0.1); --badge-neutral-fg: #c3cede;
+}
+
+/* Page background (token-driven; layout's <body> carries .page-bg). */
+.page-bg {
+  background: var(--page-bg);
+  background-attachment: fixed;
+}
+
 /* PWA / mobile shell (CRM Phase 2): never scroll sideways on phones,
    no grey tap flash, and safe-area helpers for notch / home bar. */
 html,
 body {
   overflow-x: clip;
 }
-/* Mobile polish (Oct 14, 2026): anchor jumps land below the 56px
-   mobile header + the status-bar safe area. */
+/* Smooth anchor/page scrolling (reduced-motion gate below wins). */
 html {
+  scroll-behavior: smooth;
+  /* Mobile polish (Oct 14, 2026): anchor jumps land below the 56px
+     mobile header + the status-bar safe area. */
   scroll-padding-top: calc(56px + env(safe-area-inset-top));
 }
 /* When the on-screen keyboard is open (MobileNav toggles `kb-open` on
@@ -18,23 +97,24 @@ html {
    FAB slide away so they never float over the keyboard. */
 html.kb-open .mobile-tabbar,
 html.kb-open .fab-root {
-  transform: translateY(130%);
+  transform: translateY(160%);
   pointer-events: none;
 }
 .mobile-tabbar,
 .fab-root {
   transition: transform 0.22s ease;
 }
-/* Bottom clearance for page content on phones: always clear the 64px
-   tab bar + home-bar inset; on pages where the FAB renders it adds
-   the `fab-visible` class to <html> for one more FAB-height of room
-   so the last cards are never covered. Desktop: no extra padding. */
+/* Bottom clearance for page content on phones: clear the FLOATING
+   tab bar (12px inset + 64px bar + 12px breathing room = 88px) plus
+   the home-bar inset; on pages where the FAB renders, `fab-visible`
+   adds one more FAB-height of room so the last cards are never
+   covered. Desktop: no extra padding. */
 @media (max-width: 767px) {
   .page-pad {
-    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
   }
   html.fab-visible .page-pad {
-    padding-bottom: calc(128px + env(safe-area-inset-bottom));
+    padding-bottom: calc(148px + env(safe-area-inset-bottom));
   }
 }
 /* NOTE (Ethan, Oct 14 2026, correction): the cacti / night-sky photo
@@ -57,16 +137,26 @@ html.kb-open .fab-root {
   padding-right: env(safe-area-inset-right);
 }
 
-/* Data-table gradients (Ethan, Oct 14, 2026 — "bring back those
-   gradients"): a soft navy-to-gold wash behind the table body and a
-   navy gradient band across the header row. Add class "tbl-grad" to a
-   <table>. Row hover tints are translucent, so the wash shows through. */
-/* Ethan (Oct 14, late): "i liked the old table look better" — the full
-   gradient wash + navy header band came off the tables the same night it
-   shipped. Tables are back to the clean look: light header, white rows,
-   hover tints only. The gradient BARS (barGradient in sector-colors)
-   stay — those are what he originally pointed at. The class name is kept
-   so all 19 table usages update from this one definition. */
+/* Visible keyboard focus everywhere interactive (spec §2): 2px gold
+   ring with an offset. Components with their own ring utilities
+   compose on top; this is the floor, never removed. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: 2px;
+}
+
+/* Data tables (Ethan, Oct 14, 2026 — final): clean look, solid navy
+   header + 2px gold rule (the table-header identity — kept), white
+   rows, hover tints only. The gradient BARS (barGradient in
+   sector-colors) stay. Polish additions (Oct 17): sticky header with
+   a subtle shadow, barely-visible zebra on rows nothing else paints
+   (:where() keeps specificity at zero so React inline styles and
+   utility classes — incl. the fit rows' gold tint — always win). */
 .tbl-grad {
   background-image: none;
 }
@@ -74,6 +164,10 @@ html.kb-open .fab-root {
   background-color: #0d1f3c;
   color: #f3ead8;
   border-bottom: 2px solid #b8975a;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  box-shadow: 0 10px 18px -14px rgba(13, 31, 60, 0.45);
 }
 .dark .tbl-grad {
   background-image: none;
@@ -82,6 +176,15 @@ html.kb-open .fab-root {
   background-color: #12294d;
   color: #f3ead8;
   border-bottom: 2px solid rgba(184, 151, 90, 0.75);
+}
+:where(.tbl-grad) tbody tr {
+  transition: background-color var(--dur-fast) var(--ease-std);
+}
+:where(.tbl-grad) tbody tr:nth-child(even) {
+  background-color: rgba(13, 31, 60, 0.018);
+}
+:where(.dark .tbl-grad) tbody tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.02);
 }
 
 /* Premium redesign Wave 1 (Oct 14, 2026) — design-system utilities.
@@ -97,23 +200,47 @@ html.kb-open .fab-root {
   font-variant-numeric: tabular-nums;
 }
 
-/* Soft layered card surface: white by day, deep navy layer at night,
-   16px radius, a hairline border and a soft shadow — no decorative
-   gold borders. */
+/* Soft layered card surface (tokenized Oct 17): white by day, deep
+   navy layer at night, 18px radius, a hairline navy-7% border and
+   the two-layer card shadow — no decorative gold borders. */
 .card-surface {
-  border-radius: 1rem;
-  border: 1px solid rgb(226 232 240);
-  background-color: #ffffff;
-  box-shadow:
-    0 1px 2px rgba(13, 31, 60, 0.05),
-    0 12px 32px -20px rgba(13, 31, 60, 0.28);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-card);
+  background-color: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 .dark .card-surface {
-  border-color: rgba(255, 255, 255, 0.1);
   background-color: #12294d;
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.25),
     0 12px 32px -20px rgba(0, 0, 0, 0.6);
+}
+/* Interactive cards: lift on hover (desktop), compress on press. */
+.card-hover {
+  transition:
+    transform var(--dur-med) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out);
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+.card-hover:active {
+  transform: scale(0.99);
+}
+/* Key cards only (spec §3): a short gold rule at the top-left edge. */
+.card-accent {
+  position: relative;
+}
+.card-accent::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 1.25rem;
+  width: 3rem;
+  height: 3px;
+  border-radius: 0 0 4px 4px;
+  background: var(--gold-gradient);
 }
 
 /* One consistent photo grade: wrap the image (or a color block) in
@@ -154,8 +281,279 @@ html.kb-open .fab-root {
     opacity: 0.45;
   }
 }
+
+/* Page transition (spec §7): a short fade + slight slide on route
+   change, applied by components/PageTransition (keyed by pathname). */
+.page-enter {
+  /* fill backwards (not both): after the 200ms the wrapper returns
+     to natural styles, so no lingering transform can become a
+     containing block for fixed-position descendants (modals). */
+  animation: page-enter var(--dur-med) var(--ease-out) backwards;
+}
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Animated expand/collapse (spec §7): grid-rows height animation —
+   wrap collapsible content in .collapse-grid > .collapse-inner and
+   toggle [data-open]. No layout jumps, no JS measuring. */
+.collapse-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-med) var(--ease-out);
+}
+.collapse-grid[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.collapse-grid > .collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Toast (spec §7): slides up from the bottom, above the floating
+   nav bar; token-styled. Host: components/Toast.tsx. */
+.toast-in {
+  animation: toast-in var(--dur-med) var(--ease-out) both;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================================
+   SHARED COMPONENT CLASSES (spec §2/§5/§6) — @layer components so
+   page utilities can still override. Buttons: 150–200ms transitions
+   on color/shadow/transform, hover lift, press scale, disabled
+   dimmed with no hover, loading spinner via [data-loading="true"].
+   Dark-mode primary follows the portal's established dark pattern
+   (gold on navy surfaces) — same token family, surface-adapted.
+   ============================================================ */
+@layer components {
+  .btn {
+    @apply relative inline-flex select-none items-center justify-center gap-2 whitespace-nowrap font-semibold transition-all duration-200 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+    min-height: 44px;
+    border-radius: var(--radius-md);
+    padding: 0.625rem 1.125rem;
+    font-size: 0.875rem;
+    transition-timing-function: var(--ease-std);
+  }
+  .btn-sm {
+    min-height: 36px;
+    padding: 0.375rem 0.875rem;
+    font-size: 0.8125rem;
+    border-radius: 10px;
+  }
+  .btn-primary {
+    @apply text-white;
+    background-color: var(--navy-900);
+    box-shadow: 0 1px 2px rgba(13, 31, 60, 0.18), 0 8px 20px -12px rgba(13, 31, 60, 0.5);
+  }
+  .btn-primary:hover {
+    background-color: #1a3455;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-lift);
+  }
+  .btn-primary:active {
+    background-color: var(--navy-950);
+  }
+  .dark .btn-primary {
+    background: var(--gold-gradient);
+    color: var(--navy-900);
+  }
+  .dark .btn-primary:hover {
+    background: var(--gold-gradient);
+    filter: brightness(1.07);
+  }
+  .dark .btn-primary:active {
+    background: var(--gold-gradient);
+    filter: brightness(0.95);
+  }
+  /* Accent: gold gradient, navy text — the single most important
+     action on a screen, used sparingly (e.g. Sign in). */
+  .btn-accent {
+    background: var(--gold-gradient);
+    color: var(--navy-900);
+    box-shadow: var(--shadow-fab);
+  }
+  .btn-accent:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+  }
+  .btn-accent:active {
+    filter: brightness(0.95);
+  }
+  .btn-secondary {
+    @apply bg-white text-[#0d1f3c];
+    border: 1px solid rgba(13, 31, 60, 0.22);
+    box-shadow: 0 1px 2px rgba(13, 31, 60, 0.06);
+  }
+  .btn-secondary:hover {
+    background-color: var(--navy-50);
+    transform: translateY(-1px);
+  }
+  .dark .btn-secondary {
+    background-color: rgba(255, 255, 255, 0.06);
+    color: #e8dfc8;
+    border-color: rgba(255, 255, 255, 0.22);
+  }
+  .dark .btn-secondary:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+  }
+  /* Tertiary / text button: navy text, underline/tint on hover. */
+  .btn-ghost {
+    @apply text-[#0d1f3c];
+    box-shadow: none;
+  }
+  .btn-ghost:hover {
+    background-color: rgba(13, 31, 60, 0.05);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .dark .btn-ghost {
+    color: var(--gold-400);
+  }
+  .dark .btn-ghost:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+  /* Destructive: muted red text/outline only — solid fill stays
+     reserved for confirm steps (existing confirm UIs keep theirs). */
+  .btn-danger {
+    @apply bg-transparent text-red-700;
+    border: 1px solid rgba(185, 28, 28, 0.4);
+    box-shadow: none;
+  }
+  .btn-danger:hover {
+    background-color: rgba(220, 38, 38, 0.06);
+  }
+  .dark .btn-danger {
+    color: #fca5a5;
+    border-color: rgba(252, 165, 165, 0.4);
+  }
+  .dark .btn-danger:hover {
+    background-color: rgba(220, 38, 38, 0.14);
+  }
+  /* Loading: spinner replaces the label's left slot (spec §2). */
+  .btn[data-loading="true"] {
+    pointer-events: none;
+    opacity: 0.8;
+  }
+  .btn[data-loading="true"]::before {
+    content: "";
+    width: 1em;
+    height: 1em;
+    border-radius: 9999px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    animation: btn-spin 0.7s linear infinite;
+  }
+
+  /* Pill filters (spec §6): light tint idle, navy fill + white text
+     selected, subtle selected shadow. Dark: gold fill (portal's
+     established dark pattern). Ethan's control-order rule is a
+     markup concern — order is never changed by these classes. */
+  .chip {
+    @apply inline-flex select-none items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 font-semibold transition-all duration-150 active:scale-[0.97];
+    min-height: 36px;
+    font-size: 0.8125rem;
+    background-color: rgba(13, 31, 60, 0.05);
+    color: var(--caption);
+    transition-timing-function: var(--ease-std);
+  }
+  .chip:hover {
+    background-color: rgba(13, 31, 60, 0.09);
+    color: var(--navy-900);
+  }
+  .dark .chip {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.65);
+  }
+  .dark .chip:hover {
+    background-color: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+  }
+  .chip-active {
+    background-color: var(--navy-900);
+    color: #ffffff;
+    box-shadow: 0 4px 14px -6px rgba(13, 31, 60, 0.55);
+  }
+  .chip-active:hover {
+    background-color: var(--navy-900);
+    color: #ffffff;
+  }
+  .dark .chip-active {
+    background: var(--gold-gradient);
+    color: var(--navy-900);
+  }
+  .dark .chip-active:hover {
+    background: var(--gold-gradient);
+    color: var(--navy-900);
+  }
+
+  /* Badges (spec §6): small rounded tags, one color language —
+     gold fit, red overdue/danger, amber warning, slate neutral. */
+  .badge {
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 font-semibold;
+    font-size: 0.6875rem;
+    line-height: 1.125rem;
+    letter-spacing: 0.02em;
+  }
+  .badge-fit { background-color: var(--badge-fit-bg); color: var(--badge-fit-fg); }
+  .badge-danger { background-color: var(--badge-danger-bg); color: var(--badge-danger-fg); }
+  .badge-warn { background-color: var(--badge-warn-bg); color: var(--badge-warn-fg); }
+  .badge-neutral { background-color: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
+
+  /* Typography helpers (spec §5): micro labels at the reduced
+     tracking token; captions in the AA caption color. */
+  .micro-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-label);
+    color: var(--caption);
+  }
+  .caption {
+    font-size: 0.75rem;
+    color: var(--caption);
+  }
+}
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Reduced motion (spec §7/§9): every animation and transition in
+   the app collapses; smooth scrolling turns off. Component-level
+   gates (count-up, pill slide) also check matchMedia in JS. */
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
   .skel {
+    animation: none;
+  }
+  .page-enter,
+  .toast-in {
     animation: none;
   }
 }

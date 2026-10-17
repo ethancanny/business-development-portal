@@ -6,6 +6,25 @@ export function fmtMoney(value: number): string {
   }).format(value || 0);
 }
 
+/**
+ * Compact money for stat tiles and big-number displays (visual
+ * polish, Oct 17, 2026): $9.5M instead of $9,499,994, $950K under a
+ * million, full dollars under $10K. One decimal, trailing ".0"
+ * dropped. The exact figure stays one tap away — callers pair this
+ * with fmtMoney in the title attribute / detail view.
+ */
+export function fmtMoneyCompact(value: number): string {
+  const v = value || 0;
+  const sign = v < 0 ? "-" : "";
+  const abs = Math.abs(v);
+  const trim = (n: number) =>
+    n.toFixed(1).replace(/\.0$/, "");
+  if (abs >= 1_000_000_000) return `${sign}$${trim(abs / 1_000_000_000)}B`;
+  if (abs >= 1_000_000) return `${sign}$${trim(abs / 1_000_000)}M`;
+  if (abs >= 10_000) return `${sign}$${trim(abs / 1_000)}K`;
+  return fmtMoney(v);
+}
+
 export function fmtDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
