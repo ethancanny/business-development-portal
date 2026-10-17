@@ -32,16 +32,23 @@
  * later by an agent in our own words (see lib/news-db.ts).
  */
 import { logSync } from "./market-db";
-import { INDUSTRY_KEYWORDS, kwMatch } from "./industry-classify";
 import {
   insertNewsItem,
   getRecentNewsRows,
   appendAlsoCoveredBy,
   loadMatchEntities,
+  loadClassifierState,
+  type ClassifierState,
   type MatchEntity,
   type MatchLoadStats,
   type RecentNewsRow,
 } from "./news-db";
+import {
+  NEWS_MIN_RELEVANCE,
+  classifySector,
+  scoreRelevance,
+  feedbackDelta,
+} from "./news-classify";
 import type { MiNewsItem, MiNewsMatch } from "./types";
 
 /* ---------------- feeds ---------------- */
@@ -123,37 +130,20 @@ function stripHtml(s: string): string {
 const JUNK_HEADLINE =
   /\b(how to|what to know|opinion|editorial|podcast|webinar|sponsored|price target|dividend|earnings call|top \d+|best stocks?|stocks? to (buy|watch)|shares? (rise|risen|fall|fell|jump|drop|surge|plunge|slide|soar|climb|dip)|stock is trending|trending stocks?|lawsuit|indicted|arrested|coupon|giveaway|campaign|endorses?|endorsement|poll (shows|says|finds)|slams|blasts|feud|scandal)\b/i;
 
-/* ---------------- relevance screen ---------------- */
+/* ---------------- relevance screen ----------------
+ * Sector + relevance decisions live in lib/news-classify.ts (News
+ * overhaul, Oct 17, 2026): a weighted keyword/entity classifier over
+ * headline + snippet, a deal-signal relevance model with a display
+ * threshold, and named hard-exclude categories that never reach the
+ * feed. This file keeps only the entity matching + ingest mechanics. */
 
-/** Arizona + Southwest place terms (AZ list mirrors market-ingest). */
-const AZ_TERMS =
-  /\b(arizona|phoenix|scottsdale|tempe|mesa|tucson|chandler|gilbert|glendale|peoria|surprise|flagstaff|yuma|prescott|avondale|goodyear|buckeye|queen creek|maricopa|pinal|sedona|lake havasu)\b/i;
-const SW_TERMS =
-  /\b(new mexico|albuquerque|santa fe|las cruces|nevada|las vegas|henderson|reno|utah|salt lake city|southwest)\b/i;
-
-/** Major-event terms for lane (c): expansion / contract award /
- * acquisition / regulatory change in a focus sector. */
-const EVENT_TERMS =
-  /\b(expand|expansion|expands|acqui\w*|merger|merges|merged|contract (award|win)|awarded|wins? (a |the )?(contract|deal)|plant|headquarters|fda|regulat\w*|bankrupt\w*|groundbreak\w*|relocat\w*|new facility|layoffs?|shutter\w*|closes|closing)\b/i;
-
-/** Portal focus sectors and the industry-classify keyword groups that map
- * to them (classify names → portal sector names). */
-const FOCUS_SECTORS: { sector: string; industry: string }[] = [
-  { sector: "Aerospace & Defense", industry: "Aerospace & Defense" },
-  { sector: "Healthcare", industry: "Healthcare" },
-  { sector: "Advanced Manufacturing", industry: "Advanced Manufacturing" },
-  { sector: "Specialty Trades & Construction", industry: "Specialty Trades & Construction" },
-  { sector: "Hospitality", industry: "Hospitality & Leisure" },
-];
-const PORTAL_SECTORS = new Set(FOCUS_SECTORS.map((f) => f.sector));
-
-function sectorKeywordHit(text: string): string | null {
-  for (const f of FOCUS_SECTORS) {
-    const group = INDUSTRY_KEYWORDS.find((g) => g.industry === f.industry);
-    if (group && group.words.some((w) => kwMatch(text, w))) return f.sector;
-  }
-  return null;
-}
+const PORTAL_SECTORS = new Set([
+  "Aerospace & Defense",
+  "Healthcare",
+  "Advanced Manufacturing",
+  "Specialty Trades & Construction",
+  "Hospitality",
+]);
 
 function normalizeHeadline(h: string): string {
   return h
@@ -186,14 +176,31 @@ interface Screened {
   kind: MiNewsItem["kind"];
   matched: MiNewsMatch[];
   sector: string | null;
+  sectorConfidence: number;
+  sectorTags: string[];
+  relevanceReason: string | null;
+  dealSignal: boolean;
 }
 
-/** Ethan's relevance lanes (Oct 14, 2026): (a) a name we track — fit
+type ScreenResult =
+  | { status: "keep"; screened: Screened }
+  | { status: "hard"; category: string }
+  | { status: "below" };
+
+/** Screen one story: entity matching first (tracked names — fit
  * companies, pipeline deals, Directory people, competing buyers, the
- * watchlist; (b) a focus-sector company in AZ/Southwest; (c) a major
- * event in a focus sector. Scores: entity 50 (+20 watchlist), event +
- * sector 30, sector + AZ 20, recency up to +10. Keep at ≥20. */
-function screenItem(headline: string, snippet: string, feedLocal: boolean, entities: MatchEntity[]): Screened | null {
+ * watchlist, tracked hospitality groups), then the classifier +
+ * relevance model from lib/news-classify.ts, with Ethan's learned
+ * corrections and "Not relevant" adjustments applied. Hard-excluded
+ * categories and sub-threshold stories never insert. */
+function screenItem(
+  headline: string,
+  snippet: string,
+  sourceName: string,
+  entities: MatchEntity[],
+  state: ClassifierState,
+  publishedAt: Date | null
+): ScreenResult {
   const hay = `${headline} ${stripHtml(snippet)}`;
   const hayLc = hay.toLowerCase();
   // Tokens keep internal apostrophes so single-word names like
@@ -214,48 +221,55 @@ function screenItem(headline: string, snippet: string, feedLocal: boolean, entit
     if (e.type === "watchlist") watchlistHit = true;
     else {
       entityHit = true;
-      // Tracked hospitality groups (§5) count as lane-(a) tracked names:
-      // the entity base score (50) ranks them above every generic
-      // sector/event item (max 40 with recency), and the match carries
-      // the "Tracked group" marker into the UI.
+      // A tracked company/group whose sector we already know votes for
+      // that sector below — a stronger signal than vocabulary alone.
       if ((e.type === "company" || e.type === "hospitality") && e.sector && PORTAL_SECTORS.has(e.sector) && !companySector) companySector = e.sector;
     }
   }
 
-  const sectorKw = sectorKeywordHit(hay);
-  const azHit = feedLocal || AZ_TERMS.test(hay) || SW_TERMS.test(hay);
-  const eventHit = EVENT_TERMS.test(hay);
+  const verdict = classifySector(headline, "", hay, state.corrections);
+  // A matched tracked company's known sector overrides the vocabulary
+  // vote when the classifier itself found no confident sector — the
+  // entity record is ground truth about what the company IS.
+  const sector =
+    verdict.sector === "Other" && companySector ? companySector : verdict.sector;
+  const matchedTypes = matched.map((m) => m.type);
+  const rel = scoreRelevance({
+    headline,
+    summary: "",
+    snippet: hay,
+    sector,
+    matchedTypes,
+    publishedAt: publishedAt ? publishedAt.toISOString() : null,
+  });
+  if (rel.hardExclude) return { status: "hard", category: rel.hardExclude.category };
+  let score = rel.score;
+  // Learned "Not relevant" feedback applies to future stories from the
+  // same source / on the same topic tokens.
+  const delta = feedbackDelta(sourceName, headline, state.adjustments);
+  if (delta !== 0) score = Math.max(0, Math.min(100, score + delta));
+  if (score < NEWS_MIN_RELEVANCE) return { status: "below" };
 
-  let base = 0;
-  let kind: MiNewsItem["kind"] = "sector";
-  if (entityHit || watchlistHit) {
-    base = 50;
-    kind = watchlistHit ? "watchlist" : "entity";
-  } else if (eventHit && sectorKw) {
-    base = 30;
-    kind = "event";
-  } else if (sectorKw && azHit) {
-    base = 20;
-    kind = "sector";
-  } else {
-    return null;
-  }
-
+  const kind: MiNewsItem["kind"] = watchlistHit
+    ? "watchlist"
+    : entityHit
+      ? "entity"
+      : rel.dealSignal
+        ? "event"
+        : "sector";
   return {
-    score: base + (watchlistHit ? 20 : 0),
-    kind,
-    matched,
-    sector: companySector ?? sectorKw,
+    status: "keep",
+    screened: {
+      score,
+      kind,
+      matched,
+      sector,
+      sectorConfidence: verdict.confidence,
+      sectorTags: verdict.tags,
+      relevanceReason: rel.reason,
+      dealSignal: rel.dealSignal,
+    },
   };
-}
-
-function recencyBonus(publishedAt: Date | null): number {
-  if (!publishedAt) return 0;
-  const ageH = (Date.now() - publishedAt.getTime()) / 3600e3;
-  if (ageH <= 6) return 10;
-  if (ageH <= 24) return 6;
-  if (ageH <= 72) return 3;
-  return 0;
 }
 
 /* ---------------- og:image ---------------- */
@@ -291,6 +305,7 @@ const IMAGE_FETCH_CAP = 12;
 export async function ingestIntelNews(): Promise<number> {
   const loadStats: MatchLoadStats = { hospitalityTotal: 0, hospitalityMatchable: 0, hospitalityGenericSkipped: 0 };
   const entities = await loadMatchEntities(loadStats);
+  const classifierState = await loadClassifierState();
   const recent: RecentNewsRow[] = await getRecentNewsRows(72);
   const seenLinks = new Set<string>();
   const seenKeys = new Set<string>();
@@ -304,6 +319,9 @@ export async function ingestIntelNews(): Promise<number> {
   let merged = 0;
   let dupSkipped = 0;
   let imagesFetched = 0;
+  let hardExcluded = 0;
+  let belowBar = 0;
+  const hardCats = new Map<string, number>();
 
   interface Candidate {
     headline: string;
@@ -351,21 +369,28 @@ export async function ingestIntelNews(): Promise<number> {
       const dedupeKey = normalizeHeadline(headline).slice(0, 220);
       if (!dedupeKey || seenKeys.has(dedupeKey)) continue;
       seenKeys.add(dedupeKey);
-      const screened = screenItem(headline, item.description, Boolean(feed.local), entities);
-      if (!screened) continue;
       const pub = item.pubDate ? new Date(item.pubDate) : null;
       const publishedAt = pub && Number.isFinite(pub.getTime()) ? pub : null;
-      screened.score += recencyBonus(publishedAt);
-      if (screened.score < 20) continue;
+      const sourceName = (item.source || "").trim() || feed.name;
+      const result = screenItem(headline, item.description, sourceName, entities, classifierState, publishedAt);
+      if (result.status === "hard") {
+        hardExcluded++;
+        hardCats.set(result.category, (hardCats.get(result.category) ?? 0) + 1);
+        continue;
+      }
+      if (result.status === "below") {
+        belowBar++;
+        continue;
+      }
       t.kept++;
       kept++;
       candidates.push({
         headline,
         url: item.link,
-        sourceName: (item.source || "").trim() || feed.name,
+        sourceName,
         publishedAt,
         snippet: stripHtml(item.description).slice(0, 600),
-        screened,
+        screened: result.screened,
         dedupeKey,
       });
     }
@@ -408,7 +433,11 @@ export async function ingestIntelNews(): Promise<number> {
       sourceName: cand.sourceName,
       publishedAt: cand.publishedAt ? cand.publishedAt.toISOString() : null,
       sector: cand.screened.sector,
+      sectorConfidence: cand.screened.sectorConfidence,
+      sectorTags: cand.screened.sectorTags,
       relevanceScore: cand.screened.score,
+      relevanceReason: cand.screened.relevanceReason,
+      dealSignal: cand.screened.dealSignal,
       kind: cand.screened.kind,
       matched: cand.screened.matched,
       imageUrl,
@@ -436,7 +465,8 @@ export async function ingestIntelNews(): Promise<number> {
     .filter(([, h]) => h !== "ok")
     .map(([short, h]) => `${short} ${h}`)
     .join(", ");
-  const verdict = `fetched ${fetched} · kept ${kept} · inserted ${inserted} · merged ${merged} · dup ${dupSkipped} · entities ${entities.length} (hosp groups ${loadStats.hospitalityMatchable}/${loadStats.hospitalityTotal} matchable, ${loadStats.hospitalityGenericSkipped} generic-skipped) · per-source kept/fetched: ${perSource}${feedGaps ? ` · FEED GAPS: ${feedGaps}` : ""}`;
+  const hardStr = Array.from(hardCats.entries()).map(([c, n]) => `${c} ${n}`).join(", ");
+  const verdict = `fetched ${fetched} · kept ${kept} · inserted ${inserted} · merged ${merged} · dup ${dupSkipped} · hard-excluded ${hardExcluded}${hardStr ? ` (${hardStr})` : ""} · below-bar ${belowBar} · entities ${entities.length} (hosp groups ${loadStats.hospitalityMatchable}/${loadStats.hospitalityTotal} matchable, ${loadStats.hospitalityGenericSkipped} generic-skipped) · per-source kept/fetched: ${perSource}${feedGaps ? ` · FEED GAPS: ${feedGaps}` : ""}`;
   await logSync("intel-news-xcheck", "ok", kept, verdict.slice(0, 950));
   await logSync("intel_news", "ok", inserted, verdict.slice(0, 950));
   return inserted;
