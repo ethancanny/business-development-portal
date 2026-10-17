@@ -46,6 +46,7 @@ const MATCH_LABELS: Record<MiNewsMatch["type"], string> = {
   operator: "Operator",
   investor: "Investor",
   watchlist: "Watchlist",
+  hospitality: "Tracked group",
 };
 
 const pillCls = (active: boolean) =>
@@ -271,7 +272,9 @@ export default function NewsIntel() {
     }
     const companies: MiNewsMatch[] = [];
     item.matched.forEach((m) => {
-      if (m.type === "company" && !companies.some((c) => c.id === m.id)) companies.push(m);
+      // Tracked hospitality groups carry their mirrored company's id —
+      // they are linkable companies too.
+      if ((m.type === "company" || m.type === "hospitality") && !companies.some((c) => c.id === m.id)) companies.push(m);
     });
     if (companies.length === 0) return null;
     if (companies.length === 1) {
@@ -383,7 +386,9 @@ export default function NewsIntel() {
                   className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
                     m.type === "watchlist"
                       ? "bg-[#b8975a]/15 text-[#8a6f3c] ring-1 ring-inset ring-[#b8975a]/50 dark:text-[#d4b37a]"
-                      : "bg-slate-500/10 text-slate-600 ring-1 ring-inset ring-slate-500/20 dark:text-white/60"
+                      : m.type === "hospitality"
+                        ? "bg-[#7A4E7E]/10 text-[#7A4E7E] ring-1 ring-inset ring-[#7A4E7E]/40 dark:text-[#c9a3cf]"
+                        : "bg-slate-500/10 text-slate-600 ring-1 ring-inset ring-slate-500/20 dark:text-white/60"
                   }`}
                 >
                   {m.name}

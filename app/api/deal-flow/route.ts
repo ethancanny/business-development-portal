@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDealFlow, saveDealFlow, newId, logActivity } from "@/lib/db";
 import { shouldAutoDismiss } from "@/lib/az-location";
+import { isHospitalityListing, screenHospitalityListing } from "@/lib/hospitality-screen";
 import { getSessionUser } from "@/lib/auth";
 import type { DealFlowItem, DealFlowKind } from "@/lib/types";
 
@@ -38,17 +39,45 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "title is required" }, { status: 400 });
   }
   const now = new Date().toISOString();
+  const kind: DealFlowKind = KINDS.includes(body.kind) ? body.kind : "business_for_sale";
+  const title = String(body.title).trim();
+  const industry = String(body.industry ?? "").trim();
+  const location = String(body.location ?? "").trim();
+  // Classification (portal layer): the AZ rule first, then — for
+  // hospitality listings only — the §5 screen (multi-unit ≥3 or a
+  // hotel/lodging property, viability on stated figures). A screened-out
+  // item is still created, as "dismissed", exactly like a non-AZ
+  // listing: registered, never surfaced as new. Optional structured
+  // figures (price / cashFlow / locations) may ride the POST body.
+  let status: DealFlowItem["status"] = shouldAutoDismiss(kind, location) ? "dismissed" : "new";
+  if (status === "new" && kind === "business_for_sale" && isHospitalityListing(industry, title)) {
+    const num = (v: unknown): number | null => {
+      if (v === undefined || v === null || v === "") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const verdict = await screenHospitalityListing({
+      title,
+      industry,
+      location,
+      why: String(body.why ?? ""),
+      price: num(body.price),
+      cashFlow: num(body.cashFlow),
+      locations: num(body.locations),
+    });
+    if (!verdict.pass) status = "dismissed";
+  }
   const item: DealFlowItem = {
     id: newId(),
-    kind: KINDS.includes(body.kind) ? body.kind : "business_for_sale",
-    title: String(body.title).trim(),
+    kind,
+    title,
     source: String(body.source ?? "").trim(),
     sourceDetail: String(body.sourceDetail ?? ""),
     spottedAt: String(body.spottedAt ?? now.slice(0, 10)),
     why: String(body.why ?? ""),
-    industry: String(body.industry ?? "").trim(),
-    location: String(body.location ?? "").trim(),
-    status: shouldAutoDismiss(KINDS.includes(body.kind) ? body.kind : "business_for_sale", String(body.location ?? "").trim()) ? "dismissed" : "new",
+    industry,
+    location,
+    status,
     relatedDealId: null,
     relatedExecId: null,
     createdAt: now,
