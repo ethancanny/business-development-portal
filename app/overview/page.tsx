@@ -5,12 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import TaskList from "@/components/TaskList";
 import PageHero from "@/components/PageHero";
+import { StatTile } from "@/components/ui";
 import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiCompany, type MiIndicatorObs, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
 import type { Investor } from "@/lib/investors-db";
 import type { OperatorCandidate } from "@/lib/candidates-db";
-import { fmtMoney, dedupeSourceTokens } from "@/lib/format";
+import { fmtMoney, fmtMoneyCompact, dedupeSourceTokens } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, sectorIcon, stageColor } from "@/lib/sector-colors";
 import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
@@ -977,7 +978,7 @@ export default function Overview() {
           figures with small uppercase labels. Scope: ALL deals (the
           count-all rule) — the old "All sectors." caption now rides
           in the pipeline-value label line. */}
-      <section className="card-surface mb-6 p-5 sm:p-6">
+      <section className="card-surface card-accent mb-6 p-5 sm:p-6">
         <p className="font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">
           {briefDate}
         </p>
@@ -987,70 +988,49 @@ export default function Overview() {
           </p>
         )}
         <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 lg:grid-cols-5">
-          <Link href="/pipeline" className="group block">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
-              Active pipeline value
-            </p>
-            <p className="tnum mt-1 font-display text-4xl font-semibold text-[#0d1f3c] transition group-hover:text-[#8a6f3c] dark:text-white dark:group-hover:text-[#d4b37a]">
-              {pipelineValued.length === 0 ? "—" : fmtMoney(pipelineValue)}
-            </p>
-            <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
-              All sectors
-            </p>
-          </Link>
-          <Link href="/pipeline" className="group block">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
-              Active targets
-            </p>
-            <p className="tnum mt-1 font-display text-4xl font-semibold text-[#0d1f3c] transition group-hover:text-[#8a6f3c] dark:text-white dark:group-hover:text-[#d4b37a]">
-              {activeDeals.length}
-            </p>
-            <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
-              In the pipeline now
-            </p>
-          </Link>
-          <Link href="/market-intel#fit-targets" className="group block">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
-              Fit targets
-            </p>
-            <p className="tnum mt-1 font-display text-4xl font-semibold text-[#0d1f3c] transition group-hover:text-[#8a6f3c] dark:text-white dark:group-hover:text-[#d4b37a]">
-              {fitTotalReady ? fitTotal.toLocaleString() : "…"}
-            </p>
-            <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
-              Across the five focus sectors
-            </p>
-          </Link>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
-              Open follow-ups
-            </p>
-            <p
-              className="tnum mt-1 font-display text-4xl font-semibold text-[#0d1f3c] dark:text-white"
-              style={overdueTasks.length > 0 ? { color: AGING_COLORS.bad } : undefined}
-            >
-              {openTasks.length}
-            </p>
-            {overdueTasks.length > 0 ? (
-              <p className="mt-0.5 text-xs" style={{ color: AGING_COLORS.bad }}>
-                {overdueTasks.length} overdue
-              </p>
-            ) : (
-              <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
-                None overdue
-              </p>
-            )}
+          <StatTile
+            label="Active pipeline value"
+            display={pipelineValued.length === 0 ? "—" : fmtMoneyCompact(pipelineValue)}
+            numericValue={pipelineValued.length === 0 ? undefined : pipelineValue}
+            format={fmtMoneyCompact}
+            caption="All sectors"
+            href="/pipeline"
+            title={pipelineValued.length === 0 ? undefined : fmtMoney(pipelineValue)}
+          />
+          <StatTile
+            label="Active targets"
+            display={String(activeDeals.length)}
+            numericValue={activeDeals.length}
+            format={(n) => n.toLocaleString()}
+            caption="In the pipeline now"
+            href="/pipeline"
+          />
+          <StatTile
+            label="Fit targets"
+            display={fitTotalReady ? fitTotal.toLocaleString() : "…"}
+            numericValue={fitTotalReady ? fitTotal : undefined}
+            format={(n) => n.toLocaleString()}
+            caption="Across the five focus sectors"
+            href="/market-intel#fit-targets"
+          />
+          <StatTile
+            label="Open follow-ups"
+            display={String(openTasks.length)}
+            numericValue={openTasks.length}
+            format={(n) => n.toLocaleString()}
+            caption={overdueTasks.length > 0 ? `${overdueTasks.length} overdue` : "None overdue"}
+            valueClassName={overdueTasks.length > 0 ? "!text-[#B03A2E]" : ""}
+          />
+          <div className="col-span-2 lg:col-span-1">
+            <StatTile
+              label="Claimed by me"
+              display={String(myClaims)}
+              numericValue={myClaims}
+              format={(n) => n.toLocaleString()}
+              caption="Deals & operators"
+              href="/pipeline"
+            />
           </div>
-          <Link href="/pipeline" className="group block">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
-              Claimed by me
-            </p>
-            <p className="tnum mt-1 font-display text-4xl font-semibold text-[#0d1f3c] transition group-hover:text-[#8a6f3c] dark:text-white dark:group-hover:text-[#d4b37a]">
-              {myClaims}
-            </p>
-            <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
-              Deals &amp; operators
-            </p>
-          </Link>
         </div>
         {showFullAnalytics && (
           <div className="mt-5 hidden border-t border-slate-100 pt-3 md:block dark:border-white/10">
