@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDealFlow, saveDealFlow, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
+import { pushBadgeUpdate } from "@/lib/push";
 import type { DealFlowStatus } from "@/lib/types";
 
 interface Params {
@@ -40,6 +41,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
   };
   items[idx] = updated;
   await saveDealFlow(items);
+  // Triage changes what needs attention — refresh the badge everywhere.
+  if (updated.status !== prev.status) {
+    pushBadgeUpdate(user.email).catch(() => undefined);
+  }
 
   if (body.status === "added" && prev.status !== "added") {
     const actor = user.name || user.email;
@@ -68,5 +73,6 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   }
   items.splice(idx, 1);
   await saveDealFlow(items);
+  pushBadgeUpdate(user.email).catch(() => undefined);
   return NextResponse.json({ ok: true });
 }

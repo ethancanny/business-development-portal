@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
     relatedExecId: null,
     createdAt: now,
     updatedAt: now,
+    readAt: null,
   };
   const items = await getDealFlow();
   items.unshift(item);

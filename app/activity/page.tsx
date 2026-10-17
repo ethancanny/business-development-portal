@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
 import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
@@ -66,6 +66,68 @@ export default function ActivityPage() {
   const tabItems = filtered.filter((i) => i.kind === kindTab);
 
   const newCount = items.filter((i) => i.status === "new").length;
+
+  /* --- read state (app-icon badge, Oct 16, 2026) ---
+   * Unread = status "new" and never seen in this list. Viewing the
+   * list marks what's rendered as read; the items stay "new" for
+   * triage — read state only drives the badge count. */
+  const unreadCount = items.filter(
+    (i) => i.status === "new" && !i.readAt
+  ).length;
+  const markedRef = useRef<Set<string>>(new Set());
+
+  const markRead = useCallback(async (ids: string[]) => {
+    const fresh = ids.filter((id) => !markedRef.current.has(id));
+    if (!fresh.length) return;
+    fresh.forEach((id) => markedRef.current.add(id));
+    try {
+      const res = await fetch("/api/deal-flow/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: fresh }),
+      });
+      if (res.ok) {
+        const nowIso = new Date().toISOString();
+        setItems((prev) =>
+          prev.map((i) =>
+            fresh.includes(i.id) && !i.readAt ? { ...i, readAt: nowIso } : i
+          )
+        );
+      }
+    } catch {
+      /* best-effort — the badge recalcs from the server on next view */
+    }
+  }, []);
+
+  const markAllRead = async () => {
+    try {
+      const res = await fetch("/api/deal-flow/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true }),
+      });
+      if (res.ok) {
+        const nowIso = new Date().toISOString();
+        items.forEach((i) => markedRef.current.add(i.id));
+        setItems((prev) =>
+          prev.map((i) =>
+            i.status === "new" && !i.readAt ? { ...i, readAt: nowIso } : i
+          )
+        );
+      }
+    } catch {
+      /* best-effort */
+    }
+  };
+
+  // Mark whatever is currently rendered as read — switching tabs or
+  // status filters marks the newly visible items too.
+  useEffect(() => {
+    const visibleUnread = tabItems
+      .filter((i) => i.status === "new" && !i.readAt)
+      .map((i) => i.id);
+    if (visibleUnread.length) void markRead(visibleUnread);
+  }, [tabItems, markRead]);
 
   const setStatus = async (id: string, status: DealFlowStatus) => {
     setBusy(id);
@@ -174,6 +236,14 @@ export default function ActivityPage() {
           >
             {showAdd ? "Cancel" : "+ Add item"}
           </button>
+          {unreadCount > 0 && (
+            <button
+              onClick={markAllRead}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-white/20 dark:text-white/70 dark:hover:bg-white/5"
+            >
+              Mark all as read ({unreadCount})
+            </button>
+          )}
         </div>
 
         {showAdd && <AddFlowItem onDone={() => { setShowAdd(false); load(); }} />}

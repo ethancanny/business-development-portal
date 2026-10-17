@@ -91,9 +91,45 @@ self.addEventListener("fetch", (event) => {
 });
 
 /* ---------------- Web Push ----------------
- * Payload contract (push backend): JSON { title, body, url, tag, badge? }.
- * Lock-screen text is composed server-side (generic by default), so the
- * SW simply displays what it receives. */
+ * Payload contract (push backend): JSON { title, body, url, tag,
+ * badge?, badgeOnly? }. `badge` is the CURRENT server-computed
+ * attention count (lib/badge) — the SW applies it to the app icon so
+ * the count stays right even with no page open. A badgeOnly payload
+ * carries no notification: it only refreshes the icon.
+ * Lock-screen text is composed server-side (generic by default), so
+ * the SW simply displays what it receives. */
+
+/* Apply a server-computed badge count. Zero CLEARS the badge (never
+ * setAppBadge(0), which can leave a stale badge on some devices).
+ * Best-effort: the Badging API is not exposed in every service worker
+ * (older WebKit) — the page recalcs on next open regardless. */
+async function applyBadge(count) {
+  try {
+    const nav = self.navigator;
+    if (!nav || typeof nav.setAppBadge !== "function") return;
+    if (typeof count !== "number" || Number.isNaN(count)) return;
+    if (count > 0) await nav.setAppBadge(count);
+    else if (typeof nav.clearAppBadge === "function") {
+      await nav.clearAppBadge();
+    }
+  } catch (e) {
+    /* badge is best-effort */
+  }
+}
+
+/* Recompute the badge from the server (session cookie rides along).
+ * Used when a notification is tapped or dismissed: the count is
+ * whatever the live data says, never a local guess. */
+async function recalcBadge() {
+  try {
+    const r = await fetch("/api/push/badge", { credentials: "include" });
+    if (!r.ok) return;
+    const d = await r.json();
+    await applyBadge(typeof d.count === "number" ? d.count : null);
+  } catch (e) {
+    /* offline / signed out — the page recalcs on next open */
+  }
+}
 
 self.addEventListener("push", (event) => {
   let data = {};
@@ -101,6 +137,13 @@ self.addEventListener("push", (event) => {
     data = event.data ? event.data.json() : {};
   } catch (e) {
     data = { body: event.data ? event.data.text() : "" };
+  }
+  // Badge-only update: refresh the icon, show nothing.
+  if (data.badgeOnly === true) {
+    event.waitUntil(
+      applyBadge(typeof data.badge === "number" ? data.badge : null)
+    );
+    return;
   }
   const title = data.title || "Canny Capital Portal";
   const options = {
@@ -110,14 +153,21 @@ self.addEventListener("push", (event) => {
     tag: data.tag || undefined,
     data: { url: data.url || "/overview" },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    Promise.all([
+      self.registration.showNotification(title, options),
+      applyBadge(typeof data.badge === "number" ? data.badge : null),
+    ])
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const target = (event.notification.data && event.notification.data.url) || "/overview";
   event.waitUntil(
-    self.clients
+    Promise.all([
+      recalcBadge(),
+      self.clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((clients) => {
         for (const client of clients) {
@@ -137,8 +187,16 @@ self.addEventListener("notificationclick", (event) => {
           return open.focus();
         }
         return self.clients.openWindow(target);
-      })
+      }),
+    ])
   );
+});
+
+self.addEventListener("notificationclose", (event) => {
+  // Dismissing a notification doesn't change what needs attention
+  // server-side, but re-applying the live count repairs any drift
+  // without depending on the page being open.
+  event.waitUntil(recalcBadge());
 });
 
 /* If the browser rotates/drops the subscription, re-subscribe with the

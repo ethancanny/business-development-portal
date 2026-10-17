@@ -208,6 +208,96 @@ export default function PwaShell() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [standalone, onLogin, syncBadge]);
 
+  /* --- badge triggers for the whole session (Oct 16, 2026) ---
+   * The per-launch effect above registers one visibility listener, but
+   * it is one-shot (verifiedRef) and unregisters on route changes —
+   * the badge could go stale for the rest of a session. These triggers
+   * are registered once, independent of push verification, and always
+   * recalculate from the server (lib/badge) — never a local delta. */
+  useEffect(() => {
+    const onForeground = () => syncBadge();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") syncBadge();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onForeground);
+    window.addEventListener("pageshow", onForeground);
+    window.addEventListener("ccp:badge-refresh", onForeground);
+    // Explicit hook for any mutation code: window.ccpBadgeRefresh().
+    (window as unknown as { ccpBadgeRefresh?: () => void }).ccpBadgeRefresh =
+      () => syncBadge();
+
+    // Mutation observer: a successful write to the follow-up (tasks)
+    // or Activity (deal-flow) APIs can change what needs attention —
+    // complete / snooze / reschedule / delete a follow-up, triage or
+    // mark-read a feed item — so recalc from the server rather than
+    // guessing the delta. Observes responses only; requests pass
+    // through untouched.
+    const origFetch = window.fetch.bind(window);
+    let active = true;
+    window.fetch = async (
+      ...args: Parameters<typeof fetch>
+    ): Promise<Response> => {
+      const res = await origFetch(...args);
+      try {
+        if (active && res.ok) {
+          const input = args[0] as unknown;
+          const url =
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.href
+                : ((input as Request)?.url ?? "");
+          const method =
+            (input as Request)?.method ?? args[1]?.method ?? "GET";
+          if (String(method).toUpperCase() !== "GET" && url) {
+            const path = new URL(url, window.location.origin).pathname;
+            if (
+              path.startsWith("/api/tasks") ||
+              path.startsWith("/api/deal-flow")
+            ) {
+              setTimeout(() => syncBadge(), 0);
+            }
+          }
+        }
+      } catch {
+        /* observer is best-effort */
+      }
+      return res;
+    };
+
+    return () => {
+      active = false;
+      window.fetch = origFetch;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onForeground);
+      window.removeEventListener("pageshow", onForeground);
+      window.removeEventListener("ccp:badge-refresh", onForeground);
+    };
+  }, [syncBadge]);
+
+  /* --- badge on navigation; unconditional clear when signed out ---
+   * Arriving anywhere in the app (including right after login)
+   * recalcs; landing on /login — i.e. after any logout path — clears
+   * the badge outright so a signed-out phone never keeps showing the
+   * previous session's count. */
+  useEffect(() => {
+    if (pathname === "/login") {
+      try {
+        const nav = window.navigator as Navigator & {
+          clearAppBadge?: () => Promise<void>;
+        };
+        if (typeof nav.clearAppBadge === "function") {
+          void nav.clearAppBadge();
+        }
+      } catch {
+        /* badge is best-effort */
+      }
+      return;
+    }
+    syncBadge();
+  }, [pathname, syncBadge]);
+
   const dismissInstall = () => {
     try {
       localStorage.setItem(INSTALL_KEY, "1");
