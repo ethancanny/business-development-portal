@@ -13,6 +13,16 @@ import { neon } from "@neondatabase/serverless";
 import { ensureSchema, newId, getDeals, getExecutives } from "./db-postgres";
 import { getInvestors } from "./investors-db";
 import { hospitalityMatchName, nameKey } from "./hospitality-screen";
+import {
+  NEWS_MIN_RELEVANCE,
+  NEWS_SECTORS,
+  classifySector,
+  scoreRelevance,
+  feedbackDelta,
+  extractCorrectionTerms,
+  distinctiveTokens,
+  type SectorCorrection,
+} from "./news-classify";
 import type { MiNewsItem, MiNewsMatch } from "./types";
 
 function sql() {
@@ -55,10 +65,42 @@ export function ensureNewsSchema(): Promise<void> {
         )`;
       await db`CREATE INDEX IF NOT EXISTS mi_news_published_idx ON mi_news (published_at DESC)`;
       await db`CREATE INDEX IF NOT EXISTS mi_news_pending_idx ON mi_news (summary) WHERE summary IS NULL`;
+      // News overhaul (Oct 17, 2026): classifier + relevance columns.
+      // sector_confidence/sector_tags come from lib/news-classify.ts;
+      // sector_corrected pins a row Ethan fixed by hand so re-runs
+      // never overwrite him; hard_excluded marks a story in a category
+      // that must never reach the feed (school overrides & peers).
+      await db`ALTER TABLE mi_news ADD COLUMN IF NOT EXISTS sector_confidence REAL NOT NULL DEFAULT 0`;
+      await db`ALTER TABLE mi_news ADD COLUMN IF NOT EXISTS sector_tags JSONB NOT NULL DEFAULT '[]'::jsonb`;
+      await db`ALTER TABLE mi_news ADD COLUMN IF NOT EXISTS sector_corrected BOOLEAN NOT NULL DEFAULT FALSE`;
+      await db`ALTER TABLE mi_news ADD COLUMN IF NOT EXISTS relevance_reason TEXT`;
+      await db`ALTER TABLE mi_news ADD COLUMN IF NOT EXISTS deal_signal BOOLEAN NOT NULL DEFAULT FALSE`;
+      await db`ALTER TABLE mi_news ADD COLUMN IF NOT EXISTS hard_excluded BOOLEAN NOT NULL DEFAULT FALSE`;
+      await db`ALTER TABLE mi_news ADD COLUMN IF NOT EXISTS hard_reason TEXT`;
       await db`
         CREATE TABLE IF NOT EXISTS mi_news_watchlist (
           term TEXT PRIMARY KEY,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`;
+      // Ethan's "Wrong sector?" corrections: the article is pinned, and
+      // the correction's distinctive terms vote in future classifications.
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_news_corrections (
+          id TEXT PRIMARY KEY,
+          news_id TEXT NOT NULL,
+          from_sector TEXT,
+          to_sector TEXT NOT NULL,
+          terms JSONB NOT NULL DEFAULT '[]'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`;
+      // "Not relevant" feedback: accumulated score deltas keyed
+      // source:<name> / topic:<token>, applied at classify time.
+      await db`
+        CREATE TABLE IF NOT EXISTS mi_news_adjustments (
+          key TEXT PRIMARY KEY,
+          delta INTEGER NOT NULL DEFAULT 0,
+          hits INTEGER NOT NULL DEFAULT 0,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`;
     })();
   }
@@ -98,6 +140,10 @@ function rowToNews(r: Record<string, unknown>, includeSnippet: boolean): MiNewsI
     publishedAt: r.published_at ? new Date(str(r.published_at)).toISOString() : "",
     fetchedAt: r.fetched_at ? new Date(str(r.fetched_at)).toISOString() : "",
     sector: r.sector === null || r.sector === undefined || r.sector === "" ? null : str(r.sector),
+    sectorConfidence: Number(numOrNull(r.sector_confidence) ?? 0),
+    sectorTags: parseJsonArray(r.sector_tags).map((s) => str(s)).filter(Boolean),
+    relevanceReason: r.relevance_reason ? str(r.relevance_reason) : null,
+    dealSignal: Boolean(r.deal_signal),
     summary: r.summary === null || r.summary === undefined ? null : str(r.summary),
     summaryAt: r.summary_at ? new Date(str(r.summary_at)).toISOString() : null,
     relevanceScore: Number(numOrNull(r.relevance_score) ?? 0),
@@ -114,6 +160,57 @@ function rowToNews(r: Record<string, unknown>, includeSnippet: boolean): MiNewsI
   return item;
 }
 
+/* ---------------- classifier state (learning) ---------------- */
+
+export interface ClassifierState {
+  corrections: SectorCorrection[];
+  adjustments: Map<string, number>;
+}
+
+/** Everything the classifier has LEARNED from Ethan: his sector
+ * corrections (as term votes) and the accumulated "Not relevant"
+ * source/topic score adjustments. Loaded once per ingest / reclassify
+ * run so a run sees a consistent snapshot. */
+export async function loadClassifierState(): Promise<ClassifierState> {
+  await ensureNewsSchema();
+  const db = sql();
+  const corrRows = (await db`
+    SELECT to_sector, terms FROM mi_news_corrections ORDER BY created_at`) as unknown as Record<string, unknown>[];
+  const corrections: SectorCorrection[] = corrRows.map((r) => ({
+    sector: str(r.to_sector),
+    terms: parseJsonArray(r.terms).map((t) => str(t)).filter(Boolean),
+  }));
+  const adjRows = (await db`SELECT key, delta FROM mi_news_adjustments`) as unknown as Record<string, unknown>[];
+  const adjustments = new Map<string, number>();
+  for (const r of adjRows) adjustments.set(str(r.key), Number(r.delta ?? 0));
+  return { corrections, adjustments };
+}
+
+/** Record one "Not relevant" verdict as score adjustments: the source
+ * takes −4 (keyed source:<name>) and up to three distinctive headline
+ * tokens take −2 each (keyed topic:<token>). Stored deltas are floored
+ * (−24 source, −12 topic) so feedback stays a nudge, not a ban; the
+ * classifier additionally clamps the total applied delta at −32. */
+async function recordNotRelevantFeedback(sourceName: string, headline: string): Promise<void> {
+  await ensureNewsSchema();
+  const db = sql();
+  const bumps: { key: string; delta: number; floor: number }[] = [
+    { key: `source:${sourceName}`, delta: -4, floor: -24 },
+  ];
+  for (const t of distinctiveTokens(headline, 3)) {
+    bumps.push({ key: `topic:${t}`, delta: -2, floor: -12 });
+  }
+  for (const b of bumps) {
+    await db`
+      INSERT INTO mi_news_adjustments (key, delta, hits, updated_at)
+      VALUES (${b.key}, ${b.delta}, 1, NOW())
+      ON CONFLICT (key) DO UPDATE
+        SET delta = GREATEST(mi_news_adjustments.delta + ${b.delta}, ${b.floor}),
+            hits = mi_news_adjustments.hits + 1,
+            updated_at = NOW()`;
+  }
+}
+
 /* ---------------- ingest-side writes ---------------- */
 
 export interface NewsInsert {
@@ -123,7 +220,11 @@ export interface NewsInsert {
   sourceName: string;
   publishedAt: string | null;
   sector: string | null;
+  sectorConfidence: number;
+  sectorTags: string[];
   relevanceScore: number;
+  relevanceReason: string | null;
+  dealSignal: boolean;
   kind: MiNewsItem["kind"];
   matched: MiNewsMatch[];
   imageUrl: string | null;
@@ -138,9 +239,11 @@ export async function insertNewsItem(row: NewsInsert): Promise<string | null> {
   const db = sql();
   const rows = (await db`
     INSERT INTO mi_news (id, dedupe_key, headline, url, source_name, published_at,
-      sector, relevance_score, kind, matched, image_url, image_credit, raw_snippet)
+      sector, sector_confidence, sector_tags, relevance_score, relevance_reason,
+      deal_signal, kind, matched, image_url, image_credit, raw_snippet)
     VALUES (${newId()}, ${row.dedupeKey}, ${row.headline}, ${row.url}, ${row.sourceName},
-      ${row.publishedAt}, ${row.sector}, ${row.relevanceScore}, ${row.kind},
+      ${row.publishedAt}, ${row.sector}, ${row.sectorConfidence}, ${JSON.stringify(row.sectorTags)}::jsonb,
+      ${row.relevanceScore}, ${row.relevanceReason}, ${row.dealSignal}, ${row.kind},
       ${JSON.stringify(row.matched)}::jsonb, ${row.imageUrl}, ${row.imageCredit}, ${row.rawSnippet})
     ON CONFLICT (dedupe_key) DO NOTHING
     RETURNING id`) as unknown as Record<string, unknown>[];
@@ -303,12 +406,19 @@ export interface NewsQuery {
   days?: number;
   savedOnly?: boolean;
   limit?: number;
+  offset?: number;
+  /** "relevance" (default) or "recent" — the carousel's two rows. */
+  sort?: "relevance" | "recent";
+  /** Only stories carrying an acquisition/investment signal — the
+   * ⭐ Top Market Events pool. */
+  dealOnly?: boolean;
 }
 
 export async function getNewsForUi(q: NewsQuery): Promise<{ items: MiNewsItem[]; lastFetchedAt: string | null }> {
   await ensureNewsSchema();
   const db = sql();
   const limit = Math.min(Math.max(q.limit ?? 50, 1), 200);
+  const offset = Math.min(Math.max(q.offset ?? 0, 0), 1000);
   const cutoff = q.days && q.days > 0 ? new Date(Date.now() - q.days * 864e5).toISOString() : null;
   const sector = q.sector && q.sector !== "all" ? q.sector : null;
   // Type lanes: watchlist = a watchlist entry inside matched; entity = a
@@ -328,15 +438,30 @@ export async function getNewsForUi(q: NewsQuery): Promise<{ items: MiNewsItem[];
   const savedCond = q.savedOnly
     ? `saved = TRUE AND dismissed = FALSE`
     : `dismissed = FALSE`;
+  // Display gates (News overhaul, Oct 17, 2026): hard-excluded
+  // categories never reach the feed; a story without a working source
+  // link never displays; the main feed shows only stories at or above
+  // NEWS_MIN_RELEVANCE. The Saved view bypasses the relevance bar only
+  // (Ethan saved those deliberately) — never the other two gates.
+  const gateCond = `hard_excluded = FALSE AND url <> ''`;
+  const relevanceCond = q.savedOnly ? `TRUE` : `relevance_score >= ${NEWS_MIN_RELEVANCE}`;
+  const dealCond = q.dealOnly ? `deal_signal = TRUE` : `TRUE`;
+  const orderBy =
+    q.sort === "recent"
+      ? `published_at DESC NULLS LAST, relevance_score DESC`
+      : `relevance_score DESC, published_at DESC NULLS LAST`;
   const rows = (await db.query(
     `SELECT * FROM mi_news
      WHERE ${savedCond}
+       AND ${gateCond}
+       AND ${relevanceCond}
+       AND ${dealCond}
        AND (${typeCond})
        AND ($1::text IS NULL OR sector = $1)
        AND ($2::timestamptz IS NULL OR published_at >= $2)
-     ORDER BY relevance_score DESC, published_at DESC NULLS LAST
-     LIMIT $3`,
-    [sector, cutoff, limit]
+     ORDER BY ${orderBy}
+     LIMIT $3 OFFSET $4`,
+    [sector, cutoff, limit, offset]
   )) as unknown as Record<string, unknown>[];
   const maxRows = (await db`SELECT MAX(fetched_at) AS m FROM mi_news`) as unknown as Record<string, unknown>[];
   const lastFetchedAt = maxRows[0]?.m ? new Date(str(maxRows[0].m)).toISOString() : null;
@@ -386,7 +511,7 @@ export async function setNewsSummary(id: string, summary: string): Promise<boole
 
 /* ---------------- user actions ---------------- */
 
-export type NewsAction = "save" | "unsave" | "dismiss" | "link";
+export type NewsAction = "save" | "unsave" | "dismiss" | "link" | "sector" | "not-relevant";
 
 /** Apply a UI action. For "link", appends the story as a signal on the
  * target company (mirrors the filings Keep mechanism in market-db) and
@@ -394,7 +519,8 @@ export type NewsAction = "save" | "unsave" | "dismiss" | "link";
 export async function applyNewsAction(
   id: string,
   action: NewsAction,
-  companyId?: string
+  companyId?: string,
+  newSector?: string
 ): Promise<{ ok: boolean; error?: string; companyId?: string; companyName?: string }> {
   await ensureNewsSchema();
   const db = sql();
@@ -412,6 +538,32 @@ export async function applyNewsAction(
   }
   if (action === "dismiss") {
     await db`UPDATE mi_news SET dismissed = TRUE WHERE id = ${id}`;
+    return { ok: true };
+  }
+  if (action === "not-relevant") {
+    // Hides the story (same permanence as dismiss) AND teaches the
+    // scorer: source −4, up to three distinctive headline topics −2.
+    await db`UPDATE mi_news SET dismissed = TRUE WHERE id = ${id}`;
+    await recordNotRelevantFeedback(str(item.source_name), str(item.headline));
+    return { ok: true };
+  }
+  if (action === "sector") {
+    // "Wrong sector?" — Ethan's correction pins this article (the
+    // reclassify pass never overwrites a corrected row) and is stored
+    // with the story's distinctive terms so the same vocabulary votes
+    // for the corrected sector in future classifications.
+    const target = String(newSector ?? "");
+    if (!(NEWS_SECTORS as readonly string[]).includes(target)) {
+      return { ok: false, error: `Unknown sector "${target}"` };
+    }
+    const terms = extractCorrectionTerms(str(item.headline), str(item.summary));
+    await db`
+      UPDATE mi_news
+      SET sector = ${target}, sector_corrected = TRUE, sector_confidence = 1
+      WHERE id = ${id}`;
+    await db`
+      INSERT INTO mi_news_corrections (id, news_id, from_sector, to_sector, terms)
+      VALUES (${newId()}, ${id}, ${item.sector ? str(item.sector) : null}, ${target}, ${JSON.stringify(terms)}::jsonb)`;
     return { ok: true };
   }
   // link
@@ -469,4 +621,138 @@ export async function addWatchTerm(term: string): Promise<void> {
 export async function deleteWatchTerm(term: string): Promise<void> {
   await ensureNewsSchema();
   await sql()`DELETE FROM mi_news_watchlist WHERE term = ${term.trim()}`;
+}
+
+/* ---------------- reclassify pass (News overhaul, Oct 17, 2026) ------ */
+
+export interface ReclassifyReport {
+  total: number;
+  updated: number;
+  sectorBefore: Record<string, number>;
+  sectorAfter: Record<string, number>;
+  sectorChanged: number;
+  hardExcluded: number;
+  hardByCategory: Record<string, number>;
+  belowThreshold: number;
+  noUrl: number;
+  lowConfidence: number;
+  scoreBuckets: Record<string, number>;
+  korea: {
+    id: string;
+    headline: string;
+    from: string | null;
+    to: string | null;
+    confidence: number;
+    score: number;
+  } | null;
+}
+
+/** Re-run the sector classifier + relevance model over EVERY stored
+ * story (headline + stored summary + raw snippet — the text the
+ * original ingest held, plus the agent summary written since). Rows
+ * Ethan corrected by hand keep their sector (sector_corrected) but are
+ * still re-scored. Returns a full before/after report for the
+ * checkpoint; the route logs a one-line verdict to mi_sync_log. */
+export async function reclassifyAllNews(): Promise<ReclassifyReport> {
+  await ensureNewsSchema();
+  const db = sql();
+  const state = await loadClassifierState();
+  const rows = (await db`
+    SELECT id, headline, summary, raw_snippet, source_name, url, sector,
+           sector_corrected, matched, published_at, relevance_score,
+           hard_excluded
+    FROM mi_news ORDER BY fetched_at DESC`) as unknown as Record<string, unknown>[];
+
+  const report: ReclassifyReport = {
+    total: rows.length,
+    updated: 0,
+    sectorBefore: {},
+    sectorAfter: {},
+    sectorChanged: 0,
+    hardExcluded: 0,
+    hardByCategory: {},
+    belowThreshold: 0,
+    noUrl: 0,
+    lowConfidence: 0,
+    scoreBuckets: {},
+    korea: null,
+  };
+
+  for (const r of rows) {
+    const id = str(r.id);
+    const headline = str(r.headline);
+    const summary = r.summary ? str(r.summary) : "";
+    const snippet = str(r.raw_snippet);
+    const sourceName = str(r.source_name);
+    const beforeSector = r.sector ? str(r.sector) : null;
+    const corrected = Boolean(r.sector_corrected);
+    const matchedTypes = parseJsonArray(r.matched)
+      .filter((m): m is Record<string, unknown> => !!m && typeof m === "object")
+      .map((m) => str(m.type));
+    const publishedAt = r.published_at ? new Date(str(r.published_at)).toISOString() : null;
+
+    report.sectorBefore[beforeSector ?? "(null)"] = (report.sectorBefore[beforeSector ?? "(null)"] ?? 0) + 1;
+    if (!str(r.url)) report.noUrl++;
+
+    const verdict = classifySector(headline, summary, snippet, state.corrections);
+    const sector = corrected && beforeSector ? beforeSector : verdict.sector;
+    const confidence = corrected ? 1 : verdict.confidence;
+    if (verdict.lowConfidence && !corrected) report.lowConfidence++;
+
+    const rel = scoreRelevance({
+      headline,
+      summary,
+      snippet,
+      sector,
+      matchedTypes,
+      publishedAt,
+    });
+    let score = rel.score;
+    let reason = rel.reason;
+    let dealSignal = rel.dealSignal;
+    const hard = rel.hardExclude;
+    if (!hard) {
+      const delta = feedbackDelta(sourceName, headline, state.adjustments);
+      if (delta !== 0) {
+        score = Math.max(0, Math.min(100, score + delta));
+        reason = `${reason} · Feedback ${delta}`;
+      }
+    } else {
+      score = 0;
+      dealSignal = false;
+      report.hardExcluded++;
+      report.hardByCategory[hard.category] = (report.hardByCategory[hard.category] ?? 0) + 1;
+    }
+    if (!hard && score < NEWS_MIN_RELEVANCE) report.belowThreshold++;
+    const bucket = score >= 80 ? "80-100" : score >= 60 ? "60-79" : score >= NEWS_MIN_RELEVANCE ? "35-59" : "0-34";
+    report.scoreBuckets[bucket] = (report.scoreBuckets[bucket] ?? 0) + 1;
+    report.sectorAfter[sector] = (report.sectorAfter[sector] ?? 0) + 1;
+    if (sector !== beforeSector) report.sectorChanged++;
+    if (/korea/i.test(headline) && !report.korea) {
+      report.korea = { id, headline, from: beforeSector, to: sector, confidence, score };
+    }
+
+    const tagsJson = JSON.stringify(verdict.tags);
+    const oldScore = Number(r.relevance_score ?? 0);
+    const wasHard = Boolean(r.hard_excluded);
+    if (
+      sector !== beforeSector ||
+      score !== oldScore ||
+      !!hard !== wasHard
+    ) {
+      await db`
+        UPDATE mi_news SET
+          sector = ${sector},
+          sector_confidence = ${confidence},
+          sector_tags = ${tagsJson}::jsonb,
+          relevance_score = ${score},
+          relevance_reason = ${reason},
+          deal_signal = ${dealSignal},
+          hard_excluded = ${!!hard},
+          hard_reason = ${hard ? hard.label : null}
+        WHERE id = ${id}`;
+      report.updated++;
+    }
+  }
+  return report;
 }
