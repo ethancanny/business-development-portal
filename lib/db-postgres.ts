@@ -333,11 +333,26 @@ export function ensureSchema(): Promise<void> {
           last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          date_added TIMESTAMPTZ,
+          dismissed_at TIMESTAMPTZ,
+          dismissed_reason TEXT NOT NULL DEFAULT '',
           UNIQUE (source, dedup_key, sector)
         )`;
       await db`
         CREATE INDEX IF NOT EXISTS mi_companies_sector_idx
         ON mi_companies (sector, signal_value DESC)`;
+      // Fit pipeline stage (Ethan, Oct 16, 2026): date_added is set
+      // once at creation and never overwritten by syncs;
+      // dismissed_at / dismissed_reason record a fit dismissal. The
+      // one-time data migration into the stage model lives in
+      // lib/market-db.ts (runFitStageMigration) so its counts land in
+      // mi_sync_log; these statements are only the additive DDL.
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS date_added TIMESTAMPTZ`;
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMPTZ`;
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS dismissed_reason TEXT NOT NULL DEFAULT ''`;
+      await db`
+        CREATE INDEX IF NOT EXISTS mi_companies_fit_stage_idx
+        ON mi_companies (status, date_added DESC)`;
       // Fix A (Oct 16, 2026): widen the mi_companies unique key to include
       // sector. CREATE TABLE IF NOT EXISTS does not migrate the live table,
       // whose (source, dedup_key) key made dual-sector USASpending

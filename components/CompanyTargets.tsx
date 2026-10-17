@@ -28,9 +28,29 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
   };
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
+  const [dismissReason, setDismissReason] = useState("");
 
   useEffect(() => {
     let live = true;
+    if (fitOnly) {
+      // Fits section (Ethan, Oct 16, 2026): the server owns the stage
+      // query — active fits only, newest date_added first, capped —
+      // so a dismissal here refetches and the next fit backfills.
+      fetch(`/api/market/companies?mode=fits&sectors=${encodeURIComponent(sectorList.join(","))}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { companies?: MiCompany[]; fitTotal?: number } | null) => {
+          if (!live || !d) return;
+          setRows(d.companies ?? []);
+          setFitTotal(d.fitTotal ?? 0);
+          setTotal(d.fitTotal ?? 0);
+        })
+        .catch(() => undefined);
+      return () => {
+        live = false;
+      };
+    }
     Promise.all(
       sectorList.map((s) =>
         fetch(`/api/market/companies?sector=${encodeURIComponent(s)}&limit=800`)
@@ -57,14 +77,17 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectorList.join("|")]);
+  }, [sectorList.join("|"), fitOnly, refreshTick]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (rows ?? []).filter(
       (c) =>
-        c.status !== "dismissed" &&
-        (!fitOnly || fitOf(c).fit) &&
+        // In fitOnly mode the server already scoped rows to the fit
+        // stage. In the full tables, dismissed companies stay VISIBLE
+        // with a dismissed mark + restore (Ethan, Oct 16, 2026) —
+        // they are only gone from the fits section.
+        (!fitOnly || c.status === "fit") &&
         (!q ||
           c.name.toLowerCase().includes(q) ||
           c.city.toLowerCase().includes(q) ||
@@ -76,7 +99,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
   if (rows === null) {
     return <p className="mt-4 text-xs text-slate-400 dark:text-white/30">Loading company targets…</p>;
   }
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !fitOnly) return null;
 
   const th = "sticky top-0 bg-white px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-[#132847] dark:text-white/50";
   const td = "px-3 py-2 text-sm text-slate-700 dark:text-white/80";
@@ -112,12 +135,72 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
   async function setStatus(c: MiCompany, status: MiCompany["status"]) {
     setBusy(c.id);
     try {
-      await fetch("/api/market/companies", {
+      const res = await fetch("/api/market/companies", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: c.id, status }),
       });
-      setRows((prev) => (prev ?? []).map((r) => (r.id === c.id ? { ...r, status } : r)));
+      const d = (await res.json().catch(() => null)) as { status?: MiCompany["status"] } | null;
+      const next = d?.status ?? status;
+      setRows((prev) => (prev ?? []).map((r) => (r.id === c.id ? { ...r, status: next } : r)));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Dismiss with an optional reason (recorded server-side as
+   * dismissed_reason + dismissed_at). In the fits section the row
+   * leaves and the next fit backfills via refetch; in the full
+   * tables the row stays, marked dismissed. */
+  async function dismiss(c: MiCompany) {
+    setBusy(c.id);
+    try {
+      const reason = dismissReason.trim();
+      const res = await fetch("/api/market/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: c.id, status: "dismissed", reason }),
+      });
+      if (res.ok) {
+        setDismissingId(null);
+        setDismissReason("");
+        if (fitOnly) {
+          setRefreshTick((t) => t + 1);
+        } else {
+          setRows((prev) =>
+            (prev ?? []).map((r) =>
+              r.id === c.id
+                ? { ...r, status: "dismissed" as const, dismissedAt: new Date().toISOString(), dismissedReason: reason }
+                : r
+            )
+          );
+        }
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Restore a dismissed company to the fit stage (or 'new' if its
+   * fit stamp no longer stands) at its original date_added. */
+  async function restore(c: MiCompany) {
+    setBusy(c.id);
+    try {
+      const res = await fetch("/api/market/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: c.id, action: "restore" }),
+      });
+      const d = (await res.json().catch(() => null)) as { status?: MiCompany["status"] } | null;
+      if (res.ok) {
+        setRows((prev) =>
+          (prev ?? []).map((r) =>
+            r.id === c.id
+              ? { ...r, status: d?.status ?? r.status, dismissedAt: null, dismissedReason: "" }
+              : r
+          )
+        );
+      }
     } finally {
       setBusy(null);
     }
@@ -147,7 +230,12 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           notes,
         }),
       });
-      if (res.ok) await setStatus(c, "added");
+      if (res.ok) {
+        await setStatus(c, "added");
+        // Advanced out of the fit stage — refetch so the next most
+        // recently added fit backfills the section.
+        if (fitOnly) setRefreshTick((t) => t + 1);
+      }
     } finally {
       setBusy(null);
     }
@@ -159,6 +247,16 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       return { fit: d.fit === true, why: typeof d.fitWhy === "string" ? d.fitWhy : "" };
     } catch {
       return { fit: false, why: "" };
+    }
+  }
+  /** Keep mark for a fit: the stage stays 'fit', the mark lives in
+   * details.kept (older rows may still carry status='keep'). */
+  function keptOf(c: MiCompany): boolean {
+    if (c.status === "keep") return true;
+    try {
+      return (JSON.parse(c.details || "{}") as Record<string, unknown>).kept === true;
+    } catch {
+      return false;
     }
   }
   function profileDetails(c: MiCompany): [string, string][] {
@@ -220,16 +318,41 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           </p>
         )}
         {profileNote(c) && <p className="mt-2 text-xs text-slate-500 dark:text-white/50">{profileNote(c)}</p>}
+        {c.status === "dismissed" && (
+          <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300">
+            ✕ Dismissed{c.dismissedAt ? ` ${c.dismissedAt.slice(0, 10)}` : ""}
+            {c.dismissedReason ? ` — ${c.dismissedReason}` : ""}. It stays out of the fits
+            section and no sync will re-add it; restore returns it at its original position.
+          </p>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
-          {c.status !== "added" ? (
-            <button disabled={busy === c.id} onClick={() => addToPipeline(c)} className={`${btnBase} bg-[#b8975a] font-semibold text-white`}>＋ Add to pipeline</button>
+          {c.status === "dismissed" ? (
+            <button disabled={busy === c.id} onClick={() => restore(c)} className={`${btnBase} bg-[#b8975a] font-semibold text-white`}>↩ Restore</button>
+          ) : dismissingId === c.id ? (
+            <>
+              <input
+                value={dismissReason}
+                onChange={(e) => setDismissReason(e.target.value)}
+                placeholder="Reason (optional)"
+                maxLength={300}
+                className="min-h-[36px] w-56 max-w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#b8975a] dark:border-white/20 dark:bg-white/5 dark:text-white/85"
+              />
+              <button disabled={busy === c.id} onClick={() => dismiss(c)} className={`${btnBase} bg-red-600 font-semibold text-white`}>Confirm dismiss</button>
+              <button disabled={busy === c.id} onClick={() => { setDismissingId(null); setDismissReason(""); }} className={`${btnBase} border border-slate-300 font-medium text-slate-600 dark:border-white/20 dark:text-white/70`}>Cancel</button>
+            </>
           ) : (
-            <span className={`${btnBase} bg-[#b8975a]/15 font-semibold text-[#8a6f3c] dark:text-[#d4b37a]`}>✓ In pipeline</span>
+            <>
+              {c.status !== "added" ? (
+                <button disabled={busy === c.id} onClick={() => addToPipeline(c)} className={`${btnBase} bg-[#b8975a] font-semibold text-white`}>＋ Add to pipeline</button>
+              ) : (
+                <span className={`${btnBase} bg-[#b8975a]/15 font-semibold text-[#8a6f3c] dark:text-[#d4b37a]`}>✓ In pipeline</span>
+              )}
+              {!keptOf(c) && c.status !== "added" && (
+                <button disabled={busy === c.id} onClick={() => setStatus(c, "keep")} className={`${btnBase} border border-slate-300 font-medium text-slate-600 dark:border-white/20 dark:text-white/70`}>Keep</button>
+              )}
+              <button disabled={busy === c.id} onClick={() => { setDismissingId(c.id); setDismissReason(""); }} className={`${btnBase} border border-slate-300 font-medium text-slate-600 dark:border-white/20 dark:text-white/70`}>Dismiss</button>
+            </>
           )}
-          {c.status !== "keep" && c.status !== "added" && (
-            <button disabled={busy === c.id} onClick={() => setStatus(c, "keep")} className={`${btnBase} border border-slate-300 font-medium text-slate-600 dark:border-white/20 dark:text-white/70`}>Keep</button>
-          )}
-          <button disabled={busy === c.id} onClick={() => setStatus(c, "dismissed")} className={`${btnBase} border border-slate-300 font-medium text-slate-600 dark:border-white/20 dark:text-white/70`}>Dismiss</button>
         </div>
       </>
     );
@@ -242,8 +365,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
         <p className="text-xs text-slate-500 dark:text-white/50">
           {fitOnly ? (
             <>
-              {(fitTotal ?? 0).toLocaleString()} fits {multi ? "across all focus industries" : "in this industry"} · {sources}
-              {total !== null && total > rows.length ? ` · fits shown from the top ${rows.length.toLocaleString()} companies by size signal` : ""}
+              Showing {rows.length.toLocaleString()} of {(fitTotal ?? 0).toLocaleString()} fits · {sources}
             </>
           ) : (
             <>
@@ -264,7 +386,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
         <p className="mb-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-500 dark:border-white/10 dark:text-white/50">
           {fitTotal === 0
             ? "No companies in this industry currently pass the fit rules (size, independence, focus sector)."
-            : "No fits among the top companies loaded by size signal — fits exist further down this industry's registry."}
+            : "No fits match your search."}
         </p>
       )}
       <div className="hidden max-h-96 overflow-auto rounded-xl border border-slate-200 dark:border-white/10 md:block">
@@ -300,8 +422,9 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
                     <span className="mr-2 inline-flex align-middle"><CompanyLogo name={c.name} website={c.website} sector={c.sector} /></span>
                     {c.name}
                     {fit.fit && <span className="ml-2 rounded bg-[#b8975a] px-1.5 py-0.5 text-[10px] font-bold text-white">★ FIT</span>}
-                    {c.status === "keep" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">KEPT</span>}
+                    {keptOf(c) && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">KEPT</span>}
                     {c.status === "added" && <span className="ml-2 rounded bg-[#b8975a]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">IN PIPELINE</span>}
+                    {c.status === "dismissed" && <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/20 dark:text-red-300">DISMISSED</span>}
                   </td>
                   {multi && <td className={td}><SectorChip sector={c.sector} /></td>}
                   <td className={td}>{c.city || "—"}</td>
@@ -347,8 +470,9 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
                   <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">
                     {c.name}
                     {fit.fit && <span className="ml-2 rounded bg-[#b8975a] px-1.5 py-0.5 text-[10px] font-bold text-white">★ FIT</span>}
-                    {c.status === "keep" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">KEPT</span>}
+                    {keptOf(c) && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">KEPT</span>}
                     {c.status === "added" && <span className="ml-2 rounded bg-[#b8975a]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">IN PIPELINE</span>}
+                    {c.status === "dismissed" && <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/20 dark:text-red-300">DISMISSED</span>}
                   </span>
                   <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-white/50">
                     {[c.city, c.subsector, yearOf(c.formedDate) ? `since ${yearOf(c.formedDate)}` : ""]

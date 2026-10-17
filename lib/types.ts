@@ -352,9 +352,16 @@ export interface MiCompany {
   source: string;
   sourceUrl: string;
   details: string;
-  status: "new" | "keep" | "dismissed" | "added";
+  /** Pipeline stage (Ethan, Oct 16, 2026): "fit" is the active-fit
+   * stage feeding the Fit Targets section; "dismissed" is sticky —
+   * no ingest or sync may flip it back (see lib/market-db.ts). */
+  status: "new" | "keep" | "dismissed" | "added" | "fit";
   firstSeen: string;
   lastSeen: string;
+  /** Set once when the record is created; never overwritten by syncs. */
+  dateAdded: string;
+  dismissedAt: string | null;
+  dismissedReason: string;
 }
 
 export interface MiMultiple {

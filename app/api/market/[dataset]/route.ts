@@ -9,11 +9,16 @@ import {
   getLatestIndicators,
   getListings,
   getCompanies,
+  getFitCompanies,
+  FITS_DISPLAY_LIMIT,
   countCompanies,
   countFits,
   countUnscored,
   getUpdates,
   setCompanyStatus,
+  dismissCompany,
+  restoreCompany,
+  keepCompany,
   getMultiples,
   getSyncLog,
   getSyncLogLatestByJob,
@@ -69,6 +74,19 @@ export async function GET(
       case "listings":
         return NextResponse.json(await getListings(sp.get("status") ?? undefined));
       case "companies": {
+        // Fit-stage feed (Ethan, Oct 16, 2026): active fits only,
+        // newest date_added first, capped at FITS_DISPLAY_LIMIT, with
+        // the uncapped active-fit total for the "Showing N of X fits"
+        // counter. sectors is a comma-separated scope (the Fit
+        // Targets industry tabs); absent = all sectors.
+        if (sp.get("mode") === "fits") {
+          const sectors = (sp.get("sectors") ?? "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const { companies, fitTotal } = await getFitCompanies(sectors.length ? sectors : undefined);
+          return NextResponse.json({ companies, fitTotal, limit: FITS_DISPLAY_LIMIT, mode: "fits" });
+        }
         const sector = sp.get("sector") ?? undefined;
         const off = Number(sp.get("offset") ?? 0);
         const [companies, total, fitTotal, unscoredTotal] = await Promise.all([
@@ -158,6 +176,21 @@ export async function POST(
         }
         break;
       case "companies":
+        if (body.id && body.action === "restore") {
+          const status = await restoreCompany(String(body.id));
+          return NextResponse.json({ ok: true, status });
+        }
+        if (body.id && body.status === "dismissed") {
+          await dismissCompany(
+            String(body.id),
+            typeof body.reason === "string" ? body.reason : ""
+          );
+          return NextResponse.json({ ok: true, status: "dismissed" });
+        }
+        if (body.id && body.status === "keep") {
+          const status = await keepCompany(String(body.id));
+          return NextResponse.json({ ok: true, status });
+        }
         if (body.id && body.status) {
           await setCompanyStatus(String(body.id), body.status);
           return NextResponse.json({ ok: true });
