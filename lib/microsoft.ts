@@ -3,10 +3,12 @@ import {
   deleteCalendarEvent,
   getCalendarEventById,
   getCalendarEvents,
+  getEventReminder,
   getMsState,
   getMsTokens,
   importCalendarEvents,
   saveMsTokens,
+  setEventReminder,
   setMsState,
   upsertCalendarEvent,
   type CalendarEvent,
@@ -179,6 +181,8 @@ interface GraphEvent {
   id?: string;
   subject?: string;
   isAllDay?: boolean;
+  isReminderOn?: boolean;
+  reminderMinutesBeforeStart?: number;
   webLink?: string;
   start?: { dateTime?: string };
   end?: { dateTime?: string };
@@ -209,6 +213,13 @@ function toCalendarEvent(g: GraphEvent): CalendarEvent | null {
     allDay: Boolean(g.isAllDay),
     webUrl: g.webLink ?? "",
     dismissed: false,
+    graphReminderOn:
+      typeof g.isReminderOn === "boolean" ? g.isReminderOn : undefined,
+    graphReminderMinutes: g.isReminderOn
+      ? typeof g.reminderMinutesBeforeStart === "number"
+        ? g.reminderMinutesBeforeStart
+        : null
+      : null,
   };
 }
 
@@ -338,7 +349,7 @@ export async function pullGraphRange(
   const events: CalendarEvent[] = [];
   let path: string | null =
     `/me/calendarview?startDateTime=${encodeURIComponent(from)}&endDateTime=${encodeURIComponent(to)}` +
-    `&$select=subject,start,end,location,attendees,webLink,isAllDay&$top=200`;
+    `&$select=subject,start,end,location,attendees,webLink,isAllDay,isReminderOn,reminderMinutesBeforeStart&$top=200`;
   for (let page = 0; page < 4 && path; page++) {
     const res = (await graph(path)) as { value?: GraphEvent[]; "@odata.nextLink"?: string };
     for (const g of res.value ?? []) {
@@ -363,6 +374,10 @@ export interface EventDraft {
   description?: string; // event body (plain text)
   allDay?: boolean; // Graph all-day event (start/end at Phoenix midnights)
   attendeeEmails?: string[]; // create: full attendee list (emails)
+  /** Per-event reminder (Ethan, Oct 16, 2026): minutes before start, or
+   * null = reminder Off. Undefined = leave the Graph reminder untouched
+   * (updates) / Outlook's own default (creates). */
+  reminderMinutes?: number | null;
 }
 
 interface GraphAttendee {
@@ -389,6 +404,14 @@ function graphBody(
     location: { displayName: d.location ?? "" },
   };
   if (d.allDay) body.isAllDay = true;
+  if (d.reminderMinutes !== undefined) {
+    if (d.reminderMinutes === null) {
+      body.isReminderOn = false;
+    } else {
+      body.isReminderOn = true;
+      body.reminderMinutesBeforeStart = d.reminderMinutes;
+    }
+  }
   if (d.description !== undefined) {
     body.body = { contentType: "text", content: d.description };
   }
@@ -445,7 +468,7 @@ export async function updateGraphEvent(
     method: "PATCH",
     body: JSON.stringify(graphBody(d, attendees)),
   });
-  const g = (await graph(`/me/events/${encodeURIComponent(eventId)}?$select=subject,start,end,location,attendees,webLink,isAllDay`)) as GraphEvent;
+  const g = (await graph(`/me/events/${encodeURIComponent(eventId)}?$select=subject,start,end,location,attendees,webLink,isAllDay,isReminderOn,reminderMinutesBeforeStart`)) as GraphEvent;
   const ev = toCalendarEvent(g);
   if (ev) await upsertCalendarEvent(ev);
 }
@@ -559,9 +582,27 @@ export async function syncTaskEvent(
   if (!(await msConnected())) return prevId;
   const draft = taskEventDraft(task);
 
+  // Follow-up events carry a 15-minute reminder by default (Ethan,
+  // Oct 16, 2026) — in the portal store AND on the Graph event — unless
+  // an explicit per-event choice was made on the event itself, which
+  // always wins and is left untouched here.
+  const FOLLOWUP_REMINDER_MINUTES = 15;
+  const reminderFor = async (eventId: string): Promise<number | undefined> => {
+    const existing = await getEventReminder(eventId).catch(() => null);
+    return existing && !existing.set ? FOLLOWUP_REMINDER_MINUTES : undefined;
+  };
+  const persistDefault = async (eventId: string): Promise<void> => {
+    const existing = await getEventReminder(eventId).catch(() => null);
+    if (existing && !existing.set) {
+      await setEventReminder(eventId, FOLLOWUP_REMINDER_MINUTES).catch(() => undefined);
+    }
+  };
+
   if (prevId) {
     try {
+      draft.reminderMinutes = await reminderFor(prevId);
       await updateGraphEvent(prevId, draft);
+      await persistDefault(prevId);
       return prevId;
     } catch {
       /* event vanished upstream — recreate below */
@@ -576,7 +617,9 @@ export async function syncTaskEvent(
       );
       const hit = day.find((e) => e.title === task.title);
       if (hit) {
+        draft.reminderMinutes = await reminderFor(hit.eventId);
         await updateGraphEvent(hit.eventId, draft);
+        await persistDefault(hit.eventId);
         return hit.eventId;
       }
     } catch {
@@ -584,7 +627,9 @@ export async function syncTaskEvent(
     }
   }
 
+  draft.reminderMinutes = FOLLOWUP_REMINDER_MINUTES;
   const ev = await createGraphEvent(draft);
+  if (ev) await persistDefault(ev.eventId);
   if (!ev) return prevId;
 
   // A genuinely new event for a linked follow-up keeps the standing
