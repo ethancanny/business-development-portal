@@ -397,11 +397,11 @@ async function buildAotAirports(sector: string): Promise<BuiltComponent> {
     asOf: null,
     source: "Arizona Office of Tourism — Monthly Airport Passenger Traffic Report (airport activity reports, compiled by NAU AHRRC)",
     sourceUrl: "https://tourism.az.gov/data-trends/",
-    note: "Single-source: PHX traffic is reported by the airport to AOT; no second machine-readable publisher exists. The report's own printed totals are consistency-checked in the aot_airports-xcheck log.",
+    note: "Single-source: PHX traffic is reported by the airport to AOT; no second machine-readable publisher exists. The parser is verified digit-for-digit against the published reports — the blocker is access, not format.",
     detail: [],
     staleAfterMonths: 5,
     emptyKind: "gap",
-    emptyNote: "No AOT airport observations stored yet.",
+    emptyNote: "Gap — tourism.az.gov returns HTTP 403 (bot wall) to the portal's datacenter IPs on every page and PDF (verified Oct 17, 2026; same block as DLLC). The fetcher retries weekly and this component joins the score automatically if access opens.",
   };
   const obs = bySeries(await getTailwindObs("aot_airports"));
   const ytd = lastOf(obs.get("phx_pax_ytd"));
@@ -432,11 +432,11 @@ async function buildAotLodging(sector: string): Promise<BuiltComponent> {
     asOf: null,
     source: "Arizona Office of Tourism — Monthly Lodging Report (CoStar data)",
     sourceUrl: "https://tourism.az.gov/data-trends/",
-    note: "Single-source: statewide lodging performance is CoStar survey data published only via AOT. Internal consistency (RevPAR ≈ occupancy × ADR) is checked in the aot_lodging-xcheck log. Movement = mean of the YTD occupancy and ADR % changes.",
+    note: "Single-source: statewide lodging performance is CoStar survey data published only via AOT. Movement = mean of the YTD occupancy and ADR % changes. The parser is verified digit-for-digit against the published reports — the blocker is access, not format.",
     detail: [],
     staleAfterMonths: 5,
     emptyKind: "gap",
-    emptyNote: "No AOT lodging observations stored yet.",
+    emptyNote: "Gap — tourism.az.gov returns HTTP 403 (bot wall) to the portal's datacenter IPs on every page and PDF (verified Oct 17, 2026; same block as DLLC). The fetcher retries weekly and this component joins the score automatically if access opens.",
   };
   const obs = bySeries(await getTailwindObs("aot_lodging"));
   const occYtd = lastOf(obs.get("occ_ytd"));
