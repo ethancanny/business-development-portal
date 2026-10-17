@@ -20,6 +20,7 @@ export function middleware(req: NextRequest) {
     // routes enforce session-or-CRON_SECRET auth themselves.
     "/api/market/news/pending",
     "/api/market/news/summary",
+    "/api/market/news/reclassify",
   ];
   // PWA assets: browsers fetch the manifest, icons, splash images and the
   // service worker outside the page's auth context (notably iOS), and the
