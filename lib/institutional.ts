@@ -212,25 +212,11 @@ export function detectInstitutional(
     if (/cooperative/i.test(structure)) return hard("cooperative", `entity type "${structure}" (SAM.gov registration)`);
   }
 
-  // (facility) — permitted locations are institutional facilities:
-  // the hospitality sync stamps commercial/institutional location
-  // counts; zero commercial locations with institutional ones present
-  // means the "business" is dining inside institutions.
-  const commLocs = typeof d.commercialLocationCount === "number" ? d.commercialLocationCount : null;
-  const instLocs = typeof d.institutionalLocationCount === "number" ? d.institutionalLocationCount : null;
-  if (commLocs === 0 && instLocs !== null && instLocs > 0) {
-    return hard("institutional facility", `all ${instLocs} permitted location${instLocs === 1 ? " is an institutional facility" : "s are institutional facilities"} (school / hospital / care-facility kitchens) — no commercial locations`);
-  }
-  // (facility) — stored permit/facility types that are institutional
-  // classes outright (school cafeteria, hospital kitchen, jail, ...).
-  const facTypes = Array.isArray(d.facilityTypes) ? d.facilityTypes.map((x) => String(x)) : [];
-  for (const t of facTypes) {
-    if (isInstitutionalFacilityText(t)) {
-      return hard("institutional facility", `permit/facility type "${t}" is an institutional class`);
-    }
-  }
-
   // (name) — hard terms on word boundaries (raw + stemmed tokens).
+  // Name evidence runs BEFORE the facility arms below: when the name
+  // itself says what the place is ("Benjamin Franklin Charter
+  // School"), the specific reason ("Institutional: school") is the
+  // one Ethan reviews; the facility arms catch the unnamed rest.
   let churchFirst = false;
   for (const term of INST_HARD_NAME_TERMS) {
     let hit = false;
@@ -282,6 +268,25 @@ export function detectInstitutional(
     const exception = INSTITUTIONAL_COMMERCIAL_EXCEPTIONS.find((x) => nameUpper.includes(` ${x} `) || nameUpper.includes(` ${x}`));
     if (!exception) {
       return hard("school", `name contains "${stemTokens.includes("SCHOOL") ? "School" : "Academy"}"`);
+    }
+  }
+
+  // (facility) — permitted locations are institutional facilities:
+  // the hospitality sync stamps commercial/institutional location
+  // counts; zero commercial locations with institutional ones present
+  // means the "business" is dining inside institutions. Runs after
+  // the name arms so a self-describing name gets its specific reason.
+  const commLocs = typeof d.commercialLocationCount === "number" ? d.commercialLocationCount : null;
+  const instLocs = typeof d.institutionalLocationCount === "number" ? d.institutionalLocationCount : null;
+  if (commLocs === 0 && instLocs !== null && instLocs > 0) {
+    return hard("institutional facility", `all ${instLocs} permitted location${instLocs === 1 ? " is an institutional facility" : "s are institutional facilities"} (school / hospital / care-facility kitchens) — no commercial locations`);
+  }
+  // (facility) — stored permit/facility types that are institutional
+  // classes outright (school cafeteria, hospital kitchen, jail, ...).
+  const facTypes = Array.isArray(d.facilityTypes) ? d.facilityTypes.map((x) => String(x)) : [];
+  for (const t of facTypes) {
+    if (isInstitutionalFacilityText(t)) {
+      return hard("institutional facility", `permit/facility type "${t}" is an institutional class`);
     }
   }
 
