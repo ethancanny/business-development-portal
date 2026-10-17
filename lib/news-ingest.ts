@@ -13,6 +13,12 @@
  *     (aviationweek.com/rss.xml, 10), Defense News (arc outboundfeeds rss,
  *     25), Fierce Healthcare (rss.xml, 10), Construction Dive
  *     (/feeds/news/, 10), Manufacturing Dive (/feeds/news/, 10).
+ *   Hospitality trade press (§5, live-fetched Oct 17, 2026): Restaurant
+ *     Business (/feed, 50 items — /rss.xml is Atom with no <item>),
+ *     Nation's Restaurant News (nrn.com/rss.xml, 50), Hotel Business
+ *     (hotelbusiness.com/feed/, 10). All three are national feeds: the
+ *     relevance screen keeps their stories only on a tracked-entity hit
+ *     (tracked hospitality groups included) or a sector event.
  *   GOOGLE NEWS FALLBACK (site:-scoped) — AZ Big Media (/feed/ redirects
  *     to the homepage; WP feeds disabled), Arizona Republic / azcentral
  *     (402 to non-browser clients), Axios Phoenix (no local RSS exists;
@@ -33,6 +39,7 @@ import {
   appendAlsoCoveredBy,
   loadMatchEntities,
   type MatchEntity,
+  type MatchLoadStats,
   type RecentNewsRow,
 } from "./news-db";
 import type { MiNewsItem, MiNewsMatch } from "./types";
@@ -65,6 +72,9 @@ const NEWS_FEEDS: NewsFeed[] = [
   { name: "Fierce Healthcare", short: "Fierce", kind: "rss", url: "https://www.fiercehealthcare.com/rss.xml" },
   { name: "Construction Dive", short: "ConDive", kind: "rss", url: "https://www.constructiondive.com/feeds/news/" },
   { name: "Manufacturing Dive", short: "MfgDive", kind: "rss", url: "https://www.manufacturingdive.com/feeds/news/" },
+  { name: "Restaurant Business", short: "RB", kind: "rss", url: "https://www.restaurantbusinessonline.com/feed" },
+  { name: "Nation's Restaurant News", short: "NRN", kind: "rss", url: "https://www.nrn.com/rss.xml" },
+  { name: "Hotel Business", short: "HB", kind: "rss", url: "https://hotelbusiness.com/feed/" },
 ];
 
 /* ---------------- RSS parsing ----------------
@@ -186,7 +196,10 @@ interface Screened {
 function screenItem(headline: string, snippet: string, feedLocal: boolean, entities: MatchEntity[]): Screened | null {
   const hay = `${headline} ${stripHtml(snippet)}`;
   const hayLc = hay.toLowerCase();
-  const tokens = new Set(hayLc.split(/[^a-z0-9]+/).filter(Boolean));
+  // Tokens keep internal apostrophes so single-word names like
+  // "McDonald's" or "Fry's" can match at all (splitting on ' would
+  // shred them into fragments that never equal the name).
+  const tokens = new Set(hayLc.split(/[^a-z0-9']+/).filter(Boolean));
 
   const matched: MiNewsMatch[] = [];
   let watchlistHit = false;
@@ -201,7 +214,11 @@ function screenItem(headline: string, snippet: string, feedLocal: boolean, entit
     if (e.type === "watchlist") watchlistHit = true;
     else {
       entityHit = true;
-      if (e.type === "company" && e.sector && PORTAL_SECTORS.has(e.sector) && !companySector) companySector = e.sector;
+      // Tracked hospitality groups (§5) count as lane-(a) tracked names:
+      // the entity base score (50) ranks them above every generic
+      // sector/event item (max 40 with recency), and the match carries
+      // the "Tracked group" marker into the UI.
+      if ((e.type === "company" || e.type === "hospitality") && e.sector && PORTAL_SECTORS.has(e.sector) && !companySector) companySector = e.sector;
     }
   }
 
@@ -272,11 +289,15 @@ async function fetchOgImage(url: string): Promise<string | null> {
 const IMAGE_FETCH_CAP = 12;
 
 export async function ingestIntelNews(): Promise<number> {
-  const entities = await loadMatchEntities();
+  const loadStats: MatchLoadStats = { hospitalityTotal: 0, hospitalityMatchable: 0, hospitalityGenericSkipped: 0 };
+  const entities = await loadMatchEntities(loadStats);
   const recent: RecentNewsRow[] = await getRecentNewsRows(72);
   const seenLinks = new Set<string>();
   const seenKeys = new Set<string>();
   const tally = new Map<string, { fetched: number; kept: number }>();
+  /** Per-feed health for the xcheck verdict: a feed that 403s or dies
+   * is named in the log, never silently absent (cross-reference rule). */
+  const feedHealth = new Map<string, string>();
   let fetched = 0;
   let kept = 0;
   let inserted = 0;
@@ -308,9 +329,14 @@ export async function ingestIntelNews(): Promise<number> {
         headers: { "User-Agent": BROWSER_UA },
         signal: AbortSignal.timeout(25000),
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        feedHealth.set(feed.short, `http ${res.status}`);
+        continue;
+      }
       xml = await res.text();
+      feedHealth.set(feed.short, "ok");
     } catch {
+      feedHealth.set(feed.short, "fetch error");
       continue;
     }
     for (const item of parseRss(xml)) {
@@ -406,7 +432,11 @@ export async function ingestIntelNews(): Promise<number> {
   const perSource = Array.from(tally.entries())
     .map(([short, t]) => `${short} ${t.kept}/${t.fetched}`)
     .join(", ");
-  const verdict = `fetched ${fetched} · kept ${kept} · inserted ${inserted} · merged ${merged} · dup ${dupSkipped} · entities ${entities.length} · per-source kept/fetched: ${perSource}`;
+  const feedGaps = Array.from(feedHealth.entries())
+    .filter(([, h]) => h !== "ok")
+    .map(([short, h]) => `${short} ${h}`)
+    .join(", ");
+  const verdict = `fetched ${fetched} · kept ${kept} · inserted ${inserted} · merged ${merged} · dup ${dupSkipped} · entities ${entities.length} (hosp groups ${loadStats.hospitalityMatchable}/${loadStats.hospitalityTotal} matchable, ${loadStats.hospitalityGenericSkipped} generic-skipped) · per-source kept/fetched: ${perSource}${feedGaps ? ` · FEED GAPS: ${feedGaps}` : ""}`;
   await logSync("intel-news-xcheck", "ok", kept, verdict.slice(0, 950));
   await logSync("intel_news", "ok", inserted, verdict.slice(0, 950));
   return inserted;

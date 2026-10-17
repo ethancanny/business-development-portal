@@ -483,7 +483,7 @@ export interface MiSyncLog {
  * relevance screen matched a story to. `kind` on the item is the primary
  * lane (entity | watchlist | event | sector) that decided its score. */
 export interface MiNewsMatch {
-  type: "company" | "deal" | "operator" | "investor" | "watchlist";
+  type: "company" | "deal" | "operator" | "investor" | "watchlist" | "hospitality";
   id: string;
   name: string;
 }

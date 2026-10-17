@@ -12,6 +12,7 @@
 import { neon } from "@neondatabase/serverless";
 import { ensureSchema, newId, getDeals, getExecutives } from "./db-postgres";
 import { getInvestors } from "./investors-db";
+import { hospitalityMatchName, nameKey } from "./hospitality-screen";
 import type { MiNewsItem, MiNewsMatch } from "./types";
 
 function sql() {
@@ -190,22 +191,31 @@ export interface MatchEntity extends MiNewsMatch {
   sector: string;
 }
 
+export interface MatchLoadStats {
+  hospitalityTotal: number;
+  hospitalityMatchable: number;
+  hospitalityGenericSkipped: number;
+}
+
 /** Every name the relevance screen can match a headline against: fit
  * companies, pipeline deals, Directory operators, investors (name + firm),
- * competing buyers (mi_acquisitions acquirers), and the news watchlist.
- * Sorted longest-name-first so the most specific match wins. */
-export async function loadMatchEntities(): Promise<MatchEntity[]> {
+ * competing buyers (mi_acquisitions acquirers), the news watchlist, and
+ * tracked hospitality operator groups (Hospitality §5). Sorted
+ * longest-name-first so the most specific match wins. */
+export async function loadMatchEntities(stats?: MatchLoadStats): Promise<MatchEntity[]> {
   await ensureNewsSchema();
   await ensureSchema();
   const db = sql();
   const out: MatchEntity[] = [];
   const seen = new Set<string>();
+  const nameSeen = new Set<string>();
   const push = (type: MiNewsMatch["type"], id: string, name: string, sector = "") => {
     const clean = (name ?? "").trim();
     if (clean.length < 4) return;
     const key = `${type}:${clean.toLowerCase()}`;
     if (seen.has(key)) return;
     seen.add(key);
+    nameSeen.add(clean.toLowerCase());
     out.push({ type, id, name: clean, sector });
   };
 
@@ -237,6 +247,50 @@ export async function loadMatchEntities(): Promise<MatchEntity[]> {
   const watch = (await db`SELECT term FROM mi_news_watchlist ORDER BY term`) as unknown as Record<string, unknown>[];
   for (const w of watch) push("watchlist", str(w.term), str(w.term));
 
+  // Tracked hospitality groups (Hospitality §5, Oct 17, 2026): every
+  // operator group in the spine is a tracked name, but it enters the
+  // screen ONLY under its distinctive match name (see
+  // lib/hospitality-screen.ts) — generic group names are skipped so a
+  // common word can never tag a story. The match id is the mirrored
+  // company's id, so the story can be linked to the group. A group
+  // whose name is already tracked as another entity type is not
+  // duplicated (no-redundancy rule).
+  try {
+    const groups = (await db`
+      SELECT g.name AS gname, g.group_key AS gk, c.id AS cid
+      FROM mi_hospitality_groups g
+      LEFT JOIN mi_companies c
+        ON c.source = 'Hospitality Spine' AND c.dedup_key = g.group_key
+      ORDER BY g.location_count DESC`) as unknown as Record<string, unknown>[];
+    let matchable = 0;
+    let skipped = 0;
+    // The spine deliberately keeps name variants unmerged ("Filiberto's"
+    // vs "FILIBERTOS"); for matching, one entry per normalized name is
+    // enough — the largest-location variant wins (query order above).
+    const hospKeys = new Set<string>();
+    for (const g of groups) {
+      const matchName = hospitalityMatchName(str(g.gname));
+      if (!matchName) {
+        skipped++;
+        continue;
+      }
+      if (nameSeen.has(matchName.toLowerCase())) continue;
+      const key = nameKey(matchName);
+      if (hospKeys.has(key)) continue;
+      hospKeys.add(key);
+      const before = out.length;
+      push("hospitality", str(g.cid) || str(g.gk), matchName, "Hospitality");
+      if (out.length > before) matchable++;
+    }
+    if (stats) {
+      stats.hospitalityTotal = groups.length;
+      stats.hospitalityMatchable = matchable;
+      stats.hospitalityGenericSkipped = skipped;
+    }
+  } catch {
+    // The groups table is an enhancement to the screen, not a dependency.
+  }
+
   out.sort((a, b) => b.name.length - a.name.length);
   return out;
 }
@@ -263,7 +317,7 @@ export async function getNewsForUi(q: NewsQuery): Promise<{ items: MiNewsItem[];
     q.type === "watchlist"
       ? `EXISTS (SELECT 1 FROM jsonb_array_elements(matched) m WHERE m ->> 'type' = 'watchlist')`
       : q.type === "entity"
-        ? `EXISTS (SELECT 1 FROM jsonb_array_elements(matched) m WHERE m ->> 'type' IN ('company','deal','operator','investor'))`
+        ? `EXISTS (SELECT 1 FROM jsonb_array_elements(matched) m WHERE m ->> 'type' IN ('company','deal','operator','investor','hospitality'))`
         : q.type === "event"
           ? `kind = 'event'`
           : q.type === "sector"
