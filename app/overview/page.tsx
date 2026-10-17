@@ -9,6 +9,7 @@ import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiCompany, type MiIndicatorObs, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
 import type { Investor } from "@/lib/investors-db";
+import type { OperatorCandidate } from "@/lib/candidates-db";
 import { fmtMoney, dedupeSourceTokens } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, sectorIcon, stageColor } from "@/lib/sector-colors";
@@ -67,6 +68,7 @@ export default function Overview() {
   const [flow, setFlow] = useState<DealFlowItem[]>([]);
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
   const [investors, setInvestors] = useState<Investor[]>([]);
+  const [candidates, setCandidates] = useState<OperatorCandidate[]>([]);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [rates, setRates] = useState<MarketRates>({});
   const [fitCounts, setFitCounts] = useState<Record<string, number | null>>({});
@@ -92,7 +94,7 @@ export default function Overview() {
     try {
       const calFrom = new Date(Date.now() - 16 * 86400000).toISOString();
       const calTo = new Date(Date.now() + 28 * 86400000).toISOString();
-      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes, calRes, invRes, multRes, ratesRes, indRes] = await Promise.all([
+      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes, calRes, invRes, multRes, ratesRes, indRes, candRes] = await Promise.all([
         fetch("/api/auth/me"),
         fetch("/api/deals"),
         fetch("/api/executives"),
@@ -104,6 +106,7 @@ export default function Overview() {
         fetch("/api/market/multiples"),
         fetch("/api/market/rates"),
         fetch("/api/market/indicators?series=DPRIME,SOFR,DGS10,DGS2"),
+        fetch("/api/operators/candidates"),
       ]);
       if (
         meRes.status === 401 ||
@@ -129,6 +132,10 @@ export default function Overview() {
       if (invRes.ok) {
         const inv = await invRes.json();
         if (Array.isArray(inv)) setInvestors(inv);
+      }
+      if (candRes.ok) {
+        const cs = await candRes.json();
+        if (Array.isArray(cs)) setCandidates(cs as OperatorCandidate[]);
       }
       if (multRes.ok) {
         const mult = await multRes.json();
@@ -456,20 +463,36 @@ export default function Overview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calEvents, deals, execs, investors]);
 
-  // Operators tile: interviewing now, paired to a deal, and new
-  // candidates this week (Monday → now).
+  // Operators tile: pipeline figures + the operator-candidate system
+  // (Build 4, Oct 16, 2026). Definitions (records, Monday → now):
+  // interviewing = pipeline execs at Interview + candidates at
+  // Interviewing; paired = execs paired to ≥1 deal + candidates at
+  // Paired; newCandidatesThisWeek = candidate records whose dateFound
+  // is this week; verified/awaitingVerification = candidate statuses;
+  // newThisWeek = exec records created this week.
   const operatorStats = useMemo(() => {
     const pairedIds = new Set<string>();
     deals.forEach((d) => (d.operatorIds ?? []).forEach((id) => pairedIds.add(id)));
     const now = new Date();
     const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    const mondayStr = monday.toLocaleDateString("en-CA");
     return {
-      interviewing: execs.filter((e) => e.stage === "Interview").length,
-      paired: execs.filter((e) => pairedIds.has(e.id)).length,
+      interviewing:
+        execs.filter((e) => e.stage === "Interview").length +
+        candidates.filter((c) => c.status === "Interviewing").length,
+      paired:
+        execs.filter((e) => pairedIds.has(e.id)).length +
+        candidates.filter((c) => c.status === "Paired").length,
       newThisWeek: execs.filter((e) => new Date(e.createdAt) >= monday).length,
+      newCandidatesThisWeek: candidates.filter(
+        (c) => c.dateFound && c.dateFound >= mondayStr
+      ).length,
+      verified: candidates.filter((c) => c.status === "Verified").length,
+      awaitingVerification: candidates.filter((c) => c.status === "Candidate")
+        .length,
     };
-  }, [execs, deals]);
+  }, [execs, deals, candidates]);
 
   // --- Top Signals actions -------------------------------------------------
   const signalKey = (c: MiCompany) => c.dedupKey || c.id;
@@ -557,7 +580,7 @@ export default function Overview() {
       ? (d.signals as Record<string, unknown>[])
       : [];
     for (let i = sigs.length - 1; i >= 0; i--) {
-      const t = sigs[i]?.text;
+      const t = sigs[i]?.label ?? sigs[i]?.text;
       if (typeof t === "string" && t.trim()) return t.trim();
     }
     if (typeof d.fitWhy === "string" && d.fitWhy.trim()) return d.fitWhy.trim();
@@ -1506,11 +1529,23 @@ export default function Overview() {
           </div>
           <div>
             <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{operatorStats.paired}</p>
-            <p className="text-xs text-slate-500 dark:text-white/50">Paired to a deal</p>
+            <p className="text-xs text-slate-500 dark:text-white/50">Paired</p>
           </div>
           <div>
             <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{operatorStats.newThisWeek}</p>
+            <p className="text-xs text-slate-500 dark:text-white/50">New operators this week</p>
+          </div>
+          <div>
+            <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{operatorStats.newCandidatesThisWeek}</p>
             <p className="text-xs text-slate-500 dark:text-white/50">New candidates this week</p>
+          </div>
+          <div>
+            <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{operatorStats.verified}</p>
+            <p className="text-xs text-slate-500 dark:text-white/50">Candidates verified</p>
+          </div>
+          <div>
+            <p className="tnum font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">{operatorStats.awaitingVerification}</p>
+            <p className="text-xs text-slate-500 dark:text-white/50">Awaiting verification</p>
           </div>
         </div>
       </section>
