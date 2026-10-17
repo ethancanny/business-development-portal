@@ -327,15 +327,51 @@ export function normalizeGroupName(name: string): string {
     .trim();
 }
 
+/* A group's location_count is DISTINCT STREET ADDRESSES, not permits
+ * (fix approved by Ethan Oct 16, 2026): Maricopa issues several
+ * permits per physical establishment — dual permit classes at
+ * convenience stores (~2 per store), one per department at grocers
+ * (3–7 per store), one per concession stand at venues (Chase Field
+ * held 48 permits at one address), one per truck at a mobile-food
+ * commissary. Counting permits overstated every location count and,
+ * through locations × per-location range, every modeled revenue.
+ * The key is house number + street name with suite/unit designators
+ * stripped, plus ZIP. A record whose address has no usable street
+ * portion (blank, or no house number) cannot be proven to share a
+ * site with anything, so it keys to its own record id and counts as
+ * its own location. */
+const STREET_SUFFIXES: Record<string, string> = {
+  STREET: "ST", AVENUE: "AVE", BOULEVARD: "BLVD", ROAD: "RD", DRIVE: "DR",
+  LANE: "LN", COURT: "CT", PLACE: "PL", PARKWAY: "PKWY", CIRCLE: "CIR",
+  TRAIL: "TRL", HIGHWAY: "HWY", TERRACE: "TER", FREEWAY: "FWY",
+};
+
+export function streetAddressKey(address: string): string {
+  let a = (address || "").toUpperCase().trim();
+  a = a.replace(/\b(STE|SUITE|UNIT|APT|APARTMENT|BLDG|BUILDING|DEPT|DEPARTMENT|RM|ROOM|FLR|FLOOR)\b.*$/, " ");
+  a = a.replace(/#.*$/, " ");
+  a = a.replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  if (!a) return "";
+  return a.split(" ").map((t) => STREET_SUFFIXES[t] ?? t).join(" ");
+}
+
+export function locationKeyFor(address: string, zip: string, recordId: string): string {
+  const street = streetAddressKey(address);
+  if (!street || !/\d/.test(street)) return `record:${recordId}`;
+  const z = (zip || "").replace(/\D/g, "").slice(0, 5);
+  return `addr:${street}|${z}`;
+}
+
 async function rebuildGroups(): Promise<number> {
   const db = sql();
   interface Loc {
     id: string;
     city: string;
     display: string;
+    addrKey: string;
   }
   const groups = new Map<string, { name: string; permits: Loc[]; licenses: Loc[] }>();
-  const add = (kind: "permits" | "licenses", rawName: string, id: string, city: string) => {
+  const add = (kind: "permits" | "licenses", rawName: string, id: string, city: string, address: string, zip: string) => {
     const key = normalizeGroupName(rawName);
     if (!key) return;
     let g = groups.get(key);
@@ -343,12 +379,12 @@ async function rebuildGroups(): Promise<number> {
       g = { name: rawName.trim(), permits: [], licenses: [] };
       groups.set(key, g);
     }
-    g[kind].push({ id, city, display: rawName.trim() });
+    g[kind].push({ id, city, display: rawName.trim(), addrKey: locationKeyFor(address, zip, id) });
   };
-  const permitRows = await db`SELECT permit_id, business_name, city FROM mi_hospitality_permits`;
-  for (const r of permitRows) add("permits", String(r.business_name), String(r.permit_id), String(r.city));
-  const licenseRows = await db`SELECT license_number, licensee, city FROM mi_hospitality_licenses`;
-  for (const r of licenseRows) add("licenses", String(r.licensee), String(r.license_number), String(r.city));
+  const permitRows = await db`SELECT permit_id, business_name, city, address, zip FROM mi_hospitality_permits`;
+  for (const r of permitRows) add("permits", String(r.business_name), String(r.permit_id), String(r.city), String(r.address ?? ""), String(r.zip ?? ""));
+  const licenseRows = await db`SELECT license_number, licensee, city, address, zip FROM mi_hospitality_licenses`;
+  for (const r of licenseRows) add("licenses", String(r.licensee), String(r.license_number), String(r.city), String(r.address ?? ""), String(r.zip ?? ""));
 
   const entries: { key: string; g: { name: string; permits: Loc[]; licenses: Loc[] } }[] = [];
   groups.forEach((g, key) => entries.push({ key, g }));
@@ -361,12 +397,16 @@ async function rebuildGroups(): Promise<number> {
     chunk.forEach(({ key, g }, j) => {
       keys.push(key);
       const cities = Array.from(new Set([...g.permits, ...g.licenses].map((l: Loc) => l.city).filter(Boolean))).sort();
+      // Locations = distinct street addresses across permits+licenses
+      // (see locationKeyFor); raw member counts stay in permit_ids /
+      // license_numbers and surface as permitCount in company details.
+      const locCount = new Set([...g.permits, ...g.licenses].map((l: Loc) => l.addrKey)).size;
       const b = j * 6;
       values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}::jsonb, $${b + 5}::jsonb, $${b + 6}::jsonb)`);
       params.push(
         key,
         g.name,
-        g.permits.length + g.licenses.length,
+        locCount,
         JSON.stringify(g.permits.map((l: Loc) => l.id)),
         JSON.stringify(g.licenses.map((l: Loc) => l.id)),
         JSON.stringify(cities)
@@ -537,20 +577,23 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
   const settings = await getHospitalityFitSettings();
 
   const groupRows = await db`SELECT group_key, name, location_count, permit_ids, license_numbers, cities FROM mi_hospitality_groups`;
-  const permitRows = await db`SELECT permit_id, permit_type, business_name, city, fetched_at FROM mi_hospitality_permits`;
-  const permitById = new Map<string, { type: string; name: string; city: string; fetchedAt: string }>();
+  const permitRows = await db`SELECT permit_id, permit_type, business_name, city, address, zip, fetched_at FROM mi_hospitality_permits`;
+  const permitById = new Map<string, { type: string; name: string; city: string; addrKey: string; fetchedAt: string }>();
   for (const p of permitRows) {
     permitById.set(String(p.permit_id), {
       type: String(p.permit_type), name: String(p.business_name),
       city: String(p.city), fetchedAt: String(p.fetched_at ?? ""),
+      addrKey: locationKeyFor(String(p.address ?? ""), String(p.zip ?? ""), String(p.permit_id)),
     });
   }
-  const licenseRows = await db`SELECT license_number, series, licensee FROM mi_hospitality_licenses`;
+  const licenseRows = await db`SELECT license_number, series, licensee, address, zip FROM mi_hospitality_licenses`;
   const seriesByLicense = new Map<string, string>();
   const licenseeByNumber = new Map<string, string>();
+  const licenseAddrByNumber = new Map<string, string>();
   for (const l of licenseRows) {
     seriesByLicense.set(String(l.license_number), String(l.series));
     licenseeByNumber.set(String(l.license_number), String(l.licensee));
+    licenseAddrByNumber.set(String(l.license_number), locationKeyFor(String(l.address ?? ""), String(l.zip ?? ""), String(l.license_number)));
   }
 
   /* Cross-check #1 — CBP size band for NAICS 72 (Accommodation & Food
@@ -600,16 +643,26 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
     // Stamps unreadable — the per-group note simply omits the SBA leg.
   }
 
-  // Normalized-name tallies over the raw tables, computed once — the
-  // spot reconciliation below reads them instead of re-scanning.
-  const rawNameCounts = new Map<string, number>();
-  permitById.forEach((p) => {
-    const k = normalizeGroupName(p.name);
-    if (k) rawNameCounts.set(k, (rawNameCounts.get(k) ?? 0) + 1);
-  });
-  licenseeByNumber.forEach((licensee) => {
-    const k = normalizeGroupName(licensee);
-    if (k) rawNameCounts.set(k, (rawNameCounts.get(k) ?? 0) + 1);
+  // Normalized-name distinct-address tallies over the raw tables,
+  // computed once — the spot reconciliation below reads them instead
+  // of re-scanning. Same location keying as rebuildGroups, so the
+  // recount validates stored location counts on the SAME basis
+  // (distinct street addresses, never raw permit counts).
+  const rawAddrSets = new Map<string, Set<string>>();
+  const tallyAddr = (rawName: string, addrKey: string) => {
+    const k = normalizeGroupName(rawName);
+    if (!k) return;
+    let s = rawAddrSets.get(k);
+    if (!s) {
+      s = new Set<string>();
+      rawAddrSets.set(k, s);
+    }
+    s.add(addrKey);
+  };
+  permitById.forEach((p) => tallyAddr(p.name, p.addrKey));
+  licenseeByNumber.forEach((licensee, num) => {
+    const ak = licenseAddrByNumber.get(num);
+    if (ak) tallyAddr(licensee, ak);
   });
 
   const inputs: CompanyInput[] = [];
@@ -627,7 +680,7 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
     const locs = Number(g.location_count) || permitIds.length + licenseNums.length;
 
     if (spot === null || locs > spot.stored) {
-      spot = { name: String(g.name), stored: locs, recounted: rawNameCounts.get(groupKey) ?? 0 };
+      spot = { name: String(g.name), stored: locs, recounted: rawAddrSets.get(groupKey)?.size ?? 0 };
     }
 
     // Concept: majority vote across member permits; a DLLC series-11
@@ -718,13 +771,13 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
       revenueEstimate: revMid,
       estRevenueLow: revLow,
       estRevenueHigh: revHigh,
-      estRevenueInputs: `${locs} location${locs === 1 ? "" : "s"} × ${moneyFmt(concept.revLow)}–${moneyFmt(concept.revHigh)} per-location range (${concept.label.toLowerCase()}, AZ) — revenue is modeled from permit counts, not reported`,
+      estRevenueInputs: `${locs} location${locs === 1 ? "" : "s"} × ${moneyFmt(concept.revLow)}–${moneyFmt(concept.revHigh)} per-location range (${concept.label.toLowerCase()}, AZ) — revenue is modeled from distinct-location counts, not reported`,
       estConfidence: "low",
       crossCheck,
       ...(sbaNote ? { sbaCrossCheck: sbaNote } : {}),
       ...(licenseNums.length ? { liquorLicensedVenue: liquorVenue } : {}),
       dataAsOf: maxFetched ? maxFetched.slice(0, 10) : new Date().toISOString().slice(0, 10),
-      note: "Operator group resolved from public permit/license records, grouped by operator name. Locations are permitted establishments seen so far (Maricopa coverage is still filling in). Revenue is a modeled estimate — not reported financials.",
+      note: "Operator group resolved from public permit/license records, grouped by operator name. Locations are distinct street addresses seen so far (Maricopa coverage is still filling in); a single location can hold several permits. Revenue is a modeled estimate — not reported financials.",
     };
 
     inputs.push({
@@ -752,7 +805,7 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
     "hospitality-fit-xcheck",
     spotOk ? "ok" : "error",
     fits,
-    `Hospitality fit: ${groupRows.length} operator groups evaluated → ${fits} fits (${Object.entries(fitsBySubsector).map(([k, v]) => `${k} ${v}`).join(" · ") || "none"}) · local prediction ${predictedFits} (stored count is ground truth) · excluded by ownership: ${Object.entries(excluded).map(([k, v]) => `${k} ${v}`).join(", ")} · thresholds: ≥${settings.minLocations} locations or liquor-licensed hotel/venue ≥${moneyFmt(settings.hotelMinRevenue)} (portal settings) · DLLC licenses in table: ${licenseRows.length} (hotel/venue arm ${licenseRows.length ? "active" : "inactive — no license data yet"}) · spot reconciliation: ${spot ? `${spot.name} stored ${spot.stored} locations vs ${spot.recounted} recounted from raw permits/licenses — ${spotOk ? "reconcile" : "MISMATCH"}` : "no groups to check"}`
+    `Hospitality fit: ${groupRows.length} operator groups evaluated → ${fits} fits (${Object.entries(fitsBySubsector).map(([k, v]) => `${k} ${v}`).join(" · ") || "none"}) · local prediction ${predictedFits} (stored count is ground truth) · excluded by ownership: ${Object.entries(excluded).map(([k, v]) => `${k} ${v}`).join(", ")} · thresholds: ≥${settings.minLocations} locations or liquor-licensed hotel/venue ≥${moneyFmt(settings.hotelMinRevenue)} (portal settings) · DLLC licenses in table: ${licenseRows.length} (hotel/venue arm ${licenseRows.length ? "active" : "inactive — no license data yet"}) · spot reconciliation: ${spot ? `${spot.name} stored ${spot.stored} locations vs ${spot.recounted} recounted from raw permits/licenses, both on a distinct-street-address basis — ${spotOk ? "reconcile" : "MISMATCH"}` : "no groups to check"}`
   );
 
   return { evaluated: groupRows.length, mirrored: total, fits, fitsBySubsector, excluded };
