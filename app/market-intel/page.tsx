@@ -22,10 +22,12 @@ import SizeProfileRow, { hasSizeProfile, SUBSECTOR_IDS_CSV } from "@/components/
 import CompanyTargets from "@/components/CompanyTargets";
 import IndustryExplorer from "@/components/IndustryExplorer";
 import FitTargets from "@/components/FitTargets";
+import NewsIntel from "@/components/NewsIntel";
 import SectorChip from "@/components/SectorChip";
 import { Section, SubSection, FullSection, EventStrip } from "@/components/market-sections";
 import UpdatesStrip from "@/components/UpdatesStrip";
 import ValleyDemographics from "@/components/ValleyDemographics";
+import TailwindDetail from "@/components/TailwindDetail";
 import { useTheme } from "@/components/ThemeProvider";
 import { fmtMoney, fmtDate, uniqueStrings } from "@/lib/format";
 import type {
@@ -1431,6 +1433,11 @@ export default function MarketIntelPage() {
           </div>
         )}
 
+        {/* News & Intelligence (redesign Wave 2b): sits between Major
+            Events and the tabbed panel; self-contained and defensive —
+            it fetches its own feed and never blocks the page. */}
+        <NewsIntel />
+
         {/* Single tabbed panel (Ethan, Oct 14, 2026 restructure): Fit Targets | Industries & Multiples | Arizona Economic Data | Acquisitions & Filings — one panel under the Updates tiles, page ends after it. */}
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white/60 dark:border-white/10 dark:bg-[#132847]/30">
           <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-t-2xl border-b-2 border-[#b8975a]/50 bg-white/95 px-3 py-3 backdrop-blur dark:bg-[#0d1f3c]/95 sm:px-4">
@@ -1483,6 +1490,7 @@ export default function MarketIntelPage() {
             </a>
           ))}
         </div>
+        <TailwindDetail />
               </div>
             )}
             {mainTab === "acq" && (
