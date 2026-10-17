@@ -99,7 +99,7 @@ export default function DealTable({
   }, [deals]);
 
   const thCls =
-    "cursor-pointer select-none whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-800 dark:text-white/50 dark:hover:text-white";
+    "cursor-pointer select-none whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-label text-slate-500 hover:text-slate-800 dark:text-white/50 dark:hover:text-white";
 
   return (
     <div>
@@ -108,7 +108,7 @@ export default function DealTable({
           <SectorLegend sectors={legendSectors} />
         </div>
       )}
-    <div className="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-[#132847] md:block">
+    <div className="hidden overflow-x-auto rounded-card border border-slate-200 bg-white shadow-card dark:border-white/10 dark:bg-[#132847] md:block">
       <table className="tbl-grad w-full min-w-[900px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-slate-200 dark:border-white/10">
@@ -122,7 +122,7 @@ export default function DealTable({
                 )}
               </th>
             ))}
-            <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-white/50">
+            <th className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-label text-slate-500 dark:text-white/50">
               Operators
             </th>
           </tr>
@@ -134,7 +134,7 @@ export default function DealTable({
               onClick={() => onSelect(d)}
               className="cursor-pointer border-b border-slate-100 transition hover:bg-slate-50 last:border-0 dark:border-white/5 dark:hover:bg-white/5"
             >
-              <td className="px-3 py-2.5">
+              <td className="px-3 py-3">
                 <span className="flex items-center gap-2">
                   <CompanyLogo
                     name={d.companyName}
@@ -150,19 +150,19 @@ export default function DealTable({
                       {d.companyName}
                     </Link>
                     {d.city && (
-                      <span className="block text-xs text-slate-400 dark:text-white/40">
+                      <span className="caption block">
                         {d.city}
                       </span>
                     )}
                   </span>
                 </span>
               </td>
-              <td className="px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
+              <td className="px-3 py-3 text-slate-600 dark:text-[#c8bfa8]">
                 {d.industry ? (
                   <span className="inline-flex items-center gap-1.5">
                     <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
                     {!isFocusDeal(d.industry) && (
-                      <span className="inline-block rounded-full bg-slate-100 px-1.5 py-px align-middle text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-white/50">
+                      <span className="badge badge-neutral">
                         Non-focus
                       </span>
                     )}
@@ -171,10 +171,10 @@ export default function DealTable({
                   "—"
                 )}
               </td>
-              <td className="px-3 py-2.5">
+              <td className="px-3 py-3">
                 <StageChip stage={d.stage} />
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700 dark:text-[#e8dfc8]">
+              <td className="whitespace-nowrap px-3 py-3 font-medium text-slate-700 dark:text-[#e8dfc8]">
                 {(() => {
                   const rv = resolveDealValue(d, multiples, rates);
                   if (rv.value === null) return "—";
@@ -190,10 +190,10 @@ export default function DealTable({
                   );
                 })()}
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
+              <td className="whitespace-nowrap px-3 py-3 text-slate-600 dark:text-[#c8bfa8]">
                 {d.ebitda != null ? fmtMoney(d.ebitda) : "—"}
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5">
+              <td className="whitespace-nowrap px-3 py-3">
                 {(() => {
                   const est = estOf(d);
                   if (!est) return <span className="text-slate-400">—</span>;
@@ -213,11 +213,11 @@ export default function DealTable({
                   );
                 })()}
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
+              <td className="whitespace-nowrap px-3 py-3 text-slate-600 dark:text-[#c8bfa8]">
                 {d.owner || <span className="text-slate-400">Unclaimed</span>}
               </td>
               <td
-                className="whitespace-nowrap px-3 py-2.5"
+                className="whitespace-nowrap px-3 py-3"
                 style={{
                   color: agingColor(
                     Math.floor((Date.now() - new Date(d.updatedAt).getTime()) / 86400000)
@@ -227,7 +227,7 @@ export default function DealTable({
               >
                 {fmtDateShort(d.updatedAt)}
               </td>
-              <td className="px-3 py-2.5">
+              <td className="px-3 py-3">
                 {d.operatorIds && d.operatorIds.length > 0 ? (
                   <span className="flex flex-wrap gap-1">
                     {uniqueStrings(d.operatorIds).map((oid) => (
@@ -251,7 +251,7 @@ export default function DealTable({
             <tr>
               <td
                 colSpan={COLUMNS.length + 1}
-                className="px-3 py-8 text-center text-sm text-slate-400 dark:text-white/40"
+                className="px-3 py-10 text-center text-sm text-caption"
               >
                 No deals match.
               </td>
@@ -269,7 +269,7 @@ export default function DealTable({
           <div
             key={d.id}
             onClick={() => onSelect(d)}
-            className="cursor-pointer rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm transition active:bg-slate-50 dark:border-white/10 dark:bg-[#132847] dark:active:bg-white/5"
+            className="card-surface card-hover cursor-pointer p-3.5"
           >
             <div className="flex items-start justify-between gap-3">
               <span className="flex min-w-0 items-center gap-2">
@@ -287,7 +287,7 @@ export default function DealTable({
                     {d.companyName}
                   </Link>
                   {d.city && (
-                    <span className="block text-xs text-slate-400 dark:text-white/40">
+                    <span className="caption block">
                       {d.city}
                     </span>
                   )}
@@ -369,7 +369,7 @@ export default function DealTable({
         );
       })}
       {sorted.length === 0 && (
-        <p className="rounded-xl border border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-400 dark:border-white/10 dark:bg-[#132847] dark:text-white/40">
+        <p className="card-surface px-3 py-10 text-center text-sm text-caption">
           No deals match.
         </p>
       )}

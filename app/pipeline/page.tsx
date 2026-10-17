@@ -9,6 +9,7 @@ import { DealCardGrid, ExecCardGrid, PairingCardGrid } from "@/components/Pipeli
 import PairingTable, { type Pairing } from "@/components/PairingTable";
 import { DealModal, ExecutiveModal } from "@/components/Modals";
 import PageHero from "@/components/PageHero";
+import { SkeletonRows } from "@/components/ui";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type Executive, type MiMultiple } from "@/lib/types";
 import { fmtMoney, uniqueStrings } from "@/lib/format";
 import { dealFocusSector, resolveDealValue } from "@/lib/valuation";
@@ -174,8 +175,8 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-slate-500 dark:text-white/50">Loading pipeline…</p>
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+        <SkeletonRows rows={6} />
       </div>
     );
   }
@@ -195,38 +196,26 @@ export default function Dashboard() {
         <div className="mb-4 flex gap-2">
           <button
             onClick={() => setTab("deals")}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-              tab === "deals"
-                ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
-                : "bg-white text-slate-600 hover:bg-slate-200 dark:bg-white/10 dark:text-[#c8bfa8] dark:hover:bg-white/15"
-            }`}
+            className={`chip text-sm ${tab === "deals" ? "chip-active" : ""}`}
           >
             Acquisitions ({deals.length})
           </button>
           <button
             onClick={() => setTab("execs")}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-              tab === "execs"
-                ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
-                : "bg-white text-slate-600 hover:bg-slate-200 dark:bg-white/10 dark:text-[#c8bfa8] dark:hover:bg-white/15"
-            }`}
+            className={`chip text-sm ${tab === "execs" ? "chip-active" : ""}`}
           >
             Executive Sourcing ({execs.length})
           </button>
           <button
             onClick={() => setTab("paired")}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-              tab === "paired"
-                ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
-                : "bg-white text-slate-600 hover:bg-slate-200 dark:bg-white/10 dark:text-[#c8bfa8] dark:hover:bg-white/15"
-            }`}
+            className={`chip text-sm ${tab === "paired" ? "chip-active" : ""}`}
           >
             ◈ Paired ({pairings.length})
           </button>
         </div>
 
         {/* Toolbar */}
-        <div className="mb-4 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:items-center dark:border-white/10 dark:bg-[#132847] dark:shadow-none">
+        <div className="mb-4 flex flex-col gap-2 rounded-card border border-slate-200 bg-white p-3 shadow-card sm:flex-row sm:items-center dark:border-white/10 dark:bg-[#132847] dark:shadow-none">
           {(
             <div className="flex shrink-0 overflow-hidden rounded-lg border border-slate-200 dark:border-white/15">
               <button
@@ -292,7 +281,7 @@ export default function Dashboard() {
             onClick={() =>
               tab === "deals" ? setDealModal({ deal: null }) : setExecModal({ exec: null })
             }
-            className="rounded-lg bg-[#0d1f3c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1a3455] dark:bg-[#b8975a] dark:text-[#0d1f3c] dark:hover:bg-[#d4b37a]"
+            className="btn btn-primary"
           >
             + {tab === "deals" ? "Add deal" : "Add candidate"}
           </button>

@@ -18,10 +18,11 @@ const SECTORS = [
   "Hospitality",
 ];
 
+/* Pill filters (visual polish, Oct 17, 2026 — spec §6): shared chip
+   classes; selected = navy fill + white text (gold gradient in dark
+   mode). Order is never changed by selection (Ethan's rule). */
 const pill = (active: boolean) =>
-  active
-    ? "rounded-full px-3.5 py-1.5 text-sm font-semibold text-[#0d1f3c] ring-1 ring-inset ring-[#b8975a] dark:text-[#e8cf9a]"
-    : "rounded-full border border-slate-300 px-3.5 py-1.5 text-sm text-slate-600 hover:border-[#b8975a] dark:border-white/15 dark:text-white/60";
+  `chip text-sm ${active ? "chip-active" : ""}`;
 
 export default function FitTargets() {
   const [tab, setTab] = useState<string>("All");

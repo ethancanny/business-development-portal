@@ -135,7 +135,8 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={busy}
-            className="rounded-lg bg-[#0d1f3c] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1a3455] disabled:opacity-50 dark:bg-[#b8975a] dark:text-[#0d1f3c] dark:hover:bg-[#d4b37a]"
+            data-loading={busy || undefined}
+            className="btn btn-accent w-full"
           >
             {busy ? "Signing in…" : "Sign in"}
           </button>
@@ -143,7 +144,7 @@ export default function LoginPage() {
 
         <div className="mt-6 flex items-center gap-3">
           <span className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
-          <span className="text-xs font-medium text-slate-400 dark:text-white/40">
+          <span className="text-xs font-medium text-caption">
             or
           </span>
           <span className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
@@ -153,11 +154,12 @@ export default function LoginPage() {
           type="button"
           onClick={submitPasskey}
           disabled={passkeyBusy}
-          className="mt-4 w-full rounded-lg border border-[#0d1f3c]/25 px-4 py-2.5 text-sm font-semibold text-[#0d1f3c] transition hover:border-[#b8975a] disabled:opacity-50 dark:border-white/25 dark:text-[#e8dfc8] dark:hover:border-[#b8975a]"
+          className="btn btn-secondary mt-4 w-full"
+          data-loading={passkeyBusy || undefined}
         >
           {passkeyBusy ? "Waiting for passkey…" : "Sign in with a passkey"}
         </button>
-        <p className="mt-2 text-center text-xs text-slate-400 dark:text-white/40">
+        <p className="caption mt-2 text-center">
           Uses Face ID, Touch ID, or your device PIN. Add a passkey from
           Settings after signing in.
         </p>

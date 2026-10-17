@@ -60,11 +60,11 @@ export default function ExecTable({
     deals.filter((d) => (d.operatorIds ?? []).includes(execId));
 
   const thCls =
-    "cursor-pointer select-none whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-800 dark:text-white/50 dark:hover:text-white";
+    "cursor-pointer select-none whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-label text-slate-500 hover:text-slate-800 dark:text-white/50 dark:hover:text-white";
 
   return (
     <div>
-    <div className="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-[#132847] md:block">
+    <div className="hidden overflow-x-auto rounded-card border border-slate-200 bg-white shadow-card dark:border-white/10 dark:bg-[#132847] md:block">
       <table className="tbl-grad w-full min-w-[900px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-slate-200 dark:border-white/10">
@@ -78,10 +78,10 @@ export default function ExecTable({
                 )}
               </th>
             ))}
-            <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-white/50">
+            <th className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-label text-slate-500 dark:text-white/50">
               Industries
             </th>
-            <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-white/50">
+            <th className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-label text-slate-500 dark:text-white/50">
               Paired with
             </th>
           </tr>
@@ -95,26 +95,26 @@ export default function ExecTable({
                 onClick={() => onSelect(e)}
                 className="cursor-pointer border-b border-slate-100 transition hover:bg-slate-50 last:border-0 dark:border-white/5 dark:hover:bg-white/5"
               >
-                <td className="px-3 py-2.5 font-semibold text-slate-900 dark:text-white">
+                <td className="px-3 py-3 font-semibold text-slate-900 dark:text-white">
                   <span className="flex items-center gap-2">
                     <PersonAvatar name={e.name} photoUrl={e.photoUrl} />
                     {e.name}
                   </span>
                 </td>
-                <td className="px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
+                <td className="px-3 py-3 text-slate-600 dark:text-[#c8bfa8]">
                   {e.currentTitle || "—"}
                 </td>
-                <td className="px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
+                <td className="px-3 py-3 text-slate-600 dark:text-[#c8bfa8]">
                   {e.targetRole || "—"}
                 </td>
-                <td className="px-3 py-2.5">
+                <td className="px-3 py-3">
                   <StageChip stage={e.stage} />
                 </td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-[#c8bfa8]">
-                  {e.owner || <span className="text-slate-400">Unclaimed</span>}
+                <td className="whitespace-nowrap px-3 py-3 text-slate-600 dark:text-[#c8bfa8]">
+                  {e.owner || <span className="text-caption">Unclaimed</span>}
                 </td>
                 <td
-                  className="whitespace-nowrap px-3 py-2.5"
+                  className="whitespace-nowrap px-3 py-3"
                   style={{
                     color: agingColor(
                       Math.floor((Date.now() - new Date(e.updatedAt).getTime()) / 86400000),
@@ -126,7 +126,7 @@ export default function ExecTable({
                 >
                   {fmtDateShort(e.updatedAt)}
                 </td>
-                <td className="px-3 py-2.5">
+                <td className="px-3 py-3">
                   {e.industries && e.industries.length > 0 ? (
                     <span className="flex flex-wrap gap-1">
                       {uniqueStrings(e.industries).map((ind) => (
@@ -137,7 +137,7 @@ export default function ExecTable({
                     <span className="text-xs text-slate-400">—</span>
                   )}
                 </td>
-                <td className="px-3 py-2.5">
+                <td className="px-3 py-3">
                   {paired.length > 0 ? (
                     <span className="flex flex-wrap gap-1">
                       {paired.map((d) => (
@@ -160,7 +160,7 @@ export default function ExecTable({
             <tr>
               <td
                 colSpan={COLUMNS.length + 2}
-                className="px-3 py-8 text-center text-sm text-slate-400 dark:text-white/40"
+                className="px-3 py-10 text-center text-sm text-caption"
               >
                 No candidates match.
               </td>
@@ -177,7 +177,7 @@ export default function ExecTable({
           <div
             key={e.id}
             onClick={() => onSelect(e)}
-            className="cursor-pointer rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm transition active:bg-slate-50 dark:border-white/10 dark:bg-[#132847] dark:active:bg-white/5"
+            className="card-surface card-hover cursor-pointer p-3.5"
           >
             <div className="flex items-start justify-between gap-3">
               <span className="flex min-w-0 items-center gap-2">
@@ -234,7 +234,7 @@ export default function ExecTable({
         );
       })}
       {sorted.length === 0 && (
-        <p className="rounded-xl border border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-400 dark:border-white/10 dark:bg-[#132847] dark:text-white/40">
+        <p className="card-surface px-3 py-10 text-center text-sm text-caption">
           No candidates match.
         </p>
       )}
