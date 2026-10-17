@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   PARTNER_NAMES,
@@ -117,6 +117,20 @@ export default function TaskList({
   const [completedOpen, setCompletedOpen] = useState(false);
   const [notePrompt, setNotePrompt] = useState<Task | null>(null);
   const [noteText, setNoteText] = useState("");
+
+  // Deep link from a reminder notification: /overview?task=<id> expands
+  // that follow-up and scrolls it into view.
+  useEffect(() => {
+    const tid = new URLSearchParams(window.location.search).get("task");
+    if (!tid) return;
+    setExpandedId(tid);
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById(`task-row-${tid}`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const resolveLink = (value: string) => {
     if (presetLink) {
@@ -494,7 +508,7 @@ export default function TaskList({
                       t.dueDate && t.dueDate < today ? diffDays(t.dueDate, today) : 0;
                     const expanded = expandedId === t.id;
                     return (
-                      <li key={t.id} className="py-2.5">
+                      <li key={t.id} id={`task-row-${t.id}`} className="py-2.5">
                         <div className="flex items-start gap-3">
                           <button
                             onClick={() => toggle(t)}

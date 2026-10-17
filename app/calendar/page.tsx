@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
 import type { CalendarEvent } from "@/lib/calendar-db";
@@ -59,12 +59,9 @@ const emptyDraft: Draft = {
 const REMINDER_OPTIONS: { v: string; label: string }[] = [
   { v: "default", label: "Default" },
   { v: "off", label: "Off — no reminder" },
-  { v: "0", label: "At start time" },
   { v: "5", label: "5 minutes before" },
   { v: "15", label: "15 minutes before" },
-  { v: "30", label: "30 minutes before" },
   { v: "60", label: "1 hour before" },
-  { v: "120", label: "2 hours before" },
   { v: "1440", label: "1 day before" },
 ];
 
@@ -754,6 +751,23 @@ export default function CalendarPage() {
     setEditDraft(draftOf(e));
     setEditRemoved([]);
   };
+  // Deep link from a reminder notification: /calendar?event=<id> opens
+  // that event's editor once it has loaded.
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (deepLinked.current || events.length === 0) return;
+    const id = new URLSearchParams(window.location.search).get("event");
+    if (!id) {
+      deepLinked.current = true;
+      return;
+    }
+    const hit = events.find((e) => e.eventId === id);
+    if (hit) {
+      deepLinked.current = true;
+      openInList(hit);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
   const startNewOn = (dateISO: string) => {
     setDraft({ ...emptyDraft, date: dateISO });
     setShowNew(true);
