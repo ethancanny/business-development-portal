@@ -2,6 +2,7 @@ import {
   clearMsTokens,
   deleteCalendarEvent,
   getCalendarEventById,
+  getCalendarEvents,
   getMsState,
   getMsTokens,
   importCalendarEvents,
@@ -359,6 +360,8 @@ export interface EventDraft {
   startsAt: string; // ISO with -07:00 offset
   endsAt: string;
   location: string;
+  description?: string; // event body (plain text)
+  allDay?: boolean; // Graph all-day event (start/end at Phoenix midnights)
   attendeeEmails?: string[]; // create: full attendee list (emails)
 }
 
@@ -385,6 +388,10 @@ function graphBody(
     end: { dateTime: strip(d.endsAt || d.startsAt), timeZone: TZ },
     location: { displayName: d.location ?? "" },
   };
+  if (d.allDay) body.isAllDay = true;
+  if (d.description !== undefined) {
+    body.body = { contentType: "text", content: d.description };
+  }
   if (attendees !== undefined) body.attendees = attendees;
   return body;
 }
@@ -448,43 +455,180 @@ export async function deleteGraphEvent(eventId: string): Promise<void> {
   await deleteCalendarEvent(eventId);
 }
 
-/** Pipeline → calendar: a new dated follow-up creates an Outlook event. */
+/* ---------------- Follow-up ⇄ calendar sync ----------------
+ * Storage convention (Ethan, Oct 16, 2026): a follow-up's dueDate is an
+ * America/Phoenix calendar date ("YYYY-MM-DD") and its dueTime a Phoenix
+ * wall-clock "HH:MM" (null = all-day). Phoenix never observes DST, so
+ * instants are built with the fixed -07:00 offset the rest of this module
+ * uses. Timed events run 30 minutes (the integration's standing default).
+ * COMPLETE convention: completing a follow-up REMOVES its calendar event;
+ * reopening recreates it. Deleting a follow-up removes it too. */
+
+export interface TaskEventSyncInput {
+  title: string;
+  dueDate: string; // YYYY-MM-DD or ""
+  dueTime: string | null; // "HH:MM" or null (all-day)
+  type?: string;
+  notes?: string;
+  done: boolean;
+  relatedKind: "deal" | "executive" | null;
+  relatedId: string | null;
+  relatedName: string;
+  calendarEventId: string | null;
+}
+
+function phxDatePlus(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T12:00:00-07:00`);
+  d.setTime(d.getTime() + days * 86400000);
+  return d.toLocaleDateString("en-CA", { timeZone: TZ });
+}
+
+function phxInstantPlusMinutes(iso: string, minutes: number): string {
+  const d = new Date(iso);
+  d.setTime(d.getTime() + minutes * 60000);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const p: Record<string, string> = {};
+  for (const part of parts) p[part.type] = part.value;
+  const hour = p.hour === "24" ? "00" : p.hour;
+  return `${p.year}-${p.month}-${p.day}T${hour}:${p.minute}:${p.second}-07:00`;
+}
+
+function taskEventDraft(task: TaskEventSyncInput): EventDraft {
+  const desc: string[] = [];
+  if (task.notes && task.notes.trim()) desc.push(task.notes.trim());
+  if (task.relatedName) desc.push(`Linked account: ${task.relatedName}`);
+  desc.push(
+    `Follow-up${task.type ? ` · ${task.type}` : ""} — Canny Capital Partners portal`
+  );
+  if (task.dueTime) {
+    const startsAt = `${task.dueDate}T${task.dueTime}:00-07:00`;
+    return {
+      title: task.title,
+      startsAt,
+      endsAt: phxInstantPlusMinutes(startsAt, 30),
+      location: "",
+      description: desc.join("\n"),
+    };
+  }
+  // All-day: Graph convention is midnight → next midnight (end exclusive).
+  return {
+    title: task.title,
+    startsAt: `${task.dueDate}T00:00:00-07:00`,
+    endsAt: `${phxDatePlus(task.dueDate, 1)}T00:00:00-07:00`,
+    location: "",
+    description: desc.join("\n"),
+    allDay: true,
+  };
+}
+
+/**
+ * Reconcile a follow-up with its calendar event and return the event id the
+ * task should carry afterward (null when no event should exist). Best-effort
+ * by design: when Microsoft is unreachable the previous id is returned
+ * unchanged so a later sync can finish the job — task and calendar never
+ * silently drift. Legacy events (created before calendar_event_id existed,
+ * at 9:00 AM by the bridge or the old create path) are adopted by matching
+ * title + due date in the local mirror instead of duplicated.
+ */
+export async function syncTaskEvent(
+  task: TaskEventSyncInput
+): Promise<string | null> {
+  const prevId = task.calendarEventId || null;
+
+  // Done or undated: no event should exist.
+  if (task.done || !task.dueDate) {
+    if (!prevId) return null;
+    if (!(await msConnected())) return prevId;
+    try {
+      await deleteGraphEvent(prevId);
+      return null;
+    } catch {
+      return prevId;
+    }
+  }
+
+  if (!(await msConnected())) return prevId;
+  const draft = taskEventDraft(task);
+
+  if (prevId) {
+    try {
+      await updateGraphEvent(prevId, draft);
+      return prevId;
+    } catch {
+      /* event vanished upstream — recreate below */
+    }
+  } else {
+    // Adopt a pre-existing mirror event for this follow-up (legacy 9 AM
+    // bridge events carry the task's exact title on its due date).
+    try {
+      const day = await getCalendarEvents(
+        `${task.dueDate}T00:00:00-07:00`,
+        `${phxDatePlus(task.dueDate, 1)}T00:00:00-07:00`
+      );
+      const hit = day.find((e) => e.title === task.title);
+      if (hit) {
+        await updateGraphEvent(hit.eventId, draft);
+        return hit.eventId;
+      }
+    } catch {
+      /* adoption is an optimization — creation below still applies */
+    }
+  }
+
+  const ev = await createGraphEvent(draft);
+  if (!ev) return prevId;
+
+  // A genuinely new event for a linked follow-up keeps the standing
+  // behavior: a dated note on the account's profile.
+  if (task.relatedKind && task.relatedId) {
+    const execs = await getExecutives();
+    const deals = await getDeals();
+    const hit =
+      task.relatedKind === "executive"
+        ? execs.find((e) => e.id === task.relatedId)
+        : deals.find((d) => d.id === task.relatedId);
+    if (hit) {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: TZ });
+      const when = task.dueTime
+        ? `${task.dueDate} ${task.dueTime}`
+        : `${task.dueDate} (all day)`;
+      await appendProfileNote(
+        task.relatedKind,
+        task.relatedId,
+        `[${today}] 📅 Calendar event created from follow-up "${task.title}" — ${when}. Auto-logged from the portal.`
+      );
+    }
+  }
+  return ev.eventId;
+}
+
+/** Back-compat wrapper: a new dated follow-up creates its Outlook event. */
 export async function createEventFromTask(task: {
   title: string;
   dueDate: string;
   relatedKind: "deal" | "executive" | null;
   relatedId: string | null;
 }): Promise<boolean> {
-  if (!(await msConnected())) return false;
-  const execs = await getExecutives();
-  const deals = await getDeals();
-  let target: { kind: "executive" | "deal"; obj: Executive | Deal } | null = null;
-  if (task.relatedKind === "executive" && task.relatedId) {
-    const hit = execs.find((e) => e.id === task.relatedId);
-    if (hit) target = { kind: "executive", obj: hit };
-  } else if (task.relatedKind === "deal" && task.relatedId) {
-    const hit = deals.find((d) => d.id === task.relatedId);
-    if (hit) target = { kind: "deal", obj: hit };
-  }
-  if (!target) {
-    const m = matchProfile(task.title, execs, deals);
-    if (m) target = m;
-  }
-  if (!target) return false;
-  const ev = await createGraphEvent({
+  const id = await syncTaskEvent({
     title: task.title,
-    startsAt: `${task.dueDate}T09:00:00-07:00`,
-    endsAt: `${task.dueDate}T09:30:00-07:00`,
-    location: "",
+    dueDate: task.dueDate,
+    dueTime: null,
+    done: false,
+    relatedKind: task.relatedKind,
+    relatedId: task.relatedId,
+    relatedName: "",
+    calendarEventId: null,
   });
-  if (!ev) return false;
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: TZ });
-  await appendProfileNote(
-    target.kind,
-    target.obj.id,
-    `[${today}] 📅 Calendar event created from follow-up "${task.title}" — ${task.dueDate} 9:00 AM. Auto-logged from the portal.`
-  );
-  return true;
+  return id !== null;
 }
 
 /* ---------------- Webhook subscription ---------------- */

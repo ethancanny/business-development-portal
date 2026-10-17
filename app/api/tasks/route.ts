@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTasks, saveTasks, newId, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
-import type { Task } from "@/lib/types";
+import type { Task, TaskType } from "@/lib/types";
+
+const TASK_TYPES: TaskType[] = ["Call", "Email", "Meeting", "Send docs", "Other"];
+
+function parseDueTime(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const m = v.trim().match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return m ? `${m[1]}:${m[2]}` : null;
+}
+
+function parseTaskType(v: unknown): TaskType {
+  return TASK_TYPES.includes(v as TaskType) ? (v as TaskType) : "Call";
+}
 
 export async function GET() {
   if (!getSessionUser()) {
@@ -12,7 +24,9 @@ export async function GET() {
     if (a.done !== b.done) return a.done ? 1 : -1;
     const da = a.dueDate || "9999-12-31";
     const db = b.dueDate || "9999-12-31";
-    return da.localeCompare(db);
+    if (da !== db) return da.localeCompare(db);
+    // All-day (no time) first, then timed in order.
+    return (a.dueTime ?? "").localeCompare(b.dueTime ?? "");
   });
   return NextResponse.json(tasks);
 }
@@ -38,11 +52,17 @@ export async function POST(req: NextRequest) {
     id: newId(),
     title: String(body.title).trim(),
     dueDate: String(body.dueDate ?? "").trim(),
+    dueTime: parseDueTime(body.dueTime),
+    type: parseTaskType(body.type),
+    priority: body.priority === "high" ? "high" : "normal",
+    notes: String(body.notes ?? "").trim(),
     done: false,
+    completedAt: null,
     owner: String(body.owner ?? "").trim(),
     relatedKind,
     relatedId: relatedKind ? String(body.relatedId ?? "") || null : null,
     relatedName: String(body.relatedName ?? "").trim(),
+    calendarEventId: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -62,18 +82,20 @@ export async function POST(req: NextRequest) {
     execName:
       task.relatedKind === "executive" ? task.relatedName || null : null,
   });
-  // Real-time bridge (Ethan, Oct 9, 2026): a dated follow-up linked to a
-  // profile also creates the Outlook event immediately via Graph.
+  // Calendar sync via the existing Graph integration (Ethan, Oct 9, 2026;
+  // extended Oct 16, 2026): every dated follow-up gets a matching Outlook
+  // event — timed at its time, all-day when no time is set — and the task
+  // records the event id so later edits/completion/deletion reconcile.
   // Best-effort — never fail task creation because Microsoft is unreachable.
   if (task.dueDate) {
     try {
-      const { createEventFromTask } = await import("@/lib/microsoft");
-      await createEventFromTask({
-        title: task.title,
-        dueDate: task.dueDate,
-        relatedKind: task.relatedKind,
-        relatedId: task.relatedId,
-      });
+      const { syncTaskEvent } = await import("@/lib/microsoft");
+      const eventId = await syncTaskEvent(task);
+      if (eventId !== task.calendarEventId) {
+        task.calendarEventId = eventId;
+        task.updatedAt = new Date().toISOString();
+        await saveTasks(tasks);
+      }
     } catch {
       /* the watchdog pull remains as the safety net */
     }

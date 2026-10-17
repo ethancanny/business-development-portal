@@ -1,14 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTasks, saveTasks, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
+import type { Task, TaskType } from "@/lib/types";
 
 type Params = { params: { id: string } };
+
+const TASK_TYPES: TaskType[] = ["Call", "Email", "Meeting", "Send docs", "Other"];
+
+function parseDueTime(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const m = v.trim().match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return m ? `${m[1]}:${m[2]}` : null;
+}
 
 function unauthorized() {
   if (!getSessionUser()) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   return null;
+}
+
+/** Reconcile the task's Outlook event after any mutation (best-effort). */
+async function syncCalendar(task: Task, tasks: Task[]): Promise<void> {
+  try {
+    const { syncTaskEvent } = await import("@/lib/microsoft");
+    const eventId = await syncTaskEvent(task);
+    if (eventId !== task.calendarEventId) {
+      task.calendarEventId = eventId;
+      task.updatedAt = new Date().toISOString();
+      await saveTasks(tasks);
+    }
+  } catch {
+    /* the watchdog pull remains as the safety net */
+  }
 }
 
 export async function PUT(req: NextRequest, { params }: Params) {
@@ -22,14 +46,53 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   const prev = tasks[idx];
-  const updated = {
+  const now = new Date().toISOString();
+  const done =
+    body.done !== undefined ? Boolean(body.done) : prev.done;
+
+  // Re-linking: accept a full related triple, or clear it with relatedKind null.
+  let relatedKind = prev.relatedKind;
+  let relatedId = prev.relatedId;
+  let relatedName = prev.relatedName;
+  if (body.relatedKind !== undefined) {
+    if (body.relatedKind === "deal" || body.relatedKind === "executive") {
+      relatedKind = body.relatedKind;
+      relatedId = String(body.relatedId ?? "") || null;
+      relatedName = String(body.relatedName ?? "").trim();
+    } else {
+      relatedKind = null;
+      relatedId = null;
+      relatedName = "";
+    }
+  }
+
+  const updated: Task = {
     ...prev,
     title: body.title !== undefined ? String(body.title).trim() : prev.title,
     dueDate:
       body.dueDate !== undefined ? String(body.dueDate).trim() : prev.dueDate,
-    done: body.done !== undefined ? Boolean(body.done) : prev.done,
+    dueTime:
+      body.dueTime !== undefined ? parseDueTime(body.dueTime) : prev.dueTime,
+    type:
+      body.type !== undefined
+        ? TASK_TYPES.includes(body.type)
+          ? (body.type as TaskType)
+          : prev.type
+        : prev.type,
+    priority:
+      body.priority !== undefined
+        ? body.priority === "high"
+          ? "high"
+          : "normal"
+        : prev.priority,
+    notes: body.notes !== undefined ? String(body.notes) : prev.notes,
+    done,
+    completedAt: done ? (prev.done ? prev.completedAt : now) : null,
     owner: body.owner !== undefined ? String(body.owner).trim() : prev.owner,
-    updatedAt: new Date().toISOString(),
+    relatedKind,
+    relatedId,
+    relatedName,
+    updatedAt: now,
   };
   if (!updated.title) {
     return NextResponse.json({ error: "title is required" }, { status: 400 });
@@ -57,6 +120,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
           : null,
     });
   }
+
+  // Calendar follows the follow-up: reschedule/snooze moves the event,
+  // completing removes it, reopening recreates it.
+  await syncCalendar(updated, tasks);
   return NextResponse.json(updated);
 }
 
@@ -69,6 +136,16 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   const [removed] = tasks.splice(idx, 1);
+  // Remove the synced calendar event first (best-effort) so the two
+  // never drift apart.
+  if (removed.calendarEventId) {
+    try {
+      const { deleteGraphEvent } = await import("@/lib/microsoft");
+      await deleteGraphEvent(removed.calendarEventId);
+    } catch {
+      /* the watchdog pull remains as the safety net */
+    }
+  }
   await saveTasks(tasks);
   const user = getSessionUser();
   await logActivity({
