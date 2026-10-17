@@ -834,7 +834,14 @@ export async function rescoreAllCandidates(actor: string): Promise<RescoreResult
       });
     }
   }
-  needed.sort((a, b) => b.sizeRank - a.sizeRank || a.name.localeCompare(b.name));
+  // Pipeline deals surface first (they are the actionable gaps), then
+  // companies by size evidence — the biggest uncovered targets first.
+  needed.sort(
+    (a, b) =>
+      (a.type === "deal" ? 0 : 1) - (b.type === "deal" ? 0 : 1) ||
+      b.sizeRank - a.sizeRank ||
+      a.name.localeCompare(b.name)
+  );
   const state: MatchState = {
     computedAt: now,
     strongThreshold: OPERATOR_MATCH_STRONG,
