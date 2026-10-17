@@ -26,6 +26,7 @@ import { ingestIntelNews } from "./news-ingest";
 import { ingestCiPermits } from "./permits-ingest";
 import { ingestHospitality } from "./hospitality-ingest";
 import { ingestAdhs } from "./adhs-ingest";
+import { runTransitionSignalsPass } from "./signals";
 import { classifyIndustry, INDUSTRY_KEYWORDS, kwMatch } from "./industry-classify";
 
 /* ---------------- FRED indicators ---------------- */
@@ -2051,7 +2052,7 @@ export async function ingestSusbSizes(): Promise<number> {
   return total;
 }
 
-export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "permits_ci" | "sector_counts" | "commodity_spot" | "susb_sizes" | "intel_news" | "hospitality" | "adhs" | "all";
+export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "permits_ci" | "sector_counts" | "commodity_spot" | "susb_sizes" | "intel_news" | "hospitality" | "adhs" | "signals" | "all";
 
 export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -2076,6 +2077,9 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["intel_news", ingestIntelNews],
     ["hospitality", ingestHospitality],
     ["adhs", ingestAdhs],
+    // Phase 4 transition signals run LAST: the pass diffs the ADHS
+    // register and hospitality spine the steps above just refreshed.
+    ["signals", async () => (await runTransitionSignalsPass()).added],
   ];
   for (const [name, fn] of jobs) {
     if (source !== "all" && source !== name) continue;
