@@ -2,8 +2,14 @@
  * One consistent line-icon set for the mobile shell (CRM mobile polish,
  * Oct 14 2026). lucide-react is not a dependency, so these are inline
  * SVGs in the Lucide style: 24×24 viewBox, stroke = currentColor,
- * strokeWidth 1.8, round caps/joins, no fill. Path data follows the
- * Lucide icon set (ISC licensed).
+ * strokeWidth 1.75 (visual polish, Oct 17, 2026 — spec §1), round
+ * caps/joins, no fill. Path data follows the Lucide icon set
+ * (ISC licensed).
+ *
+ * The *Filled variants below are the active-tab forms (spec §1):
+ * the same glyphs as solid silhouettes. The Activity pulse has no
+ * clean solid silhouette in the Lucide set, so its filled variant
+ * is the same path at a heavier 2.75 stroke weight.
  */
 
 interface IconProps {
@@ -17,13 +23,97 @@ function base(className: string | undefined, children: React.ReactNode) {
       className={className ?? "h-6 w-6"}
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
     >
       {children}
     </svg>
+  );
+}
+
+function baseFilled(
+  className: string | undefined,
+  children: React.ReactNode,
+  strokeWidth?: number
+) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className ?? "h-6 w-6"}
+      fill="currentColor"
+      stroke={strokeWidth ? "currentColor" : "none"}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+export function IconOverviewFilled({ className }: IconProps) {
+  return baseFilled(
+    className,
+    <>
+      <rect width="7" height="7" x="3" y="3" rx="1.5" />
+      <rect width="7" height="7" x="14" y="3" rx="1.5" />
+      <rect width="7" height="7" x="14" y="14" rx="1.5" />
+      <rect width="7" height="7" x="3" y="14" rx="1.5" />
+    </>
+  );
+}
+
+export function IconPipelineFilled({ className }: IconProps) {
+  return baseFilled(
+    className,
+    <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+  );
+}
+
+export function IconActivityFilled({ className }: IconProps) {
+  // No solid Lucide silhouette for the pulse — heavier stroke form.
+  return baseFilled(
+    className,
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" fill="none" />,
+    2.75
+  );
+}
+
+export function IconMarketIntelFilled({ className }: IconProps) {
+  // Solid bars rising left→right (the filled form of the chart glyph).
+  return baseFilled(
+    className,
+    <>
+      <rect x="4" y="12" width="4" height="8" rx="1" />
+      <rect x="10" y="8" width="4" height="12" rx="1" />
+      <rect x="16" y="4" width="4" height="16" rx="1" />
+    </>
+  );
+}
+
+export function IconDirectoryFilled({ className }: IconProps) {
+  return baseFilled(
+    className,
+    <>
+      <circle cx="9" cy="7" r="4" />
+      <path d="M2 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
+      <path d="M17.5 3.6a4 4 0 0 1 0 6.8" />
+      <path d="M19.5 15.4a4 4 0 0 1 2.5 3.6v2h-3v-2a4 4 0 0 0-1.5-3.6z" />
+    </>
+  );
+}
+
+export function IconMoreFilled({ className }: IconProps) {
+  return baseFilled(
+    className,
+    <>
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="19" cy="12" r="2" />
+    </>
   );
 }
 

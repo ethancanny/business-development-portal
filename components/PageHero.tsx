@@ -58,13 +58,13 @@ export default function PageHero({ eyebrow, title, subtitle }: PageHeroProps) {
       <div className="absolute inset-0 hidden bg-gradient-to-t from-[#040b1a]/50 via-transparent to-transparent dark:block" />
       <div className="relative mx-auto flex h-full max-w-[1400px] flex-col justify-center px-4 sm:px-6">
         {eyebrow && !collapsed && (
-          <p className="hidden text-[11px] font-semibold uppercase tracking-[0.25em] text-[#d4b37a] sm:block">
+          <p className="hidden text-[11px] font-semibold uppercase tracking-label text-[#d4b37a] sm:block">
             {eyebrow}
           </p>
         )}
         <h2
-          className={`mt-1 font-bold text-white ${
-            collapsed ? "text-lg" : "text-2xl sm:text-3xl"
+          className={`mt-1 font-display font-semibold text-white ${
+            collapsed ? "text-xl" : "text-3xl sm:text-4xl"
           }`}
         >
           {title}

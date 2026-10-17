@@ -96,16 +96,17 @@ export default function Fab() {
         />
       )}
       <div
-        className={`fab-root fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-4 z-50 flex flex-col items-end gap-2 md:bottom-6 md:right-6 ${
+        className={`fab-root fixed bottom-[calc(94px+env(safe-area-inset-bottom))] right-4 z-50 flex flex-col items-end gap-2 md:bottom-6 md:right-6 ${
           tucked ? "pointer-events-none translate-y-24 opacity-0" : ""
         }`}
       >
         {open &&
-          ACTIONS.map((a) => (
+          ACTIONS.map((a, i) => (
             <button
               key={a.label}
               onClick={() => go(a.href)}
-              className="flex min-h-[44px] items-center gap-2.5 rounded-full bg-white py-2.5 pl-4 pr-5 text-sm font-semibold text-[#0d1f3c] shadow-xl transition hover:bg-slate-50 dark:bg-[#1a3358] dark:text-white dark:hover:bg-[#24436f]"
+              style={{ transitionDelay: `${i * 35}ms` }}
+              className="toast-in flex min-h-[44px] items-center gap-2.5 rounded-full bg-white py-2.5 pl-4 pr-5 text-sm font-semibold text-[#0d1f3c] shadow-pop ring-1 ring-navy-900/[0.06] transition hover:bg-slate-50 active:scale-95 dark:bg-[#1a3358] dark:text-white dark:ring-white/10 dark:hover:bg-[#24436f]"
             >
               <span className="text-[#b8975a]">
                 <a.Icon className="h-5 w-5" />
@@ -117,7 +118,7 @@ export default function Fab() {
           onClick={() => setOpen((o) => !o)}
           aria-label={open ? "Close quick actions" : "Quick actions"}
           aria-expanded={open}
-          className="flex h-12 w-12 items-center justify-center rounded-full bg-[#b8975a] text-[#0d1f3c] shadow-2xl transition hover:bg-[#d4b37a]"
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-gold-gradient text-[#0d1f3c] shadow-fab transition duration-200 hover:brightness-105 active:scale-95"
         >
           <span className={`block transition-transform duration-200 ${open ? "rotate-45" : ""}`}>
             <IconPlus className="h-6 w-6" />

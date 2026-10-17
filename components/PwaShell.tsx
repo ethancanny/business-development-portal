@@ -347,11 +347,10 @@ export default function PwaShell() {
   if (onLogin) return null;
 
   const bannerCls =
-    "fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-50 mx-auto max-w-md rounded-xl border border-[#b8975a]/50 bg-[#0d1f3c] px-4 py-3 shadow-2xl md:bottom-4";
-  const btnCls =
-    "min-h-[44px] rounded-lg bg-[#b8975a] px-3 py-2 text-sm font-semibold text-[#0d1f3c] transition hover:bg-[#d4b37a]";
+    "fixed inset-x-3 bottom-[calc(94px+env(safe-area-inset-bottom))] z-50 mx-auto max-w-md rounded-xl border border-[#b8975a]/50 bg-[#0d1f3c] px-4 py-3 shadow-pop md:bottom-4";
+  const btnCls = "btn btn-accent px-4";
   const ghostCls =
-    "min-h-[44px] rounded-lg px-3 py-2 text-sm font-medium text-[#c8bfa8] transition hover:text-white";
+    "min-h-[44px] rounded-xl px-3 py-2 text-sm font-medium text-[#c8bfa8] transition hover:text-white";
 
   return (
     <>

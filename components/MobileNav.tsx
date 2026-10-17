@@ -1,66 +1,87 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "@/components/ThemeProvider";
 import {
   IconActivity,
+  IconActivityFilled,
   IconAuditTrail,
   IconCalendar,
   IconClose,
   IconDirectory,
+  IconDirectoryFilled,
   IconLogOut,
   IconMarketIntel,
+  IconMarketIntelFilled,
   IconMoon,
   IconMore,
+  IconMoreFilled,
   IconOverview,
+  IconOverviewFilled,
   IconPipeline,
+  IconPipelineFilled,
   IconSettings,
   IconSun,
 } from "@/components/icons";
 
 /**
  * Mobile bottom tab bar + "More" sheet (CRM Phase 2; polished Oct 14,
- * 2026 per Ethan's mobile spec §3–§4). Phones only (md:hidden).
+ * 2026 per Ethan's mobile spec §3–§4; visual polish Oct 17, 2026 —
+ * Ethan's premium spec §1). Phones only (md:hidden).
  *
- * Tab bar: 64px + home-bar safe area, surface one step lighter than
- * the page (white in day mode, #16305a at night) at 95% opacity with
- * backdrop blur, a muted-gold top border and a soft upward shadow.
- * Active tab is gold with a pill indicator above the icon; inactive
- * labels are slate-600 (day) / #c3cede (night) — both ≥4.5:1 on the
- * bar surface. The bar slides away while the keyboard is open (the
- * `kb-open` class on <html>, driven by a visualViewport heuristic and
- * styled in globals.css).
+ * Tab bar: a FLOATING rounded container (24px radius) inset 12px
+ * from the screen edges and 12px above the home-bar safe area —
+ * translucent surface with backdrop blur and the token nav shadow
+ * (shadow-nav), never a flat full-width strip. The active tab sits
+ * on a navy pill that SLIDES between tabs (250ms ease-out, measured
+ * from the tab's own box) with a filled icon variant in gold and a
+ * white label; the old thin gold bar above the tab is gone. Inactive
+ * tabs are muted slate, labels 11px medium, every tab a ≥44px
+ * target. Tab changes fire a light haptic (guarded). Attention
+ * badges ride the SAME server computation as the app-icon badge
+ * (GET /api/push/badge → lib/badge): due/overdue follow-ups count
+ * on Overview, unread Activity items on Activity — never a local
+ * count. "Market Intel" is labeled "Intel" (label text only; the
+ * route is unchanged). The bar slides away while the keyboard is
+ * open (`kb-open` on <html>, styled in globals.css).
  *
- * More sheet: sits above the tab bar (the bar stays visible and its
- * More tab reads active), backdrop dims only the area above the bar,
- * and it closes on X, backdrop tap, swipe-down, More-tab toggle,
- * browser back (a pushed history state), and choosing an item.
- * Bottom page clearance is handled by layout's `.page-pad`.
+ * More sheet: sits above the floating bar (the bar stays visible
+ * and its More tab reads active via the slid pill), backdrop dims
+ * only the area above the bar, and it closes on X, backdrop tap,
+ * swipe-down, More-tab toggle, browser back (a pushed history
+ * state), and choosing an item. Bottom page clearance is handled
+ * by layout's `.page-pad`.
  */
+
+type IconFn = (p: { className?: string }) => React.ReactNode;
 
 const TABS: {
   href: string;
   label: string;
-  Icon: (p: { className?: string }) => React.ReactNode;
+  Icon: IconFn;
+  IconFilled: IconFn;
+  badgeKey?: "dueFollowups" | "unreadNotifications";
 }[] = [
-  { href: "/overview", label: "Overview", Icon: IconOverview },
-  { href: "/pipeline", label: "Pipeline", Icon: IconPipeline },
-  { href: "/activity", label: "Activity", Icon: IconActivity },
-  { href: "/market-intel", label: "Market Intel", Icon: IconMarketIntel },
-  { href: "/directory", label: "Directory", Icon: IconDirectory },
+  { href: "/overview", label: "Overview", Icon: IconOverview, IconFilled: IconOverviewFilled, badgeKey: "dueFollowups" },
+  { href: "/pipeline", label: "Pipeline", Icon: IconPipeline, IconFilled: IconPipelineFilled },
+  { href: "/activity", label: "Activity", Icon: IconActivity, IconFilled: IconActivityFilled, badgeKey: "unreadNotifications" },
+  { href: "/market-intel", label: "Intel", Icon: IconMarketIntel, IconFilled: IconMarketIntelFilled },
+  { href: "/directory", label: "Directory", Icon: IconDirectory, IconFilled: IconDirectoryFilled },
 ];
 
 const MORE_LINKS: {
   href: string;
   label: string;
-  Icon: (p: { className?: string }) => React.ReactNode;
+  Icon: IconFn;
 }[] = [
   { href: "/calendar", label: "Calendar", Icon: IconCalendar },
   { href: "/audit-trail", label: "Audit Trail", Icon: IconAuditTrail },
   { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
+
+const MORE_INDEX = TABS.length; // the More button is the 6th slot
 
 export default function MobileNav() {
   const pathname = usePathname();
@@ -68,11 +89,83 @@ export default function MobileNav() {
   const { theme, toggle } = useTheme();
   const [moreOpen, setMoreOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [badge, setBadge] = useState<{ dueFollowups: number; unreadNotifications: number }>({
+    dueFollowups: 0,
+    unreadNotifications: 0,
+  });
   const pushedRef = useRef(false);
   const touchYRef = useRef<number | null>(null);
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const tabRefs = useRef<(HTMLElement | null)[]>([]);
+  const [pill, setPill] = useState<{ x: number; w: number } | null>(null);
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(href + "/");
+
+  const moreRouteActive = MORE_LINKS.some((l) => isActive(l.href));
+  const activeIndex = moreOpen
+    ? MORE_INDEX
+    : (() => {
+        const i = TABS.findIndex((t) => isActive(t.href));
+        if (i >= 0) return i;
+        return moreRouteActive ? MORE_INDEX : -1;
+      })();
+
+  /* --- attention badge: the app badge's own server numbers --- */
+  const fetchBadge = useCallback(async () => {
+    try {
+      const r = await fetch("/api/push/badge");
+      if (!r.ok) return;
+      const d = await r.json().catch(() => null);
+      if (d && typeof d.dueFollowups === "number" && typeof d.unreadNotifications === "number") {
+        setBadge({
+          dueFollowups: d.dueFollowups,
+          unreadNotifications: d.unreadNotifications,
+        });
+      }
+    } catch {
+      /* badge is best-effort */
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchBadge();
+    const onForeground = () => fetchBadge();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchBadge();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onForeground);
+    window.addEventListener("ccp:badge-refresh", onForeground);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onForeground);
+      window.removeEventListener("ccp:badge-refresh", onForeground);
+    };
+  }, [fetchBadge, pathname]);
+
+  /* --- sliding pill: measure the active tab's box --- */
+  const measurePill = useCallback(() => {
+    const el = activeIndex >= 0 ? tabRefs.current[activeIndex] : null;
+    if (!el) {
+      setPill(null);
+      return;
+    }
+    setPill({ x: el.offsetLeft, w: el.offsetWidth });
+  }, [activeIndex]);
+
+  useLayoutEffect(() => {
+    measurePill();
+  }, [measurePill, pathname, moreOpen]);
+
+  useEffect(() => {
+    window.addEventListener("resize", measurePill);
+    const t = window.setTimeout(measurePill, 350); // after font swap settles
+    return () => {
+      window.removeEventListener("resize", measurePill);
+      window.clearTimeout(t);
+    };
+  }, [measurePill]);
 
   /* --- hide the bar while the keyboard is open (§3) --- */
   useEffect(() => {
@@ -160,6 +253,14 @@ export default function MobileNav() {
     }
   };
 
+  const haptic = () => {
+    try {
+      window.navigator.vibrate?.(10);
+    } catch {
+      /* haptics are best-effort */
+    }
+  };
+
   const rowCls = (active: boolean) =>
     `relative flex h-14 w-full items-center gap-3 px-4 text-left text-sm transition hover:bg-black/5 dark:hover:bg-white/10 ${
       active
@@ -167,46 +268,92 @@ export default function MobileNav() {
         : "font-medium text-slate-700 dark:text-[#e8dfc8]"
     }`;
 
+  const tabInner = (
+    active: boolean,
+    Icon: IconFn,
+    IconFilled: IconFn,
+    label: string,
+    badgeCount: number
+  ) => {
+    const Shown = active ? IconFilled : Icon;
+    return (
+      <>
+        <span className="relative">
+          <Shown
+            className={`h-6 w-6 transition-colors duration-200 ${
+              active
+                ? "text-gold-400"
+                : "text-slate-500 dark:text-[#c3cede]"
+            }`}
+          />
+          {badgeCount > 0 && (
+            <span className="absolute -right-2.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white dark:ring-navy-700">
+              {badgeCount > 9 ? "9+" : badgeCount}
+            </span>
+          )}
+        </span>
+        <span
+          className={`text-[11px] leading-none transition-colors duration-200 ${
+            active
+              ? "font-semibold text-white"
+              : "font-medium text-slate-600 dark:text-[#c3cede]"
+          }`}
+        >
+          {label}
+        </span>
+      </>
+    );
+  };
+
   return (
     <>
       <nav
         aria-label="Primary"
-        className="mobile-tabbar pl-safe pr-safe fixed inset-x-0 bottom-0 z-40 border-t border-[#b8975a]/55 bg-white/95 shadow-[0_-4px_16px_rgba(0,0,0,0.12)] backdrop-blur dark:bg-[#16305a]/95 md:hidden"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        className="mobile-tabbar fixed inset-x-3 bottom-[calc(12px+env(safe-area-inset-bottom))] z-40 rounded-nav border border-navy-900/[0.07] bg-white/85 shadow-nav backdrop-blur-xl dark:border-white/10 dark:bg-navy-700/85 md:hidden"
       >
-        <div className="flex h-16">
-          {TABS.map((t) => {
-            const active = isActive(t.href);
+        <div ref={barRef} className="relative flex h-16 px-1.5">
+          {pill && activeIndex >= 0 && (
+            <span
+              aria-hidden
+              className="absolute left-0 top-1/2 h-12 rounded-full bg-navy-900 shadow-card transition-all duration-pill ease-out-expo dark:bg-navy-950 dark:ring-1 dark:ring-white/15"
+              style={{
+                width: pill.w,
+                transform: `translate(${pill.x}px, -50%)`,
+              }}
+            />
+          )}
+          {TABS.map((t, i) => {
+            const active = activeIndex === i;
+            const badgeCount = t.badgeKey ? badge[t.badgeKey] : 0;
             return (
               <Link
                 key={t.href}
                 href={t.href}
+                ref={(el) => {
+                  tabRefs.current[i] = el;
+                }}
+                onClick={haptic}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 ${
-                  active ? "text-[#b8975a]" : "text-slate-600 dark:text-[#c3cede]"
-                }`}
+                className="relative z-10 flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 rounded-full"
               >
-                {active && (
-                  <span className="absolute left-1/2 top-1.5 h-1 w-6 -translate-x-1/2 rounded-full bg-[#b8975a]" />
-                )}
-                <t.Icon className="h-6 w-6" />
-                <span className="text-[11px] font-semibold leading-none">{t.label}</span>
+                {tabInner(active, t.Icon, t.IconFilled, t.label, badgeCount)}
               </Link>
             );
           })}
           <button
-            onClick={() => (moreOpen ? closeSheet() : openSheet())}
+            ref={(el) => {
+              tabRefs.current[MORE_INDEX] = el;
+            }}
+            onClick={() => {
+              haptic();
+              if (moreOpen) closeSheet();
+              else openSheet();
+            }}
             aria-label="More"
             aria-expanded={moreOpen}
-            className={`relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 ${
-              moreOpen ? "text-[#b8975a]" : "text-slate-600 dark:text-[#c3cede]"
-            }`}
+            className="relative z-10 flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 rounded-full"
           >
-            {moreOpen && (
-              <span className="absolute left-1/2 top-1.5 h-1 w-6 -translate-x-1/2 rounded-full bg-[#b8975a]" />
-            )}
-            <IconMore className="h-6 w-6" />
-            <span className="text-[11px] font-semibold leading-none">More</span>
+            {tabInner(activeIndex === MORE_INDEX, IconMore, IconMoreFilled, "More", 0)}
           </button>
         </div>
       </nav>
@@ -214,7 +361,7 @@ export default function MobileNav() {
       {moreOpen && (
         <div
           className="fixed inset-x-0 top-0 z-50 md:hidden"
-          style={{ bottom: "calc(64px + env(safe-area-inset-bottom))" }}
+          style={{ bottom: "calc(92px + env(safe-area-inset-bottom))" }}
           role="dialog"
           aria-label="More"
         >
@@ -224,13 +371,13 @@ export default function MobileNav() {
             onClick={closeSheet}
           />
           <div
-            className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-black/10 bg-[#f7f4ec] shadow-2xl dark:border-white/10 dark:bg-[#1d3a66]"
+            className="toast-in absolute inset-x-3 bottom-0 rounded-3xl border border-black/10 bg-[#f7f4ec] shadow-pop dark:border-white/10 dark:bg-[#1d3a66]"
             onTouchStart={onTouchStart}
             onTouchMove={onTouchMove}
           >
             <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-400/60 dark:bg-white/25" />
             <div className="flex items-center justify-between pl-4 pr-2">
-              <p className="text-base font-bold text-[#0d1f3c] dark:text-white">More</p>
+              <p className="font-display text-lg font-semibold text-[#0d1f3c] dark:text-white">More</p>
               <button
                 onClick={closeSheet}
                 aria-label="Close menu"

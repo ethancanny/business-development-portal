@@ -7,6 +7,8 @@ import PwaShell from "@/components/PwaShell";
 import MobileNav from "@/components/MobileNav";
 import Fab from "@/components/Fab";
 import LockScreen from "@/components/LockScreen";
+import PageTransition from "@/components/PageTransition";
+import Toast from "@/components/Toast";
 
 // Premium redesign (Oct 14, 2026): serif display + clean sans, loaded
 // once at the root and shared via CSS variables (see tailwind.config).
@@ -89,7 +91,7 @@ export default function RootLayout({
           />
         ))}
       </head>
-      <body className="bg-slate-100 font-sans text-slate-900 antialiased dark:bg-[#0d1f3c] dark:text-[#e8dfc8]">
+      <body className="page-bg font-sans text-slate-900 antialiased dark:text-[#e8dfc8]">
         {/* Status-bar underlay (mobile polish §1): with
             black-translucent the app draws under the iOS status bar;
             this fixed navy strip (pointer-events-none, above content
@@ -102,10 +104,13 @@ export default function RootLayout({
         />
         <ThemeProvider>
           <SiteHeader />
-          <div className="page-pad overflow-x-clip">{children}</div>
+          <div className="page-pad overflow-x-clip">
+            <PageTransition>{children}</PageTransition>
+          </div>
           <PwaShell />
           <Fab />
           <MobileNav />
+          <Toast />
           <LockScreen />
         </ThemeProvider>
       </body>
