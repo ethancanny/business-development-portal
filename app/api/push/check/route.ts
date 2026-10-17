@@ -30,6 +30,7 @@ import {
 import { getAcquisitions, getCompetingBuyers, getSyncLogLatestByJob } from "@/lib/market-db";
 import { dealFocusSector } from "@/lib/valuation";
 import { shouldAutoDismiss } from "@/lib/az-location";
+import { listCandidates } from "@/lib/candidates-db";
 
 /**
  * Push evaluator sweep (CRM Phase 2, Oct 14, 2026). Runs the eight
@@ -706,6 +707,39 @@ async function evalFeeds(now: Date): Promise<EvalOutcome> {
   return { candidates, sent };
 }
 
+/* i. Operator candidates scoring 80+ (Operator Discovery spec §5 —
+ * OPT-IN, default OFF in preferences). One notification per candidate,
+ * ever: the dedupe key is the candidate id with a very long window,
+ * so a candidate is announced once when they first clear 80; a
+ * Passed candidate is never announced. When the toggle is off,
+ * sendToUser logs skipped-pref and nothing is delivered. */
+async function evalCandidateHighScores(): Promise<EvalOutcome> {
+  const all = await listCandidates();
+  const top = all.filter(
+    (c) => c.score !== null && c.score >= 80 && c.status !== "Passed"
+  );
+  // Opt-in gate read here (not only inside sendToUser) so an OFF
+  // toggle doesn't write a skipped-pref log row every sweep.
+  const prefs = await getPreferences(USER);
+  if (!prefs.types.candidateHighScore) return { candidates: top.length, sent: 0 };
+  let sent = 0;
+  for (const c of top) {
+    if (await alreadySent("candidateHighScore", c.id, 3650)) continue;
+    const role = [c.currentTitle, c.company].filter(Boolean).join(", ");
+    const res = await sendToUser(USER, {
+      type: "candidateHighScore",
+      entityKey: c.id,
+      genericTitle: "High-scoring operator candidate",
+      genericBody: "An operator candidate scored 80+ in sourcing.",
+      detailTitle: "High-scoring operator candidate",
+      detailBody: `${c.name} scored ${c.score}/100${role ? ` — ${role}` : ""}`,
+      url: `/directory?q=${encodeURIComponent(c.name)}`,
+    });
+    if (res.status === "sent") sent += 1;
+  }
+  return { candidates: top.length, sent };
+}
+
 export async function POST(req: NextRequest) {
   if (!authorized(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -744,6 +778,7 @@ export async function POST(req: NextRequest) {
   await run("quiet60_90", () => evalQuietContacts(now));
   await run("competingBuyer", () => evalCompetingBuyers(now));
   await run("feedDown", () => evalFeeds(now));
+  await run("candidateHighScore", () => evalCandidateHighScores());
 
   // Morning digest flush runs after the evaluators so anything queued
   // this sweep can go out in the same run.

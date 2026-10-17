@@ -18,7 +18,8 @@ type PushTypeKey =
   | "stalled"
   | "quiet60_90"
   | "competingBuyer"
-  | "feedDown";
+  | "feedDown"
+  | "candidateHighScore";
 
 interface Prefs {
   types: Record<PushTypeKey, boolean>;
@@ -51,6 +52,7 @@ const TYPE_LABELS: { key: PushTypeKey; label: string; hint: string }[] = [
   { key: "quiet60_90", label: "Contacts going quiet", hint: "Operators and investors with no touch in 60 days, and again at 90." },
   { key: "competingBuyer", label: "Competing-buyer acquisitions", hint: "A known repeat acquirer makes another acquisition in our sectors." },
   { key: "feedDown", label: "Data feed stopped", hint: "A market-data feed has not updated in over 48 hours." },
+  { key: "candidateHighScore", label: "Top operator candidates (80+)", hint: "When an operator candidate scores 80 or higher in sourcing. Off by default — turn it on to hear about top candidates as they are scored." },
 ];
 
 const cardCls =
