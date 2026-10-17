@@ -62,6 +62,11 @@ async function ensure() {
     minutes INTEGER,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  // is_default marks rows written by the follow-up sync as the standing
+  // default (vs an explicit per-event choice Ethan made): default rows
+  // follow the CURRENT global default setting at fire time and never
+  // suppress the generic meeting alert.
+  await q`ALTER TABLE calendar_event_reminders ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT false`;
   await q`CREATE TABLE IF NOT EXISTS calendar_outbox (
     id TEXT PRIMARY KEY,
     action TEXT NOT NULL,
@@ -179,7 +184,7 @@ export function resolveReminderChoice(
   return "default";
 }
 
-const EVENT_COLS = `e.event_id, e.title, e.starts_at, e.ends_at, e.location, e.attendees, e.all_day, e.web_url, e.dismissed, e.graph_reminder_on, e.graph_reminder_minutes, r.minutes AS choice_minutes, (r.event_id IS NOT NULL) AS choice_set`;
+const EVENT_COLS = `e.event_id, e.title, e.starts_at, e.ends_at, e.location, e.attendees, e.all_day, e.web_url, e.dismissed, e.graph_reminder_on, e.graph_reminder_minutes, r.minutes AS choice_minutes, (r.event_id IS NOT NULL AND COALESCE(r.is_default, false) = false) AS choice_set`;
 
 function rowToEvent(r: Record<string, unknown>): CalendarEvent {
   let attendees: string[] = [];
@@ -235,26 +240,38 @@ export async function getCalendarEventById(eventId: string): Promise<CalendarEve
 
 /* ---------------- Per-event reminder choices ---------------- */
 
-/** The explicit portal choice for one event: { set:false } when Ethan
- * never picked one (portal default governs); minutes null = Off. */
+/** The portal reminder row for one event. `set` means an EXPLICIT
+ * choice (Ethan picked it); a default row (written by the follow-up
+ * sync) reports set:false + isDefault:true. minutes null = Off. */
 export async function getEventReminder(
   eventId: string
-): Promise<{ set: boolean; minutes: number | null }> {
+): Promise<{ set: boolean; minutes: number | null; isDefault: boolean }> {
   await ensure();
   const q = sql();
-  const rows = await q`SELECT minutes FROM calendar_event_reminders WHERE event_id = ${eventId}`;
-  if (rows.length === 0) return { set: false, minutes: null };
+  const rows = await q`SELECT minutes, is_default FROM calendar_event_reminders WHERE event_id = ${eventId}`;
+  if (rows.length === 0) return { set: false, minutes: null, isDefault: false };
   const m = rows[0].minutes;
-  return { set: true, minutes: m === null || m === undefined ? null : Number(m) };
+  const isDefault = Boolean(rows[0].is_default);
+  return {
+    set: !isDefault,
+    minutes: m === null || m === undefined ? null : Number(m),
+    isDefault,
+  };
 }
 
-/** Record an explicit choice. minutes null = Off. */
-export async function setEventReminder(eventId: string, minutes: number | null): Promise<void> {
+/** Record a reminder row. minutes null = Off. Pass isDefault:true for
+ * rows written as the standing follow-up default (they follow the
+ * global setting rather than pinning a choice). */
+export async function setEventReminder(
+  eventId: string,
+  minutes: number | null,
+  opts?: { isDefault?: boolean }
+): Promise<void> {
   await ensure();
   const q = sql();
-  await q`INSERT INTO calendar_event_reminders (event_id, minutes, updated_at)
-    VALUES (${eventId}, ${minutes}, now())
-    ON CONFLICT (event_id) DO UPDATE SET minutes = EXCLUDED.minutes, updated_at = now()`;
+  await q`INSERT INTO calendar_event_reminders (event_id, minutes, is_default, updated_at)
+    VALUES (${eventId}, ${minutes}, ${opts?.isDefault ?? false}, now())
+    ON CONFLICT (event_id) DO UPDATE SET minutes = EXCLUDED.minutes, is_default = EXCLUDED.is_default, updated_at = now()`;
 }
 
 /** Remove the explicit choice — the event returns to the portal default. */
@@ -265,7 +282,8 @@ export async function clearEventReminder(eventId: string): Promise<void> {
 }
 
 /** Explicit choices for a set of events, keyed by event id (only events
- * WITH a choice appear). minutes null = Off. */
+ * WITH an explicit choice appear — default rows are excluded).
+ * minutes null = Off. */
 export async function getEventReminderChoices(
   eventIds: string[]
 ): Promise<Map<string, number | null>> {
@@ -273,7 +291,7 @@ export async function getEventReminderChoices(
   if (eventIds.length === 0) return out;
   await ensure();
   const q = sql();
-  const rows = await q`SELECT event_id, minutes FROM calendar_event_reminders WHERE event_id = ANY(${eventIds})`;
+  const rows = await q`SELECT event_id, minutes FROM calendar_event_reminders WHERE event_id = ANY(${eventIds}) AND is_default = false`;
   for (const r of rows) {
     const m = (r as Record<string, unknown>).minutes;
     out.set(str((r as Record<string, unknown>).event_id), m === null || m === undefined ? null : Number(m));
@@ -282,7 +300,8 @@ export async function getEventReminderChoices(
 }
 
 /** Events in [from, to) carrying an explicit TIMED reminder choice
- * (minutes set — Off rows excluded), for the push evaluator. */
+ * (minutes set — Off rows and follow-up default rows excluded), for the
+ * push evaluator. */
 export async function getReminderArmedEvents(
   from: string,
   to: string
@@ -291,7 +310,7 @@ export async function getReminderArmedEvents(
   const q = sql();
   const rows = await q`SELECT ${q.unsafe(EVENT_COLS)} FROM calendar_events e
     JOIN calendar_event_reminders r ON r.event_id = e.event_id
-    WHERE r.minutes IS NOT NULL AND e.starts_at >= ${from} AND e.starts_at < ${to}
+    WHERE r.minutes IS NOT NULL AND r.is_default = false AND e.starts_at >= ${from} AND e.starts_at < ${to}
     ORDER BY e.starts_at ASC`;
   return rows.map((r) => {
     const rec = r as Record<string, unknown>;

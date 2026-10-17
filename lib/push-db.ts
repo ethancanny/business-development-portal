@@ -68,6 +68,19 @@ async function ensure(): Promise<void> {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     sent_at TIMESTAMPTZ
   )`;
+  // Notification-action snoozes for reminders (Ethan, Oct 16, 2026):
+  // a row defers the firing identified by orig_key (which encodes the
+  // item's start + offset) to fire_at. A reschedule changes orig_key,
+  // so stale rows simply never match again.
+  await q`CREATE TABLE IF NOT EXISTS reminder_snoozes (
+    item_kind TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    orig_key TEXT NOT NULL,
+    fire_at TEXT NOT NULL,
+    fired BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (item_kind, item_id, orig_key)
+  )`;
   ensured = true;
 }
 
@@ -217,7 +230,17 @@ export interface PushPreferences {
   digestBundle: boolean;
   showDetails: boolean;
   digestSentDate: string; // YYYY-MM-DD (Phoenix) of the last digest sent
+  /** Global default reminder lead for follow-ups (minutes before due;
+   * null = no reminder). Applies when a follow-up has no explicit
+   * per-event choice. Ethan, Oct 16, 2026. */
+  reminderLeadMinutes: number | null;
+  /** Morning digest of today's follow-ups at 8:00 AM Phoenix (default ON). */
+  reminderDigest: boolean;
+  reminderDigestDate: string; // YYYY-MM-DD (Phoenix) the reminder digest last sent
 }
+
+/** The only lead values the reminder system offers (minutes). */
+export const REMINDER_LEAD_VALUES: number[] = [5, 15, 60, 1440];
 
 export const DEFAULT_PREFS: PushPreferences = {
   types: {
@@ -237,6 +260,9 @@ export const DEFAULT_PREFS: PushPreferences = {
   digestBundle: false,
   showDetails: false,
   digestSentDate: "",
+  reminderLeadMinutes: 15,
+  reminderDigest: true,
+  reminderDigestDate: "",
 };
 
 const TIME_RE = /^\d{2}:\d{2}$/;
@@ -264,6 +290,16 @@ export function mergePrefs(raw: unknown): PushPreferences {
   if (typeof r.digestBundle === "boolean") out.digestBundle = r.digestBundle;
   if (typeof r.showDetails === "boolean") out.showDetails = r.showDetails;
   if (typeof r.digestSentDate === "string") out.digestSentDate = r.digestSentDate;
+  if (r.reminderLeadMinutes === null) {
+    out.reminderLeadMinutes = null;
+  } else if (
+    typeof r.reminderLeadMinutes === "number" &&
+    REMINDER_LEAD_VALUES.includes(r.reminderLeadMinutes)
+  ) {
+    out.reminderLeadMinutes = r.reminderLeadMinutes;
+  }
+  if (typeof r.reminderDigest === "boolean") out.reminderDigest = r.reminderDigest;
+  if (typeof r.reminderDigestDate === "string") out.reminderDigestDate = r.reminderDigestDate;
   return out;
 }
 
@@ -443,4 +479,49 @@ export async function getRecentFitSignalCompanies(sinceISO: string, limit = 200)
     }
   }
   return out;
+}
+
+/* ---------------- Reminder snoozes (notification actions) ---------------- */
+
+export interface ReminderSnooze {
+  fireAt: string; // ISO instant the deferred reminder should fire
+  fired: boolean;
+}
+
+export async function getReminderSnooze(
+  itemKind: string,
+  itemId: string,
+  origKey: string
+): Promise<ReminderSnooze | null> {
+  await ensure();
+  const q = sql();
+  const rows = await q`SELECT fire_at, fired FROM reminder_snoozes
+    WHERE item_kind = ${itemKind} AND item_id = ${itemId} AND orig_key = ${origKey}`;
+  if (rows.length === 0) return null;
+  return { fireAt: str(rows[0].fire_at), fired: Boolean(rows[0].fired) };
+}
+
+export async function setReminderSnooze(
+  itemKind: string,
+  itemId: string,
+  origKey: string,
+  fireAt: string
+): Promise<void> {
+  await ensure();
+  const q = sql();
+  await q`INSERT INTO reminder_snoozes (item_kind, item_id, orig_key, fire_at, fired)
+    VALUES (${itemKind}, ${itemId}, ${origKey}, ${fireAt}, false)
+    ON CONFLICT (item_kind, item_id, orig_key)
+    DO UPDATE SET fire_at = EXCLUDED.fire_at, fired = false, created_at = now()`;
+}
+
+export async function markReminderSnoozeFired(
+  itemKind: string,
+  itemId: string,
+  origKey: string
+): Promise<void> {
+  await ensure();
+  const q = sql();
+  await q`UPDATE reminder_snoozes SET fired = true
+    WHERE item_kind = ${itemKind} AND item_id = ${itemId} AND orig_key = ${origKey}`;
 }

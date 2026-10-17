@@ -1,4 +1,5 @@
 import {
+  clearEventReminder,
   clearMsTokens,
   deleteCalendarEvent,
   getCalendarEventById,
@@ -13,6 +14,7 @@ import {
   upsertCalendarEvent,
   type CalendarEvent,
 } from "./calendar-db";
+import { getPreferences } from "./push-db";
 import {
   getDeals,
   getExecutives,
@@ -582,19 +584,34 @@ export async function syncTaskEvent(
   if (!(await msConnected())) return prevId;
   const draft = taskEventDraft(task);
 
-  // Follow-up events carry a 15-minute reminder by default (Ethan,
-  // Oct 16, 2026) — in the portal store AND on the Graph event — unless
-  // an explicit per-event choice was made on the event itself, which
-  // always wins and is left untouched here.
-  const FOLLOWUP_REMINDER_MINUTES = 15;
-  const reminderFor = async (eventId: string): Promise<number | undefined> => {
+  // Follow-up events carry the Settings → "Default reminder lead time"
+  // by default (initial value 15 minutes; Ethan, Oct 16, 2026) — in the
+  // portal store AND on the Graph event — unless an explicit per-event
+  // choice was made on the event itself, which always wins and is left
+  // untouched here. A default of null means no reminder at all.
+  const PORTAL_USER = "ethan@cannycapitalpartners.com";
+  const defaultLead = async (): Promise<number | null> => {
+    try {
+      return (await getPreferences(PORTAL_USER)).reminderLeadMinutes;
+    } catch {
+      return 15;
+    }
+  };
+  const reminderFor = async (
+    eventId: string
+  ): Promise<number | null | undefined> => {
     const existing = await getEventReminder(eventId).catch(() => null);
-    return existing && !existing.set ? FOLLOWUP_REMINDER_MINUTES : undefined;
+    if (!existing || existing.set) return undefined; // explicit choice governs
+    return defaultLead();
   };
   const persistDefault = async (eventId: string): Promise<void> => {
     const existing = await getEventReminder(eventId).catch(() => null);
-    if (existing && !existing.set) {
-      await setEventReminder(eventId, FOLLOWUP_REMINDER_MINUTES).catch(() => undefined);
+    if (!existing || existing.set) return;
+    const lead = await defaultLead();
+    if (lead === null) {
+      if (existing.isDefault) await clearEventReminder(eventId).catch(() => undefined);
+    } else {
+      await setEventReminder(eventId, lead, { isDefault: true }).catch(() => undefined);
     }
   };
 
@@ -627,7 +644,7 @@ export async function syncTaskEvent(
     }
   }
 
-  draft.reminderMinutes = FOLLOWUP_REMINDER_MINUTES;
+  draft.reminderMinutes = await defaultLead();
   const ev = await createGraphEvent(draft);
   if (ev) await persistDefault(ev.eventId);
   if (!ev) return prevId;
