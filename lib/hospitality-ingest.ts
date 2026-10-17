@@ -528,6 +528,18 @@ const NATIONAL_BRANDS = [
   "CIRCLE K", "COUCHE TARD", "WAFFLE HOUSE", "WETZEL'S",
   "SMASHBURGER", "NOTHING BUNDT", "SCOOTER'S COFFEE", "SCOOTERS COFFEE", "PORT OF SUBS",
   "HAWAIIAN BROS", "HAWAIIAN BROTHERS",
+  "WAL MART", "WALMART", "TOTAL WINE", "FRY'S FOOD", "FRYS FOOD",
+  "FRY'S MARKETPLACE", "FRYS MARKETPLACE", "CAFE RIO", "BAHAMA BUCK", "HISSHO",
+  "TROPICAL SNO", "YOGURTINI", "ONO HAWAIIAN",
+];
+
+/* Brands matched as a whole word (token) instead of a substring: a bare
+ * "ALDI" substring is also contained in unrelated names already in the
+ * data (DULCERIA ESMERALDITA), while Aldi's own group key is the bare
+ * token "ALDI" (store numbers / corporate suffixes are stripped by the
+ * normalizer), so token equality is both necessary and sufficient. */
+const NATIONAL_BRAND_TOKENS = [
+  "ALDI",
 ];
 
 const INSTITUTIONAL_OPERATORS = [
@@ -543,6 +555,12 @@ function detectOwnership(groupKey: string): { ownership: string; basis: string }
   }
   for (const b of NATIONAL_BRANDS) {
     if (groupKey.includes(b)) {
+      return { ownership: "franchise", basis: `Operator name matches national brand / franchise system "${b}" — locations are chain/franchise units` };
+    }
+  }
+  const tokens = groupKey.split(" ");
+  for (const b of NATIONAL_BRAND_TOKENS) {
+    if (tokens.includes(b)) {
       return { ownership: "franchise", basis: `Operator name matches national brand / franchise system "${b}" — locations are chain/franchise units` };
     }
   }
