@@ -362,6 +362,15 @@ export interface MiCompany {
   dateAdded: string;
   dismissedAt: string | null;
   dismissedReason: string;
+  /** Chain/franchise filter (Ethan, Oct 16, 2026): isChain rows never
+   * appear in the Fits section and never count toward its cap; they
+   * list in the Filtered Out view with chainReason. chainSuspect is
+   * the weak-signal "Possible franchise" tag — the row stays in Fits.
+   * chainExempt is the permanent "Not a chain" override. */
+  isChain: boolean;
+  chainReason: string;
+  chainSuspect: boolean;
+  chainExempt: boolean;
 }
 
 export interface MiMultiple {

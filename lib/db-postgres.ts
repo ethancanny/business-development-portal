@@ -353,6 +353,19 @@ export function ensureSchema(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS mi_companies_fit_stage_idx
         ON mi_companies (status, date_added DESC)`;
+      // Chain/franchise filter (Ethan, Oct 16, 2026): is_chain rows are
+      // excluded from the Fits section and its counts but never deleted
+      // (they list in the Filtered Out view with chain_reason).
+      // chain_suspect is the weak-signal "Possible franchise" tag (the
+      // row stays in Fits). chain_exempt is the permanent "Not a chain"
+      // override — detection never re-flags an exempt record.
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS is_chain BOOLEAN NOT NULL DEFAULT false`;
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS chain_reason TEXT NOT NULL DEFAULT ''`;
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS chain_suspect BOOLEAN NOT NULL DEFAULT false`;
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS chain_exempt BOOLEAN NOT NULL DEFAULT false`;
+      await db`
+        CREATE INDEX IF NOT EXISTS mi_companies_chain_idx
+        ON mi_companies (is_chain) WHERE is_chain`;
       // Fix A (Oct 16, 2026): widen the mi_companies unique key to include
       // sector. CREATE TABLE IF NOT EXISTS does not migrate the live table,
       // whose (source, dedup_key) key made dual-sector USASpending
