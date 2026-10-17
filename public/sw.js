@@ -150,9 +150,26 @@ self.addEventListener("push", (event) => {
     body: data.body || "",
     icon: "/icon-192-v8",
     badge: "/icon-192-v8",
+    // One tag per item: an updated/re-fired notification replaces its
+    // predecessor on the device instead of stacking a duplicate.
     tag: data.tag || undefined,
-    data: { url: data.url || "/overview" },
+    // A replacement should still alert (snoozed re-fires, updates).
+    renotify: Boolean(data.tag),
+    data: {
+      url: data.url || "/overview",
+      kind: (data.data && data.data.kind) || "",
+      id: (data.data && data.data.id) || "",
+      key: (data.data && data.data.key) || "",
+    },
   };
+  // Action buttons where the platform supports them (Android / desktop
+  // Chrome). iOS PWAs do not render notification actions — there the
+  // tap-through deep link below is the interaction.
+  if (Array.isArray(data.actions) && data.actions.length) {
+    options.actions = data.actions
+      .filter((a) => a && a.action && a.title)
+      .map((a) => ({ action: a.action, title: a.title }));
+  }
   event.waitUntil(
     Promise.all([
       self.registration.showNotification(title, options),
@@ -161,7 +178,50 @@ self.addEventListener("push", (event) => {
   );
 });
 
+/* Notification action buttons (reminder notifications): Complete
+ * marks the follow-up done through the tasks API; Snooze defers the
+ * ALERT via /api/push/snooze (due dates/starts are never moved here).
+ * Session cookie rides along; if signed out the calls 401 and the tap
+ * simply lands on the deep link next time. */
+async function handleNotificationAction(action, notification) {
+  const d = notification.data || {};
+  notification.close();
+  try {
+    if (action === "complete" && d.kind === "task" && d.id) {
+      await fetch(`/api/tasks/${encodeURIComponent(d.id)}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ done: true }),
+      });
+      await recalcBadge();
+    } else if (
+      (action === "snooze1h" || action === "snoozeTomorrow") &&
+      d.id &&
+      d.key
+    ) {
+      await fetch("/api/push/snooze", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: d.kind || "task",
+          id: d.id,
+          key: d.key,
+          mode: action === "snooze1h" ? "1h" : "tomorrow",
+        }),
+      });
+    }
+  } catch (e) {
+    /* offline / signed out — nothing to repair here */
+  }
+}
+
 self.addEventListener("notificationclick", (event) => {
+  if (event.action) {
+    event.waitUntil(handleNotificationAction(event.action, event.notification));
+    return;
+  }
   event.notification.close();
   const target = (event.notification.data && event.notification.data.url) || "/overview";
   event.waitUntil(

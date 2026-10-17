@@ -28,6 +28,9 @@ interface Prefs {
   digestBundle: boolean;
   showDetails: boolean;
   digestSentDate: string;
+  reminderLeadMinutes: number | null;
+  reminderDigest: boolean;
+  reminderDigestDate: string;
 }
 
 interface Device {
@@ -232,6 +235,52 @@ export default function PushSettings() {
               </button>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Follow-up reminders: global default lead + morning digest */}
+      <section className={cardCls}>
+        <h3 className={headingCls}>Follow-up reminders</h3>
+        <p className={`mt-1 ${hintCls}`}>
+          Every follow-up gets a reminder at its due time minus the lead below, unless the
+          follow-up&apos;s calendar event has its own reminder choice. All-day follow-ups
+          remind from 8:00 AM Phoenix on the due date.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-white/40">
+              Default reminder lead time
+            </span>
+            <select
+              className={`${inputCls} mt-1 block`}
+              value={prefs.reminderLeadMinutes === null ? "none" : String(prefs.reminderLeadMinutes)}
+              onChange={(e) =>
+                setPrefs({
+                  ...prefs,
+                  reminderLeadMinutes: e.target.value === "none" ? null : Number(e.target.value),
+                })
+              }
+            >
+              <option value="none">No reminder</option>
+              <option value="5">5 minutes before</option>
+              <option value="15">15 minutes before</option>
+              <option value="60">1 hour before</option>
+              <option value="1440">1 day before</option>
+            </select>
+          </label>
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-4 border-t border-slate-100 pt-4 dark:border-white/5">
+          <div>
+            <p className="text-sm font-medium text-[#0d1f3c] dark:text-white">Morning digest</p>
+            <p className={hintCls}>
+              One notification at 8:00 AM Phoenix listing the follow-ups due that day.
+            </p>
+          </div>
+          <Toggle
+            label="Morning digest"
+            on={prefs.reminderDigest}
+            onChange={(v) => setPrefs({ ...prefs, reminderDigest: v })}
+          />
         </div>
       </section>
 
