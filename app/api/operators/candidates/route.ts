@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
     focusSector: boolParam(sp.get("focusSector")),
     locationVerified: boolParam(sp.get("locationVerified")),
     q: sp.get("q") ?? undefined,
+    sort: sp.get("sort") ?? undefined,
   });
   return NextResponse.json(candidates);
 }
