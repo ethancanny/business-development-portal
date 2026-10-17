@@ -26,6 +26,7 @@ import { ingestIntelNews } from "./news-ingest";
 import { ingestCiPermits } from "./permits-ingest";
 import { ingestHospitality } from "./hospitality-ingest";
 import { ingestAdhs } from "./adhs-ingest";
+import { ingestTailwind, type TailwindIngestOpts } from "./tailwind-ingest";
 import { runTransitionSignalsPass } from "./signals";
 import { classifyIndustry, INDUSTRY_KEYWORDS, kwMatch } from "./industry-classify";
 
@@ -2052,9 +2053,12 @@ export async function ingestSusbSizes(): Promise<number> {
   return total;
 }
 
-export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "permits_ci" | "sector_counts" | "commodity_spot" | "susb_sizes" | "intel_news" | "hospitality" | "adhs" | "signals" | "all";
+export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "permits_ci" | "sector_counts" | "commodity_spot" | "susb_sizes" | "intel_news" | "hospitality" | "adhs" | "tailwind" | "signals" | "all";
 
-export async function runMarketIngest(source: IngestSource): Promise<Record<string, number>> {
+export async function runMarketIngest(
+  source: IngestSource,
+  opts?: { tailwind?: TailwindIngestOpts }
+): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   const jobs: [IngestSource, () => Promise<number>][] = [
     ["indicators", ingestIndicators],
@@ -2077,6 +2081,9 @@ export async function runMarketIngest(source: IngestSource): Promise<Record<stri
     ["intel_news", ingestIntelNews],
     ["hospitality", ingestHospitality],
     ["adhs", ingestAdhs],
+    // Tailwind scores derive from datasets refreshed above (permits,
+    // ADHS, indicators), so they run after them but before signals.
+    ["tailwind", async () => ingestTailwind(opts?.tailwind ?? {})],
     // Phase 4 transition signals run LAST: the pass diffs the ADHS
     // register and hospitality spine the steps above just refreshed.
     ["signals", async () => (await runTransitionSignalsPass()).added],
