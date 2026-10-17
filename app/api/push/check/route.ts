@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { flushDigest, sendToUser, type SendResult } from "@/lib/push";
 import {
+  getPreferences,
   getRecentFitSignalCompanies,
+  getReminderSnooze,
   hasRecentLog,
   logPush,
+  markReminderSnoozeFired,
   phoenixDate,
+  phoenixMinutes,
+  savePreferences,
+  type PushPreferences,
 } from "@/lib/push-db";
 import { getContacts, getDealFlow, getDeals, getExecutives, getTasks } from "@/lib/db";
 import { getInvestors } from "@/lib/investors-db";
@@ -14,7 +20,12 @@ import {
   getEventReminderChoices,
   getReminderArmedEvents,
 } from "@/lib/calendar-db";
-import { reminderOffsetLabel } from "@/lib/reminder";
+import {
+  buildEventReminder,
+  buildMorningDigest,
+  buildTaskReminder,
+  taskDueInstant,
+} from "@/lib/reminder-content";
 import { getAcquisitions, getCompetingBuyers, getSyncLogLatestByJob } from "@/lib/market-db";
 import { dealFocusSector } from "@/lib/valuation";
 import { shouldAutoDismiss } from "@/lib/az-location";
@@ -121,32 +132,130 @@ async function evalMeetings(now: Date): Promise<EvalOutcome> {
   return { candidates, sent };
 }
 
-/* a2. Per-event reminder alarms (Ethan, Oct 16, 2026). Each event with
- * an explicit portal reminder choice fires ONE push at start − offset.
- * The dedupe key carries the event id + offset + start instant, so
- * changing the choice or rescheduling re-arms under a fresh key and the
- * old firing can never repeat; deleted events vanish from the mirror
- * (and their choice row with them), so they never fire. All-day events
- * anchor at 9:00 AM Phoenix on the event day: the offset counts back
- * from that anchor (1 day = 9 AM the day before; at-start = 9 AM day
- * of). The fire window runs from the fire instant until the event
- * starts (timed) or 9 PM on the day (all-day), so a reminder suppressed
- * by quiet hours retries on later sweeps instead of being lost — and
- * explicit alarms skip the daily feed cap (see sendToUser skipDailyCap)
- * while still honoring the type toggle and quiet hours. */
-async function evalEventReminders(now: Date): Promise<EvalOutcome> {
+/* a2 + b. Reminder alarms — follow-ups and calendar events (Ethan,
+ * Oct 16, 2026, incl. the rich-content amendment). One unified system:
+ *
+ * - FOLLOW-UPS fire per item at due − lead. The lead is the explicit
+ *   per-event choice stored on the follow-up's calendar event when one
+ *   exists (Off = never), else the global default in Settings
+ *   (reminderLeadMinutes, initial 15). Timed items anchor at their due
+ *   time; all-day items at 8:00 AM Phoenix on the due date, minus the
+ *   lead. Overdue items still fire (48h catch-up) with lateness stated.
+ * - EVENTS fire per item at start − offset for events carrying an
+ *   explicit choice. Follow-up events are EXCLUDED here — they fire
+ *   through their follow-up, once. All-day events anchor at 8:00 AM
+ *   Phoenix on the day, minus the offset, firing until 8 PM that day.
+ * - Every firing's dedupe key encodes id + offset + start instant, so
+ *   reschedule / snooze (due-date) / choice-change re-arms under a new
+ *   key and a stale firing is impossible; completed follow-ups and
+ *   deleted items are never collected, so they never fire.
+ * - Content is built per item from the live record (lib/reminder-
+ *   content) — rich text is used for BOTH the generic and detail slots:
+ *   reminder notifications are never generic.
+ * - Items sharing a fire minute are sent as ONE grouped notification
+ *   (per-item dedupe markers are still written); a notification-action
+ *   snooze defers a firing to a one-off re-fire (singles only).
+ * - Explicit alarms skip the daily feed cap but honor the type toggle
+ *   and quiet hours; a quiet-hours suppression is not marked fired, so
+ *   the firing retries on the next sweep inside its window. */
+
+interface Firing {
+  kind: "task" | "event";
+  id: string;
+  key: string; // dedupe key actually checked/logged
+  origKey: string; // standard key (snooze rows key off this)
+  fireAt: number;
+  type: string;
+  title: string;
+  body: string;
+  url: string;
+  tag: string;
+  actions?: { action: string; title: string }[];
+  snoozed?: boolean;
+}
+
+const TASK_ACTIONS = [
+  { action: "complete", title: "Complete" },
+  { action: "snooze1h", title: "Snooze 1 hour" },
+  { action: "snoozeTomorrow", title: "Snooze tomorrow" },
+];
+const EVENT_ACTIONS = [
+  { action: "snooze1h", title: "Snooze 1 hour" },
+  { action: "snoozeTomorrow", title: "Snooze tomorrow" },
+];
+
+async function snoozeGate(
+  kind: "task" | "event",
+  id: string,
+  key: string,
+  now: Date
+): Promise<"standard" | "deferred" | "snoozed"> {
+  const s = await getReminderSnooze(kind, id, key).catch(() => null);
+  if (!s || s.fired) return "standard";
+  return now.getTime() >= Date.parse(s.fireAt) ? "snoozed" : "deferred";
+}
+
+async function collectTaskFirings(
+  now: Date,
+  prefs: PushPreferences
+): Promise<{ firings: Firing[]; taskEventIds: Set<string> }> {
+  const tasks = await getTasks();
+  const open = tasks.filter((t) => !t.done && t.dueDate !== "");
+  const taskEventIds = new Set(
+    open.map((t) => t.calendarEventId).filter((x): x is string => Boolean(x))
+  );
+  const choices = await getEventReminderChoices(Array.from(taskEventIds));
+  const firings: Firing[] = [];
+  for (const t of open) {
+    let lead: number | null;
+    if (t.calendarEventId && choices.has(t.calendarEventId)) {
+      lead = choices.get(t.calendarEventId) ?? null; // explicit; null = Off
+    } else {
+      lead = prefs.reminderLeadMinutes; // global default; null = none
+    }
+    if (lead === null) continue;
+    const due = taskDueInstant(t);
+    const fireAt = due.getTime() - lead * 60000;
+    if (now.getTime() < fireAt) continue;
+    if (now.getTime() - fireAt > 48 * 3600 * 1000) continue; // catch-up bound
+    const key = `rem:task:${t.id}:${lead}:${t.dueDate}T${t.dueTime ?? "allday"}`;
+    const gate = await snoozeGate("task", t.id, key, now);
+    if (gate === "deferred") continue;
+    const built = buildTaskReminder(t, now);
+    firings.push({
+      kind: "task",
+      id: t.id,
+      key: gate === "snoozed" ? `remz:task:${t.id}:${key}` : key,
+      origKey: key,
+      fireAt,
+      type: "followups",
+      title: built.title,
+      body: built.body,
+      url: built.url,
+      tag: `rem:task:${t.id}`,
+      actions: TASK_ACTIONS,
+      snoozed: gate === "snoozed",
+    });
+  }
+  return { firings, taskEventIds };
+}
+
+async function collectEventFirings(
+  now: Date,
+  taskEventIds: Set<string>
+): Promise<Firing[]> {
   const from = `${phoenixDate(new Date(now.getTime() - 2 * DAY))}T00:00:00`;
   const to = `${phoenixDate(new Date(now.getTime() + 3 * DAY))}T23:59:59`;
   const armed = await getReminderArmedEvents(from, to);
-  let candidates = 0;
-  let sent = 0;
+  const firings: Firing[] = [];
   for (const { event: ev, minutes } of armed) {
+    if (taskEventIds.has(ev.eventId)) continue; // fires via its follow-up
     const start = Date.parse(ev.startsAt);
     if (Number.isNaN(start)) continue;
     let fireAt: number;
     let until: number;
     if (ev.allDay) {
-      const anchor = Date.parse(`${ev.startsAt.slice(0, 10)}T09:00:00-07:00`);
+      const anchor = Date.parse(`${ev.startsAt.slice(0, 10)}T08:00:00-07:00`);
       if (Number.isNaN(anchor)) continue;
       fireAt = anchor - minutes * 60000;
       until = anchor + 12 * 3600 * 1000;
@@ -155,61 +264,166 @@ async function evalEventReminders(now: Date): Promise<EvalOutcome> {
       until = start;
     }
     if (now.getTime() < fireAt || now.getTime() >= until) continue;
-    candidates += 1;
-    const entityKey = `rem:${ev.eventId}:${minutes}:${ev.startsAt}`;
-    if (await alreadySent("eventReminder", entityKey, 30)) continue;
-    const timeStr = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Phoenix",
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(new Date(start));
-    let when: string;
-    if (ev.allDay) {
-      const dayStr = new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/Phoenix",
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-      }).format(new Date(start));
-      when = `all-day event · ${dayStr}`;
-    } else if (minutes === 0) {
-      when = `starting now (${timeStr})`;
-    } else {
-      when = `starts in ${reminderOffsetLabel(minutes).replace(/ before$/, "")} (${timeStr})`;
-    }
-    const res = await sendToUser(USER, {
+    const key = `rem:event:${ev.eventId}:${minutes}:${ev.startsAt}`;
+    const gate = await snoozeGate("event", ev.eventId, key, now);
+    if (gate === "deferred") continue;
+    const built = buildEventReminder(ev, now);
+    firings.push({
+      kind: "event",
+      id: ev.eventId,
+      key: gate === "snoozed" ? `remz:event:${ev.eventId}:${key}` : key,
+      origKey: key,
+      fireAt,
       type: "eventReminder",
-      entityKey,
-      genericTitle: "Event reminder",
-      genericBody: "An event you set a reminder for is coming up.",
-      detailTitle: "Event reminder",
-      detailBody: `${ev.title} — ${when}`,
-      url: "/calendar",
+      title: built.title,
+      body: built.body,
+      url: built.url,
+      tag: `rem:event:${ev.eventId}`,
+      actions: EVENT_ACTIONS,
+      snoozed: gate === "snoozed",
+    });
+  }
+  return firings;
+}
+
+async function sendOne(f: Firing): Promise<SendResult> {
+  const res = await sendToUser(USER, {
+    type: f.type,
+    entityKey: f.key,
+    genericTitle: f.title,
+    genericBody: f.body,
+    detailTitle: f.title,
+    detailBody: f.body,
+    url: f.url,
+    tag: f.tag,
+    actions: f.actions,
+    data: { kind: f.kind, id: f.id, key: f.origKey },
+    skipDailyCap: true,
+  });
+  if (f.snoozed && (res.status === "sent" || res.status === "digested")) {
+    await markReminderSnoozeFired(f.kind, f.id, f.origKey).catch(() => undefined);
+  }
+  return res;
+}
+
+async function sendFirings(firings: Firing[]): Promise<{ candidates: number; sent: number }> {
+  let sent = 0;
+  const singles: Firing[] = [];
+  const groups = new Map<string, Firing[]>();
+  for (const f of firings) {
+    if (f.snoozed) {
+      singles.push(f);
+      continue;
+    }
+    const minute = new Date(f.fireAt).toISOString().slice(0, 16);
+    const g = groups.get(minute);
+    if (g) g.push(f);
+    else groups.set(minute, [f]);
+  }
+  for (const f of singles) {
+    if (await alreadySent(f.type, f.key, 30)) continue;
+    const res = await sendOne(f);
+    if (res.status === "sent") sent += 1;
+  }
+  for (const [minute, group] of Array.from(groups.entries())) {
+    if (group.length === 1) {
+      const f = group[0];
+      if (await alreadySent(f.type, f.key, 30)) continue;
+      const res = await sendOne(f);
+      if (res.status === "sent") sent += 1;
+      continue;
+    }
+    // Simultaneous reminders: ONE grouped notification. Items already
+    // fired under their own key are excluded; per-item markers are
+    // written on success so nothing double-fires next sweep.
+    const pending: Firing[] = [];
+    for (const f of group) {
+      if (!(await alreadySent(f.type, f.key, 30))) pending.push(f);
+    }
+    if (!pending.length) continue;
+    const lines = pending
+      .slice(0, 4)
+      .map((f) => {
+        const timing =
+          f.body.split("\n").find((l) => l.trim() && !l.startsWith("🔴")) ?? "";
+        return `${f.title} · ${timing}`;
+      });
+    const body =
+      lines.join("\n") + (pending.length > 4 ? `\n+${pending.length - 4} more` : "");
+    const anyTask = pending.some((f) => f.kind === "task");
+    const res = await sendToUser(USER, {
+      type: anyTask ? "followups" : "eventReminder",
+      entityKey: `rembatch:${minute}:${pending.map((f) => f.id).join(",")}`,
+      genericTitle: `${pending.length} reminders`,
+      genericBody: body,
+      detailTitle: `${pending.length} reminders`,
+      detailBody: body,
+      url: anyTask ? "/overview#overview-tasks" : "/calendar",
+      tag: `rem:batch:${minute}`,
       skipDailyCap: true,
     });
     if (res.status === "sent") sent += 1;
+    if (res.status === "sent" || res.status === "digested") {
+      for (const f of pending) {
+        await logPush({
+          userEmail: USER,
+          type: f.type,
+          entityKey: f.key,
+          title: f.title,
+          body: f.body,
+          url: f.url,
+          status: res.status,
+        }).catch(() => undefined);
+      }
+    }
   }
-  return { candidates, sent };
+  return { candidates: firings.length, sent };
 }
 
-/* b. Follow-ups due today or overdue — one bundled notification/day. */
-async function evalFollowups(now: Date): Promise<EvalOutcome> {
+async function evalReminders(
+  now: Date
+): Promise<{ taskCandidates: number; eventCandidates: number; sent: number }> {
+  const prefs = await getPreferences(USER);
+  const { firings: taskFirings, taskEventIds } = await collectTaskFirings(now, prefs);
+  const eventFirings = await collectEventFirings(now, taskEventIds);
+  const out = await sendFirings([...taskFirings, ...eventFirings]);
+  return {
+    taskCandidates: taskFirings.length,
+    eventCandidates: eventFirings.length,
+    sent: out.sent,
+  };
+}
+
+/* b2. Morning digest — one 8:00 AM Phoenix notification listing
+ * today's follow-ups (Settings toggle, default ON; extends the push
+ * digest family rather than duplicating it — this one is computed
+ * from the follow-up list itself, not the queued-item digest). */
+async function evalMorningDigest(now: Date): Promise<EvalOutcome> {
+  const prefs = await getPreferences(USER);
+  if (!prefs.reminderDigest) return { candidates: 0, sent: 0 };
   const today = phoenixDate(now);
+  if (prefs.reminderDigestDate === today) return { candidates: 0, sent: 0 };
+  if (phoenixMinutes(now) < 8 * 60) return { candidates: 0, sent: 0 };
   const tasks = await getTasks();
-  const due = tasks.filter((t) => !t.done && t.dueDate !== "" && t.dueDate <= today);
-  if (!due.length) return { candidates: 0, sent: 0 };
-  const entityKey = `followups-${today}`;
-  if (await alreadySent("followups", entityKey, 2)) return { candidates: due.length, sent: 0 };
+  const dueToday = tasks
+    .filter((t) => !t.done && t.dueDate === today)
+    .sort((a, b) => (a.dueTime ?? "").localeCompare(b.dueTime ?? ""));
+  // Mark the day evaluated either way — the digest is a morning
+  // snapshot; follow-ups added later get their own reminders.
+  await savePreferences(USER, { ...prefs, reminderDigestDate: today }).catch(() => undefined);
+  if (!dueToday.length) return { candidates: 0, sent: 0 };
+  const built = buildMorningDigest(dueToday);
   const res = await sendToUser(USER, {
-    type: "followups",
-    entityKey,
-    genericTitle: "Follow-ups due today",
-    genericBody: "You have follow-ups due or overdue.",
-    detailTitle: "Follow-ups due today",
-    detailBody: `${due.length} follow-up${due.length === 1 ? "" : "s"} due or overdue`,
-    url: "/overview",
+    type: "morningDigest",
+    entityKey: `morning-digest-${today}`,
+    genericTitle: built.title,
+    genericBody: built.body,
+    detailTitle: built.title,
+    detailBody: built.body,
+    url: built.url,
+    tag: `morning-digest-${today}`,
   });
-  return { candidates: due.length, sent: res.status === "sent" ? 1 : 0 };
+  return { candidates: 1, sent: res.status === "sent" ? 1 : 0 };
 }
 
 /* c. New fit targets carrying 2+ owner-transition signals. */
@@ -438,8 +652,17 @@ export async function POST(req: NextRequest) {
   };
 
   await run("meeting60", () => evalMeetings(now));
-  await run("eventReminder", () => evalEventReminders(now));
-  await run("followups", () => evalFollowups(now));
+  try {
+    const rem = await evalReminders(now);
+    evaluated.followups = rem.taskCandidates;
+    evaluated.eventReminder = rem.eventCandidates;
+    sent += rem.sent;
+  } catch (err) {
+    errors.reminders = err instanceof Error ? err.message : String(err);
+    evaluated.followups = 0;
+    evaluated.eventReminder = 0;
+  }
+  await run("morningDigest", () => evalMorningDigest(now));
   await run("fitSignals", () => evalFitSignals(now));
   await run("newListing", () => evalNewListings(now));
   await run("stalled", () => evalStalled(now));

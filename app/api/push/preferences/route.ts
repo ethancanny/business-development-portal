@@ -28,6 +28,7 @@ export async function PUT(req: NextRequest) {
     ...incoming,
     types: { ...current.types, ...((incoming.types as Record<string, unknown>) ?? {}) },
     digestSentDate: current.digestSentDate, // server-managed; not user-editable
+    reminderDigestDate: current.reminderDigestDate, // server-managed; not user-editable
   });
   await savePreferences(user.email, merged);
   return NextResponse.json({ preferences: merged });

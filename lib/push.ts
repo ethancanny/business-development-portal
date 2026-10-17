@@ -74,6 +74,11 @@ export function inQuietHours(quietStart: string, quietEnd: string, now: Date = n
   return cur >= start || cur < end; // overnight window, e.g. 21:00 → 07:00
 }
 
+export interface PushAction {
+  action: string; // e.g. "complete" | "snooze1h" | "snoozeTomorrow"
+  title: string;
+}
+
 export interface SendOptions {
   /** PushType name, or "test" / "digest" for the internal senders. */
   type: string;
@@ -83,6 +88,13 @@ export interface SendOptions {
   detailTitle: string;
   detailBody: string;
   url: string;
+  /** Notification tag: a later notification with the same tag replaces
+   * the earlier one on the device instead of stacking a duplicate. */
+  tag?: string;
+  /** Notification action buttons (platforms that support them). */
+  actions?: PushAction[];
+  /** Extra click/action data for the service worker (kind/id/key). */
+  data?: Record<string, string>;
   /** Test sends only: skip toggle / quiet-hours / cap enforcement. */
   bypass?: boolean;
   /** Skip ONLY the daily per-type cap (toggle + quiet hours still
@@ -106,7 +118,8 @@ async function deliver(
   entityKey: string,
   title: string,
   body: string,
-  url: string
+  url: string,
+  extra?: { tag?: string; actions?: PushAction[]; data?: Record<string, string> }
 ): Promise<SendResult> {
   await getVapid();
   const subs = await listSubscriptions(userEmail);
@@ -132,6 +145,9 @@ async function deliver(
     body,
     url,
     type,
+    ...(extra?.tag ? { tag: extra.tag } : {}),
+    ...(extra?.actions?.length ? { actions: extra.actions } : {}),
+    ...(extra?.data ? { data: extra.data } : {}),
     ...(badge !== undefined ? { badge } : {}),
   });
   let delivered = 0;
@@ -231,7 +247,11 @@ export async function sendToUser(userEmail: string, opts: SendOptions): Promise<
 
   const title = prefs.showDetails ? opts.detailTitle : opts.genericTitle;
   const body = prefs.showDetails ? opts.detailBody : opts.genericBody;
-  return deliver(userEmail, type, opts.entityKey, title, body, opts.url);
+  return deliver(userEmail, type, opts.entityKey, title, body, opts.url, {
+    tag: opts.tag,
+    actions: opts.actions,
+    data: opts.data,
+  });
 }
 
 /** Badge-only push: refreshes the app-icon badge on every subscribed
