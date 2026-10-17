@@ -106,14 +106,17 @@ const MESA_WHERE = encodeURIComponent(
   "(tax_type='TPT' and category_code_description='Restaurants and Bars') or tax_type='TLT'"
 );
 
-async function mesaSeries(datasetId: string): Promise<{ period: string; rest: number; tlt: number }[]> {
-  const url = `https://data.mesaaz.gov/resource/${datasetId}.json?$limit=50000&$where=${MESA_WHERE}&$order=report_month_date`;
+async function mesaSeries(
+  datasetId: string,
+  dateField: "report_month_date" | "post_month_date"
+): Promise<{ period: string; rest: number; tlt: number }[]> {
+  const url = `https://data.mesaaz.gov/resource/${datasetId}.json?$limit=50000&$where=${MESA_WHERE}&$order=${dateField}`;
   const res = await fetch(url, { headers: UA });
   if (!res.ok) throw new Error(`Mesa Socrata ${datasetId}: HTTP ${res.status}`);
   const rows = (await res.json()) as Record<string, string>[];
   const byPeriod = new Map<string, { rest: number; tlt: number }>();
   for (const r of rows) {
-    const period = (r.report_month_date ?? r.post_month_date ?? "").slice(0, 10);
+    const period = (r[dateField] ?? "").slice(0, 10);
     if (!period) continue;
     const amt = Number(r.amount);
     if (!Number.isFinite(amt)) continue;
@@ -128,7 +131,7 @@ async function mesaSeries(datasetId: string): Promise<{ period: string; rest: nu
 }
 
 async function fetchCityTax(): Promise<{ upserted: number; latestPeriod: string; note: string }> {
-  const rows = await mesaSeries("8y5v-kwui");
+  const rows = await mesaSeries("8y5v-kwui", "report_month_date");
   if (rows.length < 24) throw new Error(`Mesa report-month series too short (${rows.length} months)`);
   const obs: TailwindObsRow[] = [];
   for (const r of rows) {
@@ -144,7 +147,10 @@ async function xcheckCityTax(): Promise<void> {
   // Second Mesa dataset (posting month) — same categories, different
   // accounting timing. Annual totals should track within a few %.
   try {
-    const [rep, post] = await Promise.all([mesaSeries("8y5v-kwui"), mesaSeries("e9zg-r4w9")]);
+    const [rep, post] = await Promise.all([
+      mesaSeries("8y5v-kwui", "report_month_date"),
+      mesaSeries("e9zg-r4w9", "post_month_date"),
+    ]);
     const yearSum = (rows: { period: string; rest: number; tlt: number }[], year: string) =>
       rows.filter((r) => r.period.startsWith(year)).reduce((a, r) => a + r.rest + r.tlt, 0);
     const years = Array.from(new Set(rep.map((r) => r.period.slice(0, 4)))).sort();
@@ -395,14 +401,28 @@ async function xcheckSusbFrag(): Promise<void> {
 
 interface AotFile { url: string; year: number; month: number; monthName: string }
 
-async function discoverAot(pattern: RegExp, extraPages: string[]): Promise<AotFile | null> {
+/** Discover the latest report PDF by scanning the Data & Trends index
+ * pages. Returns diagnostics alongside the result: the first live run
+ * (Oct 17, 2026) found NO links from the Vercel runtime while the same
+ * code found 33 from a residential IP — Arizona state sites have
+ * blocked this project's datacenter egress before (DLLC) — so the
+ * failure message must say exactly what the runtime received. */
+async function discoverAot(
+  pattern: RegExp,
+  extraPages: string[]
+): Promise<{ file: AotFile | null; diag: string }> {
   const pages = ["https://tourism.az.gov/data-trends/", ...extraPages];
   let best: AotFile | null = null;
+  const diagParts: string[] = [];
   for (const page of pages) {
     let html = "";
     try {
-      html = await fetchText(page);
-    } catch {
+      const res = await fetch(page, { headers: UA });
+      html = await res.text();
+      diagParts.push(`${page} → HTTP ${res.status}, ${html.length} bytes, uploads links: ${html.includes("wp-content/uploads")}`);
+      if (!res.ok) continue;
+    } catch (e) {
+      diagParts.push(`${page} → ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
     const re = new RegExp(pattern.source, "gi");
@@ -417,15 +437,61 @@ async function discoverAot(pattern: RegExp, extraPages: string[]): Promise<AotFi
       if (!best || year > best.year || (year === best.year && month > best.month)) best = cand;
     }
   }
-  return best;
+  return { file: best, diag: diagParts.join("; ") };
+}
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/** Fallback when the index pages yield nothing: AOT uploads follow
+ * /wp-content/uploads/{uploadY}/{uploadM}/{Prefix}-{Month}-{Year}.pdf
+ * with the upload landing 0–3 months after the report month. Probe
+ * recent report months newest-first; the first URL that downloads
+ * wins. Bounded (~40 requests worst case, all cheap 404s). */
+async function probeAot(kind: "airports" | "lodging"): Promise<{ file: AotFile | null; diag: string }> {
+  const prefix = kind === "airports" ? "Airports" : "Arizona-Lodging";
+  const now = new Date();
+  let attempts = 0;
+  let lastStatus = "";
+  for (let back = 1; back <= 9; back++) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1));
+    const ry = d.getUTCFullYear();
+    const rm = d.getUTCMonth() + 1;
+    const monthName = MONTH_NAMES[rm - 1];
+    for (const off of [2, 1, 3, 0]) {
+      const u = new Date(Date.UTC(ry, rm - 1 + off, 1));
+      const uy = u.getUTCFullYear();
+      const um = String(u.getUTCMonth() + 1).padStart(2, "0");
+      const suffixes = kind === "airports" ? ["", "-1"] : [""];
+      for (const suf of suffixes) {
+        const url = `https://tourism.az.gov/wp-content/uploads/${uy}/${um}/${prefix}-${monthName}-${ry}${suf}.pdf`;
+        attempts++;
+        try {
+          const res = await fetch(url, { headers: UA, method: "GET" });
+          lastStatus = `HTTP ${res.status}`;
+          if (res.ok) return { file: { url, year: ry, month: rm, monthName }, diag: `pattern probe hit after ${attempts} tries` };
+        } catch (e) {
+          lastStatus = e instanceof Error ? e.message : String(e);
+        }
+      }
+    }
+  }
+  return { file: null, diag: `pattern probe exhausted ${attempts} candidate URLs (last: ${lastStatus})` };
 }
 
 async function fetchAotAirports(): Promise<{ upserted: number; latestPeriod: string; note: string }> {
-  const file = await discoverAot(
+  const found = await discoverAot(
     /https?:\/\/[^\s"']*?Airports-([A-Za-z]+)-(\d{4})(?:-\d+|-Revised)?\.pdf/i,
     ["https://tourism.az.gov/data-trends/airport-passenger-traffic/"]
   );
-  if (!file) throw new Error("No Airports-<Month>-<Year>.pdf link found on tourism.az.gov/data-trends");
+  let file = found.file;
+  if (!file) {
+    const probed = await probeAot("airports");
+    file = probed.file;
+    if (!file) throw new Error(`AOT airports report unreachable from this runtime. Index scan: ${found.diag}. ${probed.diag}`);
+  }
   const buf = await fetchBuffer(file.url);
   const parts = extractPdfStrings(buf);
   if (!parts.length) throw new Error(`AOT airports PDF produced no text (${file.url})`);
@@ -489,8 +555,13 @@ async function xcheckAotAirports(): Promise<void> {
 }
 
 async function fetchAotLodging(): Promise<{ upserted: number; latestPeriod: string; note: string }> {
-  const file = await discoverAot(/https?:\/\/[^\s"']*?Arizona-Lodging-([A-Za-z]+)-(\d{4})\.pdf/i, []);
-  if (!file) throw new Error("No Arizona-Lodging-<Month>-<Year>.pdf link found on tourism.az.gov/data-trends");
+  const found = await discoverAot(/https?:\/\/[^\s"']*?Arizona-Lodging-([A-Za-z]+)-(\d{4})\.pdf/i, []);
+  let file = found.file;
+  if (!file) {
+    const probed = await probeAot("lodging");
+    file = probed.file;
+    if (!file) throw new Error(`AOT lodging report unreachable from this runtime. Index scan: ${found.diag}. ${probed.diag}`);
+  }
   const buf = await fetchBuffer(file.url);
   const parts = extractPdfStrings(buf);
   if (!parts.length) throw new Error(`AOT lodging PDF produced no text (${file.url})`);
