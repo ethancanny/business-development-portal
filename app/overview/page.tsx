@@ -72,6 +72,12 @@ export default function Overview() {
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [rates, setRates] = useState<MarketRates>({});
   const [fitCounts, setFitCounts] = useState<Record<string, number | null>>({});
+  // Sector tailwind scores (Phase 5 / Hospitality §4): shown on the
+  // tiles only when a sector actually has a computed score (≥2 live
+  // components); absent otherwise — never a placeholder number.
+  const [tailwind, setTailwind] = useState<
+    Record<string, { score: number | null; whatChanged: string }>
+  >({});
   // Hospitality spine meta (sources + last ingest) for the Sector
   // Overview tile's source/date line (hospitality build §2).
   const [hospMeta, setHospMeta] = useState<{ sources: string; updated: string } | null>(null);
@@ -197,6 +203,19 @@ export default function Overview() {
           if (live) setFitCounts((c) => ({ ...c, [s]: 0 }));
         });
     }
+    fetch("/api/market/tailwind")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (d: {
+          sectors?: { sector: string; score: number | null; whatChanged: string }[];
+        } | null) => {
+          if (!live || !d?.sectors) return;
+          const map: Record<string, { score: number | null; whatChanged: string }> = {};
+          for (const s of d.sectors) map[s.sector] = { score: s.score, whatChanged: s.whatChanged };
+          setTailwind(map);
+        }
+      )
+      .catch(() => {});
     fetch("/api/market/hospitality-settings")
       .then((r) => (r.ok ? r.json() : null))
       .then(
@@ -1371,9 +1390,9 @@ export default function Overview() {
 
       {/* Sector Overview — one tile per focus sector (fit counts from
           the same per-sector fetches as the density view; the
-          tailwind score arrives with Phase 5 scoring and is omitted
-          until the data exists). The MI page takes no sector param,
-          so tiles link to the Fit Targets tab. */}
+          tailwind line renders only for sectors with a computed
+          score — ≥2 live components — per Phase 5 / §4). The MI page
+          takes no sector param, so tiles link to the Fit Targets tab. */}
       <section className="mb-6">
         <div className="mb-3 flex items-baseline justify-between gap-2">
           <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
@@ -1419,6 +1438,15 @@ export default function Overview() {
                     </span>{" "}
                     fit targets
                   </p>
+                  {tailwind[sector]?.score !== null &&
+                    tailwind[sector]?.score !== undefined && (
+                      <p className="mt-1.5 text-[11px] leading-snug text-slate-500 dark:text-white/60">
+                        <span className="font-semibold text-[#0d1f3c] dark:text-white">
+                          Tailwind {tailwind[sector].score}
+                        </span>{" "}
+                        · {tailwind[sector].whatChanged}
+                      </p>
+                    )}
                   {sector === "Hospitality" && hospMeta && (
                     <p className="mt-1 text-[11px] leading-snug text-slate-400 dark:text-white/40">
                       Sources: {hospMeta.sources} · Updated {hospMeta.updated}
