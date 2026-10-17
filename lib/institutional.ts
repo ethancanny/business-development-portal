@@ -174,7 +174,13 @@ export function detectInstitutional(
   // entityStructureDesc as details.structure; tax-exempt / government
   // / nonprofit / educational / cooperative structures are decisive.
   const structure = String(d.structure ?? "").trim();
-  if (structure) {
+  // TRAP (fixed Oct 17, 2026): SAM's most common corporate value is
+  // "Corporate Entity (Not Tax Exempt)" — matching plain "tax exempt"
+  // flagged every ordinary corporation as a nonprofit in the first
+  // batch run (760 false positives). The explicit "not tax exempt"
+  // value is for-profit evidence: it skips the entity arm (the
+  // name/facility arms below still apply).
+  if (structure && !/not tax exempt/i.test(structure)) {
     if (/tax exempt/i.test(structure)) return hard("nonprofit", `entity type "${structure}" (SAM.gov registration)`);
     if (/non[-\s]?profit/i.test(structure)) return hard("nonprofit", `entity type "${structure}" (SAM.gov registration)`);
     if (/government/i.test(structure)) return hard("government", `entity type "${structure}" (SAM.gov registration)`);
