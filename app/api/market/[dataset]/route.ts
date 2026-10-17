@@ -10,6 +10,8 @@ import {
   getListings,
   getCompanies,
   getFitCompanies,
+  getFilteredCompanies,
+  markNotChain,
   FITS_DISPLAY_LIMIT,
   countCompanies,
   countFits,
@@ -86,6 +88,18 @@ export async function GET(
             .filter(Boolean);
           const { companies, fitTotal } = await getFitCompanies(sectors.length ? sectors : undefined);
           return NextResponse.json({ companies, fitTotal, limit: FITS_DISPLAY_LIMIT, mode: "fits" });
+        }
+        // Filtered Out feed (chain/franchise filter, Oct 16, 2026):
+        // chain-flagged companies with their reasons — never deleted,
+        // never in the fits feed; the view carries the "Not a chain"
+        // override.
+        if (sp.get("mode") === "filtered") {
+          const sectors = (sp.get("sectors") ?? "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const { companies, chainTotal } = await getFilteredCompanies(sectors.length ? sectors : undefined);
+          return NextResponse.json({ companies, chainTotal, mode: "filtered" });
         }
         const sector = sp.get("sector") ?? undefined;
         const off = Number(sp.get("offset") ?? 0);
@@ -176,6 +190,10 @@ export async function POST(
         }
         break;
       case "companies":
+        if (body.id && body.action === "not-a-chain") {
+          await markNotChain(String(body.id));
+          return NextResponse.json({ ok: true });
+        }
         if (body.id && body.action === "restore") {
           const status = await restoreCompany(String(body.id));
           return NextResponse.json({ ok: true, status });
