@@ -69,6 +69,26 @@ export function ensureSchema(): Promise<void> {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`;
+      // Follow-up upgrade (Ethan, Oct 16, 2026): time-of-day (NULL = all-day),
+      // type, priority, notes, completion stamp, and the id of the synced
+      // Outlook/Graph event. Existing rows take the migration defaults:
+      // type=Call, priority=normal, all-day; already-done rows backfill
+      // completed_at from their last update (one-time, guarded by IS NULL).
+      await db`
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_time TEXT`;
+      await db`
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'Call'`;
+      await db`
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'normal'`;
+      await db`
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`;
+      await db`
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS calendar_event_id TEXT`;
+      await db`
+        UPDATE tasks SET completed_at = updated_at
+        WHERE done = TRUE AND completed_at IS NULL`;
       await db`
         CREATE TABLE IF NOT EXISTS activity (
           id TEXT PRIMARY KEY,
@@ -558,12 +578,21 @@ export async function saveExecutives(execs: Executive[]): Promise<void> {
 }
 
 // --- Tasks ---
+const TASK_TYPES = ["Call", "Email", "Meeting", "Send docs", "Other"];
+
 function rowToTask(r: Record<string, unknown>): Task {
   return {
     id: String(r.id),
     title: String(r.title ?? ""),
     dueDate: String(r.due_date ?? ""),
+    dueTime: r.due_time ? String(r.due_time) : null,
+    type: (TASK_TYPES.includes(String(r.type))
+      ? String(r.type)
+      : "Call") as Task["type"],
+    priority: r.priority === "high" ? "high" : "normal",
+    notes: String(r.notes ?? ""),
     done: Boolean(r.done),
+    completedAt: r.completed_at ? iso(r.completed_at) : null,
     owner: String(r.owner ?? ""),
     relatedKind:
       r.related_kind === "deal" || r.related_kind === "executive"
@@ -571,6 +600,7 @@ function rowToTask(r: Record<string, unknown>): Task {
         : null,
     relatedId: r.related_id ? String(r.related_id) : null,
     relatedName: String(r.related_name ?? ""),
+    calendarEventId: r.calendar_event_id ? String(r.calendar_event_id) : null,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
@@ -590,12 +620,14 @@ export async function saveTasks(tasks: Task[]): Promise<void> {
     ...tasks.map(
       (t) => tx`
         INSERT INTO tasks (
-          id, title, due_date, done, owner, related_kind,
-          related_id, related_name, created_at, updated_at
+          id, title, due_date, due_time, type, priority, notes, done,
+          completed_at, owner, related_kind,
+          related_id, related_name, calendar_event_id, created_at, updated_at
         ) VALUES (
-          ${t.id}, ${t.title}, ${t.dueDate}, ${t.done}, ${t.owner},
+          ${t.id}, ${t.title}, ${t.dueDate}, ${t.dueTime}, ${t.type}, ${t.priority},
+          ${t.notes}, ${t.done}, ${t.completedAt}, ${t.owner},
           ${t.relatedKind}, ${t.relatedId}, ${t.relatedName},
-          ${t.createdAt}, ${t.updatedAt}
+          ${t.calendarEventId}, ${t.createdAt}, ${t.updatedAt}
         )`
     ),
   ]);

@@ -175,15 +175,24 @@ export const PARTNER_NAMES = [
 
 export type TaskRelatedKind = "deal" | "executive";
 
+export type TaskType = "Call" | "Email" | "Meeting" | "Send docs" | "Other";
+export type TaskPriority = "normal" | "high";
+
 export interface Task {
   id: string;
   title: string;
-  dueDate: string; // yyyy-mm-dd or ""
+  dueDate: string; // yyyy-mm-dd (America/Phoenix calendar date) or ""
+  dueTime: string | null; // "HH:MM" 24h Phoenix wall-clock; null = all-day
+  type: TaskType;
+  priority: TaskPriority;
+  notes: string;
   done: boolean;
+  completedAt: string | null; // ISO timestamp when marked done
   owner: string; // partner name or ""
   relatedKind: TaskRelatedKind | null;
   relatedId: string | null;
   relatedName: string; // denormalized for display
+  calendarEventId: string | null; // Outlook/Graph event mirrored from this follow-up
   createdAt: string;
   updatedAt: string;
 }
