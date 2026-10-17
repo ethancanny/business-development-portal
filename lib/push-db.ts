@@ -336,6 +336,7 @@ export type PushLogStatus =
   | "skipped-pref"
   | "skipped-quiet"
   | "skipped-cap"
+  | "skipped-covered"
   | "digested";
 
 export interface PushLogEntry {

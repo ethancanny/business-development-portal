@@ -244,7 +244,9 @@ export default function PushSettings() {
         <p className={`mt-1 ${hintCls}`}>
           Every follow-up gets a reminder at its due time minus the lead below, unless the
           follow-up&apos;s calendar event has its own reminder choice. All-day follow-ups
-          remind from 8:00 AM Phoenix on the due date.
+          remind from 8:00 AM Phoenix on the due date. When an event&apos;s Outlook reminder
+          is on, Outlook is the one that notifies — the portal never rings a second bell for
+          the same event.
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <label className="block">

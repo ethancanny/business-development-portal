@@ -299,6 +299,30 @@ export async function getEventReminderChoices(
   return out;
 }
 
+/** Mirrored Graph reminder state for a set of events: true = an
+ * Outlook reminder is set (Outlook will notify — the portal must not
+ * double-alert), false = reminder off, null = never read from Graph
+ * (portal push stays armed as the fallback). Missing ids are absent. */
+export async function getGraphReminderStates(
+  eventIds: string[]
+): Promise<Map<string, boolean | null>> {
+  const out = new Map<string, boolean | null>();
+  if (eventIds.length === 0) return out;
+  await ensure();
+  const q = sql();
+  const rows = await q`SELECT event_id, graph_reminder_on FROM calendar_events WHERE event_id = ANY(${eventIds})`;
+  for (const r of rows) {
+    const rec = r as Record<string, unknown>;
+    out.set(
+      str(rec.event_id),
+      rec.graph_reminder_on === null || rec.graph_reminder_on === undefined
+        ? null
+        : Boolean(rec.graph_reminder_on)
+    );
+  }
+  return out;
+}
+
 /** Events in [from, to) carrying an explicit TIMED reminder choice
  * (minutes set — Off rows and follow-up default rows excluded), for the
  * push evaluator. */

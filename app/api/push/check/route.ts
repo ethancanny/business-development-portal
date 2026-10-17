@@ -18,6 +18,7 @@ import { getInvestors } from "@/lib/investors-db";
 import {
   getCalendarEvents,
   getEventReminderChoices,
+  getGraphReminderStates,
   getReminderArmedEvents,
 } from "@/lib/calendar-db";
 import {
@@ -54,6 +55,35 @@ function authorized(req: NextRequest): boolean {
 
 async function alreadySent(type: string, entityKey: string, windowDays: number): Promise<boolean> {
   return hasRecentLog(USER, type, entityKey, ["sent", "digested"], new Date(Date.now() - windowDays * DAY));
+}
+
+/* Single-notification ownership (Ethan, Oct 16, 2026): when Outlook
+ * already carries a native reminder for an event, Outlook is the ONLY
+ * notifier — the portal push is suppressed and the skip is written to
+ * push_log (once per key per window) so the decision stays auditable. */
+async function logCoveredOnce(
+  type: string,
+  entityKey: string,
+  title: string,
+  windowDays: number
+): Promise<void> {
+  const seen = await hasRecentLog(
+    USER,
+    type,
+    entityKey,
+    ["skipped-covered"],
+    new Date(Date.now() - windowDays * DAY)
+  ).catch(() => true);
+  if (seen) return;
+  await logPush({
+    userEmail: USER,
+    type,
+    entityKey,
+    title: "(skipped — covered by Outlook reminder)",
+    body: title,
+    url: "",
+    status: "skipped-covered",
+  }).catch(() => undefined);
 }
 
 interface EvalOutcome {
@@ -113,6 +143,12 @@ async function evalMeetings(now: Date): Promise<EvalOutcome> {
     candidates += 1;
     const entityKey = `${ev.eventId}-${phoenixDate(new Date(start))}`;
     if (await alreadySent("meeting60", entityKey, 2)) continue;
+    // Ownership: an Outlook native reminder already covers this event —
+    // meeting60 must not ring a second bell.
+    if (ev.graphReminderOn === true) {
+      await logCoveredOnce("meeting60", entityKey, ev.title, 2);
+      continue;
+    }
     const timeStr = new Intl.DateTimeFormat("en-US", {
       timeZone: "America/Phoenix",
       hour: "numeric",
@@ -157,7 +193,14 @@ async function evalMeetings(now: Date): Promise<EvalOutcome> {
  *   snooze defers a firing to a one-off re-fire (singles only).
  * - Explicit alarms skip the daily feed cap but honor the type toggle
  *   and quiet hours; a quiet-hours suppression is not marked fired, so
- *   the firing retries on the next sweep inside its window. */
+ *   the firing retries on the next sweep inside its window.
+ * - OWNERSHIP (single notification): any item whose Outlook event
+ *   carries a native Graph reminder is notified by Outlook ONLY — the
+ *   portal firing is suppressed and the skip logged to push_log as
+ *   "skipped-covered" (see logCoveredOnce). The portal push is the
+ *   fallback channel: it fires only when no Outlook reminder covers
+ *   the item (not synced, or the Graph reminder is off/unknown). The
+ *   same rule suppresses meeting60 for covered events. */
 
 interface Firing {
   kind: "task" | "event";
@@ -198,14 +241,16 @@ async function snoozeGate(
 async function collectTaskFirings(
   now: Date,
   prefs: PushPreferences
-): Promise<{ firings: Firing[]; taskEventIds: Set<string> }> {
+): Promise<{ firings: Firing[]; taskEventIds: Set<string>; covered: number }> {
   const tasks = await getTasks();
   const open = tasks.filter((t) => !t.done && t.dueDate !== "");
   const taskEventIds = new Set(
     open.map((t) => t.calendarEventId).filter((x): x is string => Boolean(x))
   );
   const choices = await getEventReminderChoices(Array.from(taskEventIds));
+  const graphStates = await getGraphReminderStates(Array.from(taskEventIds));
   const firings: Firing[] = [];
+  let covered = 0;
   for (const t of open) {
     let lead: number | null;
     if (t.calendarEventId && choices.has(t.calendarEventId)) {
@@ -221,6 +266,16 @@ async function collectTaskFirings(
     const key = `rem:task:${t.id}:${lead}:${t.dueDate}T${t.dueTime ?? "allday"}`;
     const gate = await snoozeGate("task", t.id, key, now);
     if (gate === "deferred") continue;
+    if (gate === "standard") {
+      if (await alreadySent("followups", key, 30)) continue;
+      // Ownership: the follow-up's Outlook event carries a native
+      // reminder — Outlook notifies; the portal stays silent.
+      if (t.calendarEventId && graphStates.get(t.calendarEventId) === true) {
+        covered += 1;
+        await logCoveredOnce("followups", key, t.title, 30);
+        continue;
+      }
+    }
     const built = buildTaskReminder(t, now);
     firings.push({
       kind: "task",
@@ -237,17 +292,18 @@ async function collectTaskFirings(
       snoozed: gate === "snoozed",
     });
   }
-  return { firings, taskEventIds };
+  return { firings, taskEventIds, covered };
 }
 
 async function collectEventFirings(
   now: Date,
   taskEventIds: Set<string>
-): Promise<Firing[]> {
+): Promise<{ firings: Firing[]; covered: number }> {
   const from = `${phoenixDate(new Date(now.getTime() - 2 * DAY))}T00:00:00`;
   const to = `${phoenixDate(new Date(now.getTime() + 3 * DAY))}T23:59:59`;
   const armed = await getReminderArmedEvents(from, to);
   const firings: Firing[] = [];
+  let covered = 0;
   for (const { event: ev, minutes } of armed) {
     if (taskEventIds.has(ev.eventId)) continue; // fires via its follow-up
     const start = Date.parse(ev.startsAt);
@@ -267,6 +323,16 @@ async function collectEventFirings(
     const key = `rem:event:${ev.eventId}:${minutes}:${ev.startsAt}`;
     const gate = await snoozeGate("event", ev.eventId, key, now);
     if (gate === "deferred") continue;
+    if (gate === "standard") {
+      if (await alreadySent("eventReminder", key, 30)) continue;
+      // Ownership: a native Outlook reminder covers this event — the
+      // portal push is suppressed; the skip is logged, once per key.
+      if (ev.graphReminderOn === true) {
+        covered += 1;
+        await logCoveredOnce("eventReminder", key, ev.title, 30);
+        continue;
+      }
+    }
     const built = buildEventReminder(ev, now);
     firings.push({
       kind: "event",
@@ -283,7 +349,7 @@ async function collectEventFirings(
       snoozed: gate === "snoozed",
     });
   }
-  return firings;
+  return { firings, covered };
 }
 
 async function sendOne(f: Firing): Promise<SendResult> {
@@ -382,14 +448,22 @@ async function sendFirings(firings: Firing[]): Promise<{ candidates: number; sen
 
 async function evalReminders(
   now: Date
-): Promise<{ taskCandidates: number; eventCandidates: number; sent: number }> {
+): Promise<{ taskCandidates: number; eventCandidates: number; covered: number; sent: number }> {
   const prefs = await getPreferences(USER);
-  const { firings: taskFirings, taskEventIds } = await collectTaskFirings(now, prefs);
-  const eventFirings = await collectEventFirings(now, taskEventIds);
+  const {
+    firings: taskFirings,
+    taskEventIds,
+    covered: coveredTasks,
+  } = await collectTaskFirings(now, prefs);
+  const { firings: eventFirings, covered: coveredEvents } = await collectEventFirings(
+    now,
+    taskEventIds
+  );
   const out = await sendFirings([...taskFirings, ...eventFirings]);
   return {
     taskCandidates: taskFirings.length,
     eventCandidates: eventFirings.length,
+    covered: coveredTasks + coveredEvents,
     sent: out.sent,
   };
 }
@@ -656,6 +730,7 @@ export async function POST(req: NextRequest) {
     const rem = await evalReminders(now);
     evaluated.followups = rem.taskCandidates;
     evaluated.eventReminder = rem.eventCandidates;
+    evaluated.remindersCovered = rem.covered;
     sent += rem.sent;
   } catch (err) {
     errors.reminders = err instanceof Error ? err.message : String(err);
