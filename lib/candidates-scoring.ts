@@ -39,7 +39,13 @@ import type { Deal, MiCompany } from "./types";
  * never excluded (spec).
  */
 
-export const OPERATOR_MATCH_STRONG = 50;
+/**
+ * A match counts as STRONG at 65+: same sector (45) alone with bare
+ * in-state location (6) and no size evidence (10) totals only 61, so
+ * a strong pairing always combines the right sector with real locality
+ * (same city/metro) or a verified size fit — never sector alone.
+ */
+export const OPERATOR_MATCH_STRONG = 65;
 export const OPERATOR_MATCH_FLOOR = 25;
 const POOL_FIT_CAP_PER_SECTOR = 2000;
 const POOL_ROW_CAP_PER_SECTOR = 40000;
@@ -612,9 +618,16 @@ interface EmployerHit {
 function nameMatches(alias: string, norm: string): boolean {
   if (!alias || !norm) return false;
   if (alias === norm) return true;
-  if (alias.length >= 8 && norm.includes(alias)) return true;
-  if (norm.length >= 8 && alias.includes(norm)) return true;
-  return false;
+  // Containment only between multi-token names, on word boundaries:
+  // "shane construction" must not match inside "mcshane construction",
+  // and a generic one-word name ("building") loosely matches nothing.
+  const aToks = alias.split(" ").filter(Boolean);
+  const nToks = norm.split(" ").filter(Boolean);
+  if (aToks.length < 2 || nToks.length < 2) return false;
+  const shorter = alias.length <= norm.length ? alias : norm;
+  const longer = alias.length <= norm.length ? norm : alias;
+  if (shorter.length < 10) return false;
+  return ` ${longer} `.includes(` ${shorter} `);
 }
 
 function detectConflicts(
