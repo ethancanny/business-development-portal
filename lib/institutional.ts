@@ -1,4 +1,16 @@
-import { chainTokens, tokensContainSeq } from "./text-tokens";
+import { chainTokens, stemToken, tokensContainSeq } from "./text-tokens";
+
+/** First index of a token sequence in a token list, or -1. */
+function seqIndex(hay: string[], needle: string[]): number {
+  for (let i = 0; i + needle.length <= hay.length; i++) {
+    let ok = true;
+    for (let j = 0; j < needle.length; j++) {
+      if (hay[i + j] !== needle[j]) { ok = false; break; }
+    }
+    if (ok) return i;
+  }
+  return -1;
+}
 
 /* ---------------- Institutional filter (Ethan, Oct 17, 2026) -------------
  * Companion to the chain filter, and it runs FIRST: Canny only wants
@@ -77,23 +89,25 @@ export const INSTITUTIONAL_COMMERCIAL_EXCEPTIONS: string[] = [
 /** Hard name signals: [token sequence, reason category, display term].
  * Reason categories are the plain-language buckets Ethan reviews:
  * "Institutional: school" etc. */
-const INST_HARD_NAME_TERMS: { seq: string[]; cat: string; label: string }[] = [
+const INST_HARD_NAME_TERMS: { seq: string[]; cat: string; label: string; notAfter?: string[] }[] = [
   { seq: ["ELEMENTARY"], cat: "school", label: "Elementary" },
   { seq: ["HIGH", "SCHOOL"], cat: "school", label: "High School" },
   { seq: ["PRESCHOOL"], cat: "school", label: "Preschool" },
-  { seq: ["CHARTER"], cat: "school", label: "Charter" },
-  { seq: ["DISTRICT"], cat: "school", label: "District" },
+  { seq: ["CHARTER", "SCHOOL"], cat: "school", label: "Charter School" },
+  { seq: ["CHARTER", "ACADEMY"], cat: "school", label: "Charter Academy" },
+  { seq: ["SCHOOL", "DISTRICT"], cat: "school", label: "School District" },
   { seq: ["COLLEGE"], cat: "school", label: "College" },
-  { seq: ["CAMPUS"], cat: "school", label: "Campus" },
+  { seq: ["UNIVERSITY"], cat: "school", label: "University" },
   { seq: ["CHURCH"], cat: "religious", label: "Church" },
   { seq: ["MINISTRY"], cat: "religious", label: "Ministry" },
+  { seq: ["TEMPLE"], cat: "religious", label: "Temple" },
   { seq: ["SYNAGOGUE"], cat: "religious", label: "Synagogue" },
   { seq: ["DIOCESE"], cat: "religious", label: "Diocese" },
   { seq: ["CITY", "OF"], cat: "government", label: "City of" },
   { seq: ["TOWN", "OF"], cat: "government", label: "Town of" },
-  { seq: ["STATE", "OF"], cat: "government", label: "State of" },
+  // "State of" the government — never "State-Of-The-Art".
+  { seq: ["STATE", "OF"], cat: "government", label: "State of", notAfter: ["THE"] },
   { seq: ["DEPARTMENT", "OF"], cat: "government", label: "Department of" },
-  { seq: ["COUNTY"], cat: "government", label: "County" },
   { seq: ["HOUSING", "AUTHORITY"], cat: "government", label: "Housing Authority" },
   { seq: ["VA", "MEDICAL"], cat: "government", label: "VA Medical" },
   { seq: ["VA", "HOSPITAL"], cat: "government", label: "VA Hospital" },
@@ -114,11 +128,19 @@ const INST_HARD_NAME_TERMS: { seq: string[]; cat: string; label: string }[] = [
 /** Weak name signals: [token sequence, ambiguity note]. Alone they
  * tag "Possible institution"; two or more corroborate into a flag. */
 const INST_WEAK_NAME_TERMS: { seq: string[]; cat: string; label: string; note: string }[] = [
-  { seq: ["UNIVERSITY"], cat: "school", label: "University", note: "\"University\" can be a place name, not the institution" },
-  { seq: ["TEMPLE"], cat: "religious", label: "Temple", note: "\"Temple\" can be a surname, not a house of worship" },
   { seq: ["CLUB"], cat: "member club", label: "Club", note: "member-owned clubs are institutional; commercial clubs exist" },
   { seq: ["HOA"], cat: "government", label: "HOA", note: "may be the association itself or its (commercial) manager" },
   { seq: ["BASE"], cat: "government", label: "Base", note: "\"Base\" alone does not prove a military installation" },
+  // Bare District / County / Charter / Campus were HARD in the first
+  // run and produced clear false positives (District Power LLC, East
+  // County Wood & Tile, Charter Construction Group, a senior-living
+  // "Campus") — they are ambiguous alone, so they corroborate or tag
+  // for review instead. Paired forms stay hard: School District,
+  // Charter School, Housing Authority.
+  { seq: ["DISTRICT"], cat: "school", label: "District", note: "\"District\" alone is often a commercial district brand, not a school district" },
+  { seq: ["COUNTY"], cat: "government", label: "County", note: "\"County\" may be county government or just a geographic descriptor in a contractor's name" },
+  { seq: ["CHARTER"], cat: "school", label: "Charter", note: "\"Charter\" alone may be a charter school or an unrelated brand" },
+  { seq: ["CAMPUS"], cat: "school", label: "Campus", note: "\"Campus\" may be a school campus or a care/office campus brand" },
 ];
 
 /** Strong facility-class keywords (permit / facility types): a permit
@@ -156,6 +178,8 @@ export function detectInstitutional(
   const sector = rec.sector ?? "";
   const nameUpper = ` ${(rec.name ?? "").toUpperCase().replace(/['’]/g, "").replace(/[^A-Z0-9]+/g, " ")} `;
   const tokens = chainTokens(rec.name ?? "");
+  // Stemmed tokens so plural forms match ("Mesa Public Schools").
+  const stemTokens = tokens.map(stemToken);
   const hard = (cat: string, evidence: string): InstitutionalVerdict => ({
     isInstitutional: true,
     reason: `Institutional: ${cat} — ${evidence}`,
@@ -206,15 +230,31 @@ export function detectInstitutional(
     }
   }
 
-  // (name) — hard terms on word boundaries.
+  // (name) — hard terms on word boundaries (raw + stemmed tokens).
+  let churchFirst = false;
   for (const term of INST_HARD_NAME_TERMS) {
-    if (tokensContainSeq(tokens, term.seq)) {
-      return hard(term.cat, `name contains "${term.label}"`);
+    let hit = false;
+    for (const hay of [tokens, stemTokens]) {
+      const needle = hay === stemTokens ? term.seq.map(stemToken) : term.seq;
+      const idx = seqIndex(hay, needle);
+      if (idx < 0) continue;
+      if (term.notAfter && term.notAfter.includes(hay[idx + needle.length] ?? "")) continue;
+      hit = true;
+      break;
     }
+    if (!hit) continue;
+    // "Church" LEADING a name is as often a surname as a congregation
+    // (Church Concrete LLC is a family-named contractor) — demote to
+    // a weak signal; a church named "... Church" still flags hard.
+    if (term.label === "Church" && tokens[0] === "CHURCH") {
+      churchFirst = true;
+      continue;
+    }
+    return hard(term.cat, `name contains "${term.label}"`);
   }
   // (name) — Foundation: a nonprofit tell everywhere EXCEPT the
   // trades, where a foundation is something you pour and repair.
-  if (tokens.includes("FOUNDATION")) {
+  if (stemTokens.includes("FOUNDATION")) {
     if (sector === "Specialty Trades & Construction") {
       // falls through to the weak-signal tally below
     } else {
@@ -237,23 +277,26 @@ export function detectInstitutional(
   // (name) — School / Academy with Ethan's commercial exception: an
   // exception phrase suppresses the name signal (the record is then
   // judged on entity type / ownership, which ran above).
-  const hasSchoolToken = tokens.includes("SCHOOL") || tokens.includes("ACADEMY");
+  const hasSchoolToken = stemTokens.includes("SCHOOL") || stemTokens.includes("ACADEMY");
   if (hasSchoolToken) {
     const exception = INSTITUTIONAL_COMMERCIAL_EXCEPTIONS.find((x) => nameUpper.includes(` ${x} `) || nameUpper.includes(` ${x}`));
     if (!exception) {
-      return hard("school", `name contains "${tokens.includes("SCHOOL") ? "School" : "Academy"}"`);
+      return hard("school", `name contains "${stemTokens.includes("SCHOOL") ? "School" : "Academy"}"`);
     }
   }
 
   // ---- weak signals only from here: "Possible institution". ----
   const weak: { cat: string; text: string }[] = [];
   for (const term of INST_WEAK_NAME_TERMS) {
-    if (tokensContainSeq(tokens, term.seq)) {
+    if (tokensContainSeq(tokens, term.seq) || tokensContainSeq(stemTokens, term.seq.map(stemToken))) {
       weak.push({ cat: term.cat, text: `"${term.label}" in name — ${term.note}` });
     }
   }
-  if (tokens.includes("FOUNDATION") && sector === "Specialty Trades & Construction") {
+  if (stemTokens.includes("FOUNDATION") && sector === "Specialty Trades & Construction") {
     weak.push({ cat: "nonprofit", text: "\"Foundation\" in a trades name usually means structural foundation work, not a nonprofit" });
+  }
+  if (churchFirst) {
+    weak.push({ cat: "religious", text: "\"Church\" leading the name — a house of worship, or a surname on a family-named business" });
   }
   if (tokens.includes("VA") && !tokensContainSeq(tokens, ["VA", "MEDICAL"]) && !tokensContainSeq(tokens, ["VA", "HOSPITAL"]) && !tokensContainSeq(tokens, ["VA", "CLINIC"])) {
     weak.push({ cat: "government", text: "\"VA\" in name — may be a veterans' facility or an unrelated name" });
