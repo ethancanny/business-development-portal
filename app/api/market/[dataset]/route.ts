@@ -36,6 +36,7 @@ import {
   setListingStatus,
   addMultiple,
 } from "@/lib/market-db";
+import { markNotInstitutional } from "@/lib/institutional-db";
 
 const DATASETS = [
   "indicators",
@@ -91,17 +92,18 @@ export async function GET(
           const { companies, fitTotal } = await getFitCompanies(sectors.length ? sectors : undefined);
           return NextResponse.json({ companies, fitTotal, limit: FITS_DISPLAY_LIMIT, mode: "fits" });
         }
-        // Filtered Out feed (chain/franchise filter, Oct 16, 2026):
-        // chain-flagged companies with their reasons — never deleted,
-        // never in the fits feed; the view carries the "Not a chain"
-        // override.
+        // Filtered Out feed (chain/franchise filter, Oct 16, 2026;
+        // institutional filter, Oct 17, 2026): chain-flagged AND
+        // institutional-flagged/suspect companies with their reasons
+        // — never deleted, never in the fits feed; the view carries
+        // the "Not a chain" and "Not institutional" overrides.
         if (sp.get("mode") === "filtered") {
           const sectors = (sp.get("sectors") ?? "")
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean);
-          const { companies, chainTotal } = await getFilteredCompanies(sectors.length ? sectors : undefined);
-          return NextResponse.json({ companies, chainTotal, mode: "filtered" });
+          const { companies, chainTotal, institutionalTotal, filteredTotal } = await getFilteredCompanies(sectors.length ? sectors : undefined);
+          return NextResponse.json({ companies, chainTotal, institutionalTotal, filteredTotal, mode: "filtered" });
         }
         const sector = sp.get("sector") ?? undefined;
         const off = Number(sp.get("offset") ?? 0);
@@ -196,6 +198,10 @@ export async function POST(
       case "companies":
         if (body.id && body.action === "not-a-chain") {
           await markNotChain(String(body.id));
+          return NextResponse.json({ ok: true });
+        }
+        if (body.id && body.action === "not-an-institution") {
+          await markNotInstitutional(String(body.id));
           return NextResponse.json({ ok: true });
         }
         if (body.id && body.action === "restore") {

@@ -399,6 +399,22 @@ export function ensureSchema(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS mi_companies_chain_idx
         ON mi_companies (is_chain) WHERE is_chain`;
+      // Institutional filter (Ethan, Oct 17, 2026): is_institutional
+      // rows (schools, nonprofits, government, religious, correctional,
+      // facility dining) are excluded from the Fits section and its
+      // counts exactly like chains — never deleted; they list in the
+      // Filtered Out view with institutional_reason. institutional_
+      // suspect is the ambiguous-signal "Possible institution" tag —
+      // also held out of Fits pending Ethan's review.
+      // institutional_exempt is the permanent "Not institutional"
+      // override — detection never re-flags an exempt record.
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS is_institutional BOOLEAN NOT NULL DEFAULT false`;
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS institutional_reason TEXT NOT NULL DEFAULT ''`;
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS institutional_suspect BOOLEAN NOT NULL DEFAULT false`;
+      await db`ALTER TABLE mi_companies ADD COLUMN IF NOT EXISTS institutional_exempt BOOLEAN NOT NULL DEFAULT false`;
+      await db`
+        CREATE INDEX IF NOT EXISTS mi_companies_institutional_idx
+        ON mi_companies (is_institutional) WHERE is_institutional`;
       // Fix A (Oct 16, 2026): widen the mi_companies unique key to include
       // sector. CREATE TABLE IF NOT EXISTS does not migrate the live table,
       // whose (source, dedup_key) key made dual-sector USASpending
