@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
 import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
+import { EmptyState, SkeletonRows } from "@/components/ui";
 import type { DealFlowItem, DealFlowKind, DealFlowStatus } from "@/lib/types";
 
 const KIND_META: Record<DealFlowKind, { label: string; cls: string }> = {
@@ -195,8 +196,8 @@ export default function ActivityPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <p className="text-sm text-slate-500 dark:text-white/50">Loading deal flow…</p>
+      <div className="mx-auto max-w-[1100px] px-4 py-6 sm:px-6">
+        <SkeletonRows rows={5} />
       </div>
     );
   }
@@ -221,25 +222,21 @@ export default function ActivityPage() {
             <button
               key={s}
               onClick={() => setFilter(s)}
-              className={`rounded-full px-3 py-1.5 text-xs font-semibold capitalize transition ${
-                filter === s
-                  ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
-                  : "bg-white text-slate-500 hover:bg-slate-100 dark:bg-white/10 dark:text-white/60"
-              }`}
+              className={`chip capitalize ${filter === s ? "chip-active" : ""}`}
             >
               {s === "all" ? `All (${items.length})` : s}
             </button>
           ))}
           <button
             onClick={() => setShowAdd((v) => !v)}
-            className="ml-auto rounded-lg bg-[#0d1f3c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1a3455] dark:bg-[#b8975a] dark:text-[#0d1f3c] dark:hover:bg-[#d4b37a]"
+            className="btn btn-primary ml-auto"
           >
             {showAdd ? "Cancel" : "+ Add item"}
           </button>
           {unreadCount > 0 && (
             <button
               onClick={markAllRead}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-white/20 dark:text-white/70 dark:hover:bg-white/5"
+              className="btn btn-secondary"
             >
               Mark all as read ({unreadCount})
             </button>
@@ -248,15 +245,20 @@ export default function ActivityPage() {
 
         {showAdd && <AddFlowItem onDone={() => { setShowAdd(false); load(); }} />}
 
-        {filtered.length === 0 && (
-          <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center dark:border-white/15">
-            <p className="text-sm text-slate-500 dark:text-white/50">
-              {newCount === 0 && filter === "all"
-                ? "Nothing in the feed yet. The morning sweep will add fresh opportunities here."
-                : "Nothing with this status."}
-            </p>
-          </div>
-        )}
+        {filtered.length === 0 &&
+          (newCount === 0 && filter === "all" ? (
+            <EmptyState
+              title="Nothing in the feed yet"
+              message="The morning sweep will add fresh opportunities here."
+              actionLabel="Add an item"
+              onAction={() => setShowAdd(true)}
+            />
+          ) : (
+            <EmptyState
+              title="Nothing with this status"
+              message="Try a different status filter."
+            />
+          ))}
 
         {/* Kind tabs — each feed type gets its own tab */}
         <div className="mb-4 flex flex-wrap gap-2">
@@ -273,11 +275,7 @@ export default function ActivityPage() {
               <button
                 key={t.kind}
                 onClick={() => setKindTab(t.kind)}
-                className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition ${
-                  active
-                    ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
-                    : "bg-white text-slate-500 hover:bg-slate-100 dark:bg-white/10 dark:text-white/60"
-                }`}
+                className={`chip text-sm ${active ? "chip-active" : ""}`}
               >
                 {t.label} <span className="opacity-70">({n})</span>
               </button>
@@ -286,9 +284,10 @@ export default function ActivityPage() {
         </div>
 
         {tabItems.length === 0 && filtered.length > 0 && (
-          <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center dark:border-white/15">
-            <p className="text-sm text-slate-500 dark:text-white/50">Nothing in this tab with the current status filter.</p>
-          </div>
+          <EmptyState
+            title="Nothing in this tab"
+            message="Nothing in this tab with the current status filter."
+          />
         )}
 
         <div className="flex flex-col gap-3">
@@ -298,7 +297,7 @@ const km = KIND_META[item.kind];
             return (
               <article
                 key={item.id}
-                className={`rounded-xl border bg-white p-5 dark:bg-[#132847] ${
+                className={`rounded-card border bg-white p-5 shadow-card transition-shadow duration-200 hover:shadow-lift dark:bg-[#132847] ${
                   item.status === "new"
                     ? "border-[#b8975a] shadow-sm dark:border-[#b8975a]/60"
                     : "border-slate-200 dark:border-white/10"

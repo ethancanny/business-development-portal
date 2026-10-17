@@ -399,7 +399,8 @@ export default function TaskList({
           <button
             onClick={addTask}
             disabled={busy || !title.trim()}
-            className="rounded-lg bg-[#0d1f3c] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1a3455] disabled:opacity-50 dark:bg-[#b8975a] dark:text-[#0d1f3c] dark:hover:bg-[#d4b37a]"
+            data-loading={busy || undefined}
+            className="btn btn-primary btn-sm"
           >
             Add
           </button>
@@ -466,7 +467,7 @@ export default function TaskList({
           <button
             type="button"
             onClick={() => setNotesOpen(true)}
-            className="self-start text-xs font-medium text-slate-400 transition hover:text-[#8a6f3c] dark:text-white/35 dark:hover:text-[#d4b37a]"
+            className="self-start text-xs font-medium text-caption transition hover:text-gold-700 dark:hover:text-gold-400"
           >
             ＋ Add a note
           </button>
@@ -475,7 +476,7 @@ export default function TaskList({
 
       {/* Grouped list */}
       {tasks.length === 0 ? (
-        <p className="py-4 text-center text-sm text-slate-400 dark:text-white/40">
+        <p className="py-6 text-center text-sm text-caption">
           No follow-ups. Add one above so nothing slips.
         </p>
       ) : (
@@ -525,7 +526,7 @@ export default function TaskList({
                             <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-slate-900 dark:text-white">
                               <span className="min-w-0">{t.title}</span>
                               {t.priority === "high" && (
-                                <span className="rounded-full bg-[#b8975a]/20 px-1.5 py-px text-[10px] font-bold text-[#8a6f3c] dark:text-[#d4b37a]">
+                                <span className="badge badge-danger">
                                   ⚑ HIGH
                                 </span>
                               )}
@@ -570,7 +571,7 @@ export default function TaskList({
                                 </Link>
                               )}
                               {t.notes && (
-                                <span className="text-[11px] text-slate-400 dark:text-white/35">
+                                <span className="text-[11px] text-caption">
                                   {expanded ? "▾ notes" : "▸ notes"}
                                 </span>
                               )}
