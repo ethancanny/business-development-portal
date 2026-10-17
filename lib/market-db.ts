@@ -1,5 +1,10 @@
 import { neon } from "@neondatabase/serverless";
 import { ensureSchema, newId } from "./db-postgres";
+import { chainTokens, stemToken, tokensContainSeq } from "./text-tokens";
+import { detectInstitutional, type InstitutionalVerdict } from "./institutional";
+import { refreshRowInstitutional } from "./institutional-db";
+export { chainTokens } from "./text-tokens";
+export { isInstitutionalFacilityText, hasInstitutionalNameSignal } from "./institutional";
 import type {
   MiAcquisition,
   MiEntity,
@@ -493,35 +498,6 @@ function compileChainSettings(s: ChainFilterSettings): CompiledChainSettings {
   return { ...s, brandTokens, brandJoined, brandNames };
 }
 
-/** Brand/name tokenizer: uppercase, apostrophes dropped (so DENNY'S
- * and Denny's agree), punctuation becomes spaces, corporate suffixes
- * dropped. Token-sequence matching gives word boundaries for free —
- * "ALDI" matches the Aldi group but never "ESMERALDITA". */
-export function chainTokens(s: string): string[] {
-  return (s || "")
-    .toUpperCase()
-    .replace(/['’]/g, "")
-    .replace(/&/g, " AND ")
-    .replace(/[^A-Z0-9]+/g, " ")
-    .split(" ")
-    .map((t) => t.trim())
-    .filter((t) => t && !["INC", "LLC", "LTD", "CORP", "CORPORATION", "CO", "COMPANY", "LP", "LLP", "PLC", "THE"].includes(t));
-}
-
-const stemToken = (t: string): string => (t.length > 3 && t.endsWith("S") ? t.slice(0, -1) : t);
-
-function tokensContainSeq(hay: string[], needle: string[]): boolean {
-  if (!needle.length || needle.length > hay.length) return false;
-  for (let i = 0; i + needle.length <= hay.length; i++) {
-    let ok = true;
-    for (let j = 0; j < needle.length; j++) {
-      if (hay[i + j] !== needle[j]) { ok = false; break; }
-    }
-    if (ok) return true;
-  }
-  return false;
-}
-
 let chainSettingsCache: { value: CompiledChainSettings; at: number } | null = null;
 
 export function chainSettings(): CompiledChainSettings {
@@ -894,22 +870,38 @@ export async function runChainDetectionBatch(
   };
 }
 
-/** All chain-flagged companies (the Filtered Out view), newest
- * date_added first. Not deleted, never in the fits feed — listed here
- * with the reason so Ethan can override false positives. */
-export async function getFilteredCompanies(sectors?: string[]): Promise<{ companies: MiCompany[]; chainTotal: number }> {
+/** All filtered-out companies (the Filtered Out view), newest
+ * date_added first: chain/franchise-flagged rows AND institutional
+ * rows (hard flags + "Possible institution" suspects, Oct 17, 2026).
+ * Not deleted, never in the fits feed — listed here with the reason
+ * so Ethan can override false positives. Institutional runs first:
+ * a row carrying both flags lists once, and the UI shows the
+ * institutional reason first. */
+export async function getFilteredCompanies(sectors?: string[]): Promise<{ companies: MiCompany[]; chainTotal: number; institutionalTotal: number; filteredTotal: number }> {
   await ensureSchema();
   const db = sql();
   const list = (sectors ?? []).filter(Boolean);
+  const FILTERED = `is_chain = true OR is_institutional = true OR institutional_suspect = true`;
   const totalRows = list.length
-    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE is_chain = true AND sector = ANY(${list})`
-    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE is_chain = true`;
+    ? await db.query(`SELECT
+        COUNT(*) FILTER (WHERE is_chain)::int AS chain,
+        COUNT(*) FILTER (WHERE is_institutional OR institutional_suspect)::int AS inst,
+        COUNT(*)::int AS total
+      FROM mi_companies WHERE (${FILTERED}) AND sector = ANY($1)`, [list])
+    : await db.query(`SELECT
+        COUNT(*) FILTER (WHERE is_chain)::int AS chain,
+        COUNT(*) FILTER (WHERE is_institutional OR institutional_suspect)::int AS inst,
+        COUNT(*)::int AS total
+      FROM mi_companies WHERE (${FILTERED})`);
   const rows = list.length
-    ? await db`SELECT * FROM mi_companies WHERE is_chain = true AND sector = ANY(${list}) ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT 500`
-    : await db`SELECT * FROM mi_companies WHERE is_chain = true ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT 500`;
+    ? await db.query(`SELECT * FROM mi_companies WHERE (${FILTERED}) AND sector = ANY($1) ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT 500`, [list])
+    : await db`SELECT * FROM mi_companies WHERE is_chain = true OR is_institutional = true OR institutional_suspect = true ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT 500`;
+  const t = (totalRows as unknown as Record<string, unknown>[])[0] ?? {};
   return {
-    companies: rows.map((r) => mapCompanyRow(r as Record<string, unknown>)),
-    chainTotal: Number((totalRows as unknown as { c: number }[])[0]?.c ?? 0),
+    companies: (rows as unknown as Record<string, unknown>[]).map((r) => mapCompanyRow(r)),
+    chainTotal: Number(t.chain ?? 0),
+    institutionalTotal: Number(t.inst ?? 0),
+    filteredTotal: Number(t.total ?? 0),
   };
 }
 
@@ -1064,7 +1056,22 @@ function computeFit(r: CompanyInput): { fit: boolean; why: string; unscored?: bo
     ) {
       return { fit: false, why: "", estRevenue: rev };
     }
-    const locs = typeof details.locationCount === "number" ? details.locationCount : 0;
+    // Institutional fit rules (Ethan, Oct 17, 2026 — §5): only
+    // COMMERCIAL locations count toward the location threshold — a
+    // permit at an institution (school cafeteria, hospital kitchen)
+    // is not a location. The hospitality sync stamps
+    // commercialLocationCount; older rows fall back to locationCount.
+    const locs = typeof details.commercialLocationCount === "number"
+      ? details.commercialLocationCount
+      : typeof details.locationCount === "number" ? details.locationCount : 0;
+    // Unverified ownership + an institutional name/facility signal is
+    // excluded by default — never assumed a fit.
+    if (ownership === "unknown") {
+      const iv = detectInstitutional({ name: r.name, sector: r.sector, details: r.details });
+      if (iv.isInstitutional || iv.suspect) {
+        return { fit: false, why: "", estRevenue: rev };
+      }
+    }
     const concept = String(details.concept ?? "");
     if (locs >= th.minLocations) {
       return {
@@ -1140,6 +1147,13 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
       { name: r.name, website: r.website ?? "", details: r.details ?? "" },
       chainSettings()
     );
+    // Institutional detection (Ethan, Oct 17, 2026) runs alongside —
+    // it is evaluated FIRST for display (Filtered Out shows the
+    // institutional reason first when both filters flag a record),
+    // while both verdicts are stored truthfully.
+    (r as CompanyInput & { _inst?: InstitutionalVerdict })._inst = detectInstitutional(
+      { name: r.name, sector: r.sector, details: r.details ?? "" }
+    );
   }
   // No-resurface guard (Ethan, Oct 16, 2026): a dismissed company must
   // never come back as a fit under a new source identity. Index the
@@ -1179,8 +1193,8 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     // so one registry feeding several sector spines never wipes the others.
     const sectors = Array.from(new Set(clean.map((r) => r.sector).filter(Boolean)));
     const existing = sectors.length
-      ? await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
-      : await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt FROM mi_companies WHERE source = ${source}`;
+      ? await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt, is_institutional, institutional_reason, institutional_suspect, institutional_exempt FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
+      : await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt, is_institutional, institutional_reason, institutional_suspect, institutional_exempt FROM mi_companies WHERE source = ${source}`;
     const statusByKey = new Map(existing.map((r) => [str(r.dedup_key), str(r.status)]));
     const firstSeenByKey = new Map(existing.map((r) => [str(r.dedup_key), r.first_seen]));
     const dateAddedByKey = new Map(existing.map((r) => [str(r.dedup_key), r.date_added]));
@@ -1201,6 +1215,20 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
         },
       ])
     );
+    // Institutional state carried through a reset under the same
+    // rules as chain state: exemption is permanent; dismissed rows
+    // keep their fields exactly; everyone else is re-judged.
+    const instCarryByKey = new Map(
+      existing.map((r) => [
+        str(r.dedup_key),
+        {
+          isInstitutional: r.is_institutional === true,
+          reason: str(r.institutional_reason),
+          suspect: r.institutional_suspect === true,
+          exempt: r.institutional_exempt === true,
+        },
+      ])
+    );
     if (sectors.length) {
       await db`DELETE FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`;
     } else {
@@ -1214,6 +1242,8 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
       (r as CompanyInput & { _dismissedReason?: string })._dismissedReason = dismissedReasonByKey.get(r.dedupKey);
       (r as CompanyInput & { _chainCarried?: { isChain: boolean; reason: string; suspect: boolean; exempt: boolean } })._chainCarried =
         chainCarryByKey.get(r.dedupKey);
+      (r as CompanyInput & { _instCarried?: { isInstitutional: boolean; reason: string; suspect: boolean; exempt: boolean } })._instCarried =
+        instCarryByKey.get(r.dedupKey);
     }
   }
   const CHUNK = 300;
@@ -1222,13 +1252,15 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     const values: string[] = [];
     const params: unknown[] = [];
     chunk.forEach((r, j) => {
-      const b = j * 30;
-      values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}, $${b + 11}, $${b + 12}, $${b + 13}, $${b + 14}, $${b + 15}, $${b + 16}, $${b + 17}, $${b + 18}, $${b + 19}, $${b + 20}, $${b + 21}, $${b + 22}, $${b + 23}, $${b + 24}, $${b + 25}, $${b + 26}, $${b + 27}, $${b + 28}, $${b + 29}, $${b + 30})`);
+      const b = j * 34;
+      values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}, $${b + 11}, $${b + 12}, $${b + 13}, $${b + 14}, $${b + 15}, $${b + 16}, $${b + 17}, $${b + 18}, $${b + 19}, $${b + 20}, $${b + 21}, $${b + 22}, $${b + 23}, $${b + 24}, $${b + 25}, $${b + 26}, $${b + 27}, $${b + 28}, $${b + 29}, $${b + 30}, $${b + 31}, $${b + 32}, $${b + 33}, $${b + 34})`);
       const rx = r as CompanyInput & {
         _fit?: boolean; _status?: string; _firstSeen?: unknown;
         _dateAdded?: unknown; _dismissedAt?: unknown; _dismissedReason?: string;
         _chain?: ChainVerdict;
         _chainCarried?: { isChain: boolean; reason: string; suspect: boolean; exempt: boolean };
+        _inst?: InstitutionalVerdict;
+        _instCarried?: { isInstitutional: boolean; reason: string; suspect: boolean; exempt: boolean };
       };
       // Stage resolution (fit-stage model): a carried dismissal always
       // wins; a name+domain / ACC-ID match against a dismissed record
@@ -1281,6 +1313,31 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
           ? (carriedChain?.suspect ?? false)
           : (verdict?.suspect ?? false);
       const chainExempt = carriedChain?.exempt ?? false;
+      // Institutional resolution: identical rules to chain (carried
+      // exemption wins; dismissed rows keep carried fields verbatim;
+      // everyone else takes this import's verdict).
+      const carriedInst = rx._instCarried;
+      const iv = rx._inst;
+      const instIs = carriedInst?.exempt
+        ? false
+        : status === "dismissed"
+          ? (carriedInst?.isInstitutional ?? false)
+          : (iv?.isInstitutional ?? false);
+      const instReason = carriedInst?.exempt
+        ? ""
+        : status === "dismissed"
+          ? (carriedInst?.reason ?? "")
+          : iv?.isInstitutional
+            ? iv.reason
+            : iv?.suspect
+              ? iv.suspectReason
+              : "";
+      const instSuspect = carriedInst?.exempt
+        ? false
+        : status === "dismissed"
+          ? (carriedInst?.suspect ?? false)
+          : (iv?.suspect ?? false);
+      const instExempt = carriedInst?.exempt ?? false;
       params.push(
         newId(), r.dedupKey, r.name, r.sector, r.subsector ?? "", r.naics ?? "",
         r.city ?? "", r.state ?? "AZ", r.address ?? "", r.zip ?? "",
@@ -1295,14 +1352,19 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
         chainIsChain,
         chainReason,
         chainSuspect,
-        chainExempt
+        chainExempt,
+        instIs,
+        instReason,
+        instSuspect,
+        instExempt
       );
     });
     await db.query(
       `INSERT INTO mi_companies (id, dedup_key, name, sector, subsector, naics, city, state, address, zip,
          contact_name, contact_title, phone, website, formed_date, employees, signal_value, signal_label,
          source, source_url, details, status, first_seen, date_added, dismissed_at, dismissed_reason,
-         is_chain, chain_reason, chain_suspect, chain_exempt)
+         is_chain, chain_reason, chain_suspect, chain_exempt,
+         is_institutional, institutional_reason, institutional_suspect, institutional_exempt)
        VALUES ${values.join(", ")}
        ON CONFLICT (source, dedup_key, sector) DO UPDATE SET
          name = EXCLUDED.name, sector = EXCLUDED.sector, subsector = EXCLUDED.subsector, naics = EXCLUDED.naics,
@@ -1338,6 +1400,22 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
            ELSE EXCLUDED.chain_suspect
          END,
          chain_exempt = mi_companies.chain_exempt,
+         is_institutional = CASE
+           WHEN mi_companies.institutional_exempt THEN false
+           WHEN mi_companies.status = 'dismissed' THEN mi_companies.is_institutional
+           ELSE EXCLUDED.is_institutional
+         END,
+         institutional_reason = CASE
+           WHEN mi_companies.institutional_exempt THEN ''
+           WHEN mi_companies.status = 'dismissed' THEN mi_companies.institutional_reason
+           ELSE EXCLUDED.institutional_reason
+         END,
+         institutional_suspect = CASE
+           WHEN mi_companies.institutional_exempt THEN false
+           WHEN mi_companies.status = 'dismissed' THEN mi_companies.institutional_suspect
+           ELSE EXCLUDED.institutional_suspect
+         END,
+         institutional_exempt = mi_companies.institutional_exempt,
          last_seen = NOW(), updated_at = NOW()`,
       params
     );
@@ -1473,8 +1551,8 @@ export async function countFits(sector?: string): Promise<number> {
   await runFitStageMigration();
   const db = sql();
   const rows = sector
-    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND status = 'fit' AND is_chain = false`
-    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false`;
+    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false`
+    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false`;
   return Number((rows as unknown as { c: number }[])[0]?.c ?? 0);
 }
 
@@ -1571,10 +1649,11 @@ export async function rescoreCompanies(sector: string | undefined, offset: numbe
     const judged = judgeDetails(input);
     const stage = stageAfterRejudge(str(r.status), judged.fit);
     const chainChanged = await refreshRowChain(r as Record<string, unknown>, judged.details);
+    const instChanged = await refreshRowInstitutional(r as Record<string, unknown>, judged.details);
     if (judged.changed || stage !== str(r.status)) {
       await db`UPDATE mi_companies SET details = ${judged.details}, status = ${stage} WHERE id = ${r.id}`;
     }
-    if (judged.changed || stage !== str(r.status) || chainChanged) changed++;
+    if (judged.changed || stage !== str(r.status) || chainChanged || instChanged) changed++;
   }
   return { processed: rows.length, changed, nextOffset: rows.length < pageSize ? -1 : offset + rows.length };
 }
@@ -1600,10 +1679,11 @@ export async function rescoreCompaniesByIds(ids: string[]): Promise<number> {
       const judged = judgeDetails(input);
       const stage = stageAfterRejudge(str(r.status), judged.fit);
       const chainChanged = await refreshRowChain(r, judged.details);
+      const instChanged = await refreshRowInstitutional(r, judged.details);
       if (judged.changed || stage !== str(r.status)) {
         await db`UPDATE mi_companies SET details = ${judged.details}, status = ${stage} WHERE id = ${r.id as string}`;
       }
-      if (judged.changed || stage !== str(r.status) || chainChanged) changed++;
+      if (judged.changed || stage !== str(r.status) || chainChanged || instChanged) changed++;
     }
   }
   return changed;
@@ -1750,6 +1830,10 @@ function mapCompanyRow(r: Record<string, unknown>): MiCompany {
     chainReason: str(r.chain_reason),
     chainSuspect: r.chain_suspect === true,
     chainExempt: r.chain_exempt === true,
+    isInstitutional: r.is_institutional === true,
+    institutionalReason: str(r.institutional_reason),
+    institutionalSuspect: r.institutional_suspect === true,
+    institutionalExempt: r.institutional_exempt === true,
   };
 }
 
@@ -1781,11 +1865,11 @@ export async function getFitCompanies(sectors?: string[]): Promise<{ companies: 
   const db = sql();
   const list = (sectors ?? []).filter(Boolean);
   const totalRows = list.length
-    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false AND sector = ANY(${list})`
-    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false`;
+    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false AND sector = ANY(${list})`
+    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false`;
   const rows = list.length
-    ? await db`SELECT * FROM mi_companies WHERE status = 'fit' AND is_chain = false AND sector = ANY(${list}) ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`
-    : await db`SELECT * FROM mi_companies WHERE status = 'fit' AND is_chain = false ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`;
+    ? await db`SELECT * FROM mi_companies WHERE status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false AND sector = ANY(${list}) ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`
+    : await db`SELECT * FROM mi_companies WHERE status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`;
   return {
     companies: rows.map((r) => mapCompanyRow(r as Record<string, unknown>)),
     fitTotal: Number((totalRows as unknown as { c: number }[])[0]?.c ?? 0),
@@ -1832,6 +1916,7 @@ export async function restoreCompany(id: string): Promise<MiCompany["status"]> {
   const full = await db`SELECT * FROM mi_companies WHERE id = ${id}`;
   if (full.length) {
     await refreshRowChain(full[0] as Record<string, unknown>, str(full[0].details));
+    await refreshRowInstitutional(full[0] as Record<string, unknown>, str(full[0].details));
   }
   return status;
 }
