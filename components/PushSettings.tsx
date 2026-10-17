@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 
 type PushTypeKey =
   | "meeting60"
+  | "eventReminder"
   | "followups"
   | "fitSignals"
   | "newListing"
@@ -39,6 +40,7 @@ interface Device {
 
 const TYPE_LABELS: { key: PushTypeKey; label: string; hint: string }[] = [
   { key: "meeting60", label: "Meeting in about an hour", hint: "When a meeting with a Directory contact starts within the hour." },
+  { key: "eventReminder", label: "Event reminders", hint: "The per-event alarms you set on calendar events (15 minutes before, 30 minutes, etc.)." },
   { key: "followups", label: "Follow-ups due", hint: "Follow-ups due today or overdue (one alert per day)." },
   { key: "fitSignals", label: "New fit targets with signals", hint: "New fit targets carrying two or more owner-transition signals." },
   { key: "newListing", label: "New businesses for sale", hint: "New Arizona listings in a focus sector that pass the size screen." },

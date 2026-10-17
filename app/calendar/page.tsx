@@ -39,6 +39,7 @@ interface Draft {
   end: string;
   location: string;
   attendees: string; // create: invite list · edit: emails to ADD (comma-separated)
+  reminder: string; // "default" | "off" | minutes-before-start as a string
 }
 
 const emptyDraft: Draft = {
@@ -48,6 +49,40 @@ const emptyDraft: Draft = {
   end: "09:30",
   location: "",
   attendees: "",
+  reminder: "default",
+};
+
+/* Per-event reminder ladder (Ethan, Oct 16, 2026). "default" = no
+ * explicit choice: the portal's standard meeting alert governs pushes
+ * and Outlook's own reminder is left as-is. A picked time sets BOTH the
+ * Outlook reminder and a portal push at start − offset. */
+const REMINDER_OPTIONS: { v: string; label: string }[] = [
+  { v: "default", label: "Default" },
+  { v: "off", label: "Off — no reminder" },
+  { v: "0", label: "At start time" },
+  { v: "5", label: "5 minutes before" },
+  { v: "15", label: "15 minutes before" },
+  { v: "30", label: "30 minutes before" },
+  { v: "60", label: "1 hour before" },
+  { v: "120", label: "2 hours before" },
+  { v: "1440", label: "1 day before" },
+];
+
+const reminderLabel = (minutes: number): string => {
+  if (minutes === 0) return "At start time";
+  if (minutes < 60) return `${minutes} minutes before`;
+  if (minutes === 60) return "1 hour before";
+  if (minutes === 1440) return "1 day before";
+  if (minutes % 60 === 0) return `${minutes / 60} hours before`;
+  return `${minutes} minutes before`;
+};
+
+const reminderShort = (minutes: number): string => {
+  if (minutes === 0) return "at start";
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes === 1440) return "1d";
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
 };
 
 const parseEmails = (text: string): string[] =>
@@ -119,6 +154,12 @@ const draftOf = (e: CalendarEvent): Draft => ({
   end: e.endsAt ? e.endsAt.slice(11, 16) || "09:30" : "09:30",
   location: /^https?:\/\//i.test(e.location) ? "" : e.location,
   attendees: "",
+  reminder:
+    e.reminderChoice === undefined || e.reminderChoice === "default"
+      ? "default"
+      : e.reminderChoice === "off"
+        ? "off"
+        : String(e.reminderChoice),
 });
 
 const payloadOf = (d: Draft) => ({
@@ -126,6 +167,7 @@ const payloadOf = (d: Draft) => ({
   startsAt: `${d.date}T${d.start}:00-07:00`,
   endsAt: `${d.date}T${d.end}:00-07:00`,
   location: d.location.trim(),
+  reminder: d.reminder,
 });
 
 export default function CalendarPage() {
@@ -479,6 +521,28 @@ export default function CalendarPage() {
         placeholder="Attendee emails, comma-separated (optional)"
         className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-[#0d1f3c] outline-none placeholder:text-slate-300 focus:border-[#b8975a] dark:border-white/10 dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/30 sm:col-span-2"
       />
+      <div className="flex items-center gap-2 sm:col-span-2">
+        <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-white/35">
+          🔔 Reminder
+        </span>
+        <select
+          value={d.reminder}
+          onChange={(e) => set({ ...d, reminder: e.target.value })}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-[#0d1f3c] outline-none focus:border-[#b8975a] dark:border-white/10 dark:bg-white/[0.04] dark:text-white"
+          aria-label="Reminder"
+        >
+          {REMINDER_OPTIONS.map((o) => (
+            <option key={o.v} value={o.v}>
+              {o.label}
+            </option>
+          ))}
+          {!REMINDER_OPTIONS.some((o) => o.v === d.reminder) && /^\d+$/.test(d.reminder) && (
+            <option value={d.reminder}>
+              {reminderLabel(parseInt(d.reminder, 10))} (from Outlook)
+            </option>
+          )}
+        </select>
+      </div>
     </div>
   );
 
@@ -520,6 +584,9 @@ export default function CalendarPage() {
             )}
             <p className="truncate text-xs text-slate-400 dark:text-white/40">
               {timeLabel(e)}
+              {typeof e.reminderChoice === "number"
+                ? ` · 🔔 ${reminderShort(e.reminderChoice)}`
+                : ""}
               {e.location ? (
                 <>
                   {" · "}
@@ -644,7 +711,7 @@ export default function CalendarPage() {
             </div>
             <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
               {ms?.connected
-                ? "Changes save straight to Outlook, attendees included — remove someone with the × on their chip, or add people by email in the Attendees field."
+                ? "Changes save straight to Outlook, attendees included — remove someone with the × on their chip, or add people by email in the Attendees field. The reminder sets this event's alarm in Outlook and as a portal push; Default keeps the usual meeting alert."
                 : "Changes apply to Outlook on the next sync (~15 min). Attendees can't be changed here — edit those in Outlook."}
             </p>
           </div>
