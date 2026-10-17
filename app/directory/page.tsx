@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
 import { fmtMoney, uniqueStrings } from "@/lib/format";
-import type { Deal, Executive, Interaction } from "@/lib/types";
+import type { Deal, Executive, Interaction, Task } from "@/lib/types";
+import TaskList from "@/components/TaskList";
 import type { Investor } from "@/lib/investors-db";
 import CompanyLogo from "@/components/CompanyLogo";
 import PersonAvatar from "@/components/PersonAvatar";
@@ -64,6 +65,19 @@ export default function Directory() {
   // persists in localStorage — it never reorders the control.
   const [view, setView] = useState<"list" | "grid">("list");
   const [interactions, setInteractions] = useState<Interaction[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+
+  const loadTasks = async () => {
+    try {
+      const r = await fetch("/api/tasks");
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d)) setTasks(d);
+      }
+    } catch {
+      /* follow-ups are an enhancement on this page — never break profiles */
+    }
+  };
 
   useEffect(() => {
     try {
@@ -86,12 +100,13 @@ export default function Directory() {
   useEffect(() => {
     (async () => {
       try {
-        const [meRes, dealsRes, execsRes, invRes, ixRes] = await Promise.all([
+        const [meRes, dealsRes, execsRes, invRes, ixRes, tasksRes] = await Promise.all([
           fetch("/api/auth/me"),
           fetch("/api/deals"),
           fetch("/api/executives"),
           fetch("/api/investors"),
           fetch("/api/interactions"),
+          fetch("/api/tasks"),
         ]);
         if (meRes.status === 401 || dealsRes.status === 401) {
           router.replace("/login");
@@ -102,6 +117,10 @@ export default function Directory() {
         if (ixRes.ok) {
           const ix = await ixRes.json();
           if (Array.isArray(ix)) setInteractions(ix);
+        }
+        if (tasksRes.ok) {
+          const tk = await tasksRes.json();
+          if (Array.isArray(tk)) setTasks(tk);
         }
         if (invRes.ok) {
           const d = await invRes.json();
@@ -678,6 +697,33 @@ export default function Directory() {
                           </button>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {(selExec || selDeal) && (
+                    <div className="mt-6 border-t border-slate-100 pt-4 dark:border-white/10">
+                      <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-white/40">
+                        Follow-ups
+                      </p>
+                      <TaskList
+                        tasks={tasks.filter((t) =>
+                          selExec
+                            ? t.relatedKind === "executive" && t.relatedId === selExec.id
+                            : t.relatedKind === "deal" && t.relatedId === selDeal?.id
+                        )}
+                        deals={[]}
+                        execs={execs}
+                        onChanged={loadTasks}
+                        presetLink={
+                          selExec
+                            ? { kind: "executive", id: selExec.id, name: selExec.name }
+                            : {
+                                kind: "deal",
+                                id: selDeal!.id,
+                                name: selDeal!.companyName,
+                              }
+                        }
+                      />
                     </div>
                   )}
 
