@@ -32,14 +32,15 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
   const [refreshTick, setRefreshTick] = useState(0);
   const [dismissingId, setDismissingId] = useState<string | null>(null);
   const [dismissReason, setDismissReason] = useState("");
-  // Filtered Out view (chain/franchise filter, Oct 16, 2026): a
-  // sibling view of the fits section — chain-flagged companies with
-  // their reasons and the permanent "Not a chain" override. The page
-  // layout and banner are untouched; the toggle lives in the section
-  // header.
+  // Filtered Out view (chain/franchise filter, Oct 16, 2026;
+  // institutional filter, Oct 17, 2026): a sibling view of the fits
+  // section — chain-flagged and institutional-flagged/suspect
+  // companies with their reasons and the permanent "Not a chain" /
+  // "Not institutional" overrides. The page layout and banner are
+  // untouched; the toggle lives in the section header.
   const [view, setView] = useState<"fits" | "filtered">("fits");
-  const [chainRows, setChainRows] = useState<MiCompany[] | null>(null);
-  const [chainTotal, setChainTotal] = useState<number | null>(null);
+  const [filteredRows, setFilteredRows] = useState<MiCompany[] | null>(null);
+  const [filteredTotal, setFilteredTotal] = useState<number | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -56,14 +57,15 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           setTotal(d.fitTotal ?? 0);
         })
         .catch(() => undefined);
-      // Filtered Out (chain/franchise filter): flagged companies are
-      // fetched alongside so the sibling view + its count are ready.
+      // Filtered Out (chain + institutional filters): flagged
+      // companies are fetched alongside so the sibling view + its
+      // count are ready.
       fetch(`/api/market/companies?mode=filtered&sectors=${encodeURIComponent(sectorList.join(","))}`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((d: { companies?: MiCompany[]; chainTotal?: number } | null) => {
+        .then((d: { companies?: MiCompany[]; filteredTotal?: number; chainTotal?: number } | null) => {
           if (!live || !d) return;
-          setChainRows(d.companies ?? []);
-          setChainTotal(d.chainTotal ?? 0);
+          setFilteredRows(d.companies ?? []);
+          setFilteredTotal(d.filteredTotal ?? d.chainTotal ?? 0);
         })
         .catch(() => undefined);
       return () => {
@@ -101,22 +103,25 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const base =
-      fitOnly && view === "filtered" ? (chainRows ?? []) : (rows ?? []);
+      fitOnly && view === "filtered" ? (filteredRows ?? []) : (rows ?? []);
     return base.filter(
       (c) =>
         // In fitOnly mode the server already scoped rows to the fit
         // stage. In the full tables, dismissed companies stay VISIBLE
         // with a dismissed mark + restore (Ethan, Oct 16, 2026) —
         // they are only gone from the fits section. The Filtered Out
-        // view lists chain-flagged rows whatever their stage.
-        (fitOnly && view === "filtered" ? c.isChain : !fitOnly || c.status === "fit") &&
+        // view lists chain- or institutional-flagged rows whatever
+        // their stage.
+        (fitOnly && view === "filtered"
+          ? c.isChain || c.isInstitutional || c.institutionalSuspect
+          : !fitOnly || c.status === "fit") &&
         (!q ||
           c.name.toLowerCase().includes(q) ||
           c.city.toLowerCase().includes(q) ||
           c.subsector.toLowerCase().includes(q))
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, chainRows, query, fitOnly, view]);
+  }, [rows, filteredRows, query, fitOnly, view]);
 
   if (rows === null) {
     return <p className="mt-4 text-xs text-slate-400 dark:text-white/30">Loading company targets…</p>;
@@ -125,7 +130,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
 
   const th = "sticky top-0 bg-white px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-[#132847] dark:text-white/50";
   const td = "px-3 py-2 text-sm text-slate-700 dark:text-white/80";
-  const baseRows = fitOnly && view === "filtered" ? (chainRows ?? []) : rows;
+  const baseRows = fitOnly && view === "filtered" ? (filteredRows ?? []) : rows;
   // Dedupe at the TOKEN level: a company's source is itself composite
   // ("SAM.gov + USASpending"), so whole-string dedupe still printed
   // "USASpending" once per distinct combination (Ethan, Oct 14).
@@ -141,6 +146,9 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       ? sourceTokens.slice(0, 6).join(" · ") + ` +${sourceTokens.length - 6} more`
       : sourceTokens.join(" · ");
   const withSignal = baseRows.find((r) => r.signalLabel)?.signalLabel;
+  // "Since" column (Ethan, Oct 17, 2026): rendered only when at
+  // least one visible row has a since year — never an empty column.
+  const showSince = visible.some((c) => sinceOf(c) !== "");
 
   const fmtMoney = (v: number) =>
     v >= 1e9
@@ -251,8 +259,55 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
               : r
           )
         );
-        setChainRows((prev) => (prev ?? []).filter((r) => r.id !== c.id));
-        setChainTotal((t) => (t !== null ? Math.max(0, t - 1) : t));
+        // A row carrying both flags stays in Filtered Out on its
+        // institutional flag; a chain-only row leaves the view.
+        setFilteredRows((prev) =>
+          (prev ?? []).flatMap((r) => {
+            if (r.id !== c.id) return [r];
+            const next = { ...r, isChain: false, chainReason: "", chainSuspect: false, chainExempt: true };
+            return next.isInstitutional || next.institutionalSuspect ? [next] : [];
+          })
+        );
+        setFilteredTotal((t) =>
+          t !== null && !c.isInstitutional && !c.institutionalSuspect ? Math.max(0, t - 1) : t
+        );
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** "Not institutional" override (institutional filter, Oct 17,
+   * 2026): clears the flag/suspect tag server-side and records a
+   * PERMANENT exemption — detection never re-flags the record. In
+   * the fits section both lists refetch (the record returns at its
+   * original date_added position); in the full tables the row
+   * updates in place. */
+  async function notAnInstitution(c: MiCompany) {
+    setBusy(c.id);
+    try {
+      const res = await fetch("/api/market/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: c.id, action: "not-an-institution" }),
+      });
+      if (res.ok) {
+        if (fitOnly) setRefreshTick((t) => t + 1);
+        setRows((prev) =>
+          (prev ?? []).map((r) =>
+            r.id === c.id
+              ? { ...r, isInstitutional: false, institutionalReason: "", institutionalSuspect: false, institutionalExempt: true }
+              : r
+          )
+        );
+        setFilteredRows((prev) =>
+          (prev ?? []).flatMap((r) => {
+            if (r.id !== c.id) return [r];
+            const next = { ...r, isInstitutional: false, institutionalReason: "", institutionalSuspect: false, institutionalExempt: true };
+            return next.isChain ? [next] : [];
+          })
+        );
+        setFilteredTotal((t) => (t !== null && !c.isChain ? Math.max(0, t - 1) : t));
       }
     } finally {
       setBusy(null);
@@ -312,26 +367,133 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       return false;
     }
   }
+  /** Full date with year for "Data as of" (Ethan, Oct 17, 2026):
+   * "2026-10-15" → "October 15, 2026". Parsed as UTC so the rendered
+   * day never shifts with the viewer's timezone. */
+  function fmtFullDate(v: string): string {
+    const m = (v || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return v;
+    const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    if (Number.isNaN(d.getTime())) return v;
+    return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  }
+  /** "Since" year for a row (Ethan, Oct 17, 2026): the registered/
+   * licensed year when the record carries one, else the earliest
+   * permit year (hospitality groups carry no formed date — their
+   * permits do). Empty when the record has neither — the column is
+   * hidden for a view where no row has a value. */
+  function sinceOf(c: MiCompany): string {
+    const y = yearOf(c.formedDate);
+    if (y) return y;
+    try {
+      const d = JSON.parse(c.details || "{}") as Record<string, unknown>;
+      return typeof d.earliestPermitDate === "string" ? yearOf(d.earliestPermitDate) : "";
+    } catch {
+      return "";
+    }
+  }
+  /** Plain-language chain reason for Filtered Out (Ethan, Oct 17,
+   * 2026): "Chain/franchise: [brand]" for list matches; the stored
+   * rule text, humanized, for the other rules. */
+  function chainDisplayReason(c: MiCompany): string {
+    const r = c.chainReason || "";
+    const brand = r.match(/— "([^"]+)"/);
+    if (/^(list|domain|parent|acc):/.test(r) && brand) return `Chain/franchise: ${brand[1]}`;
+    if (r.startsWith("locations:")) return `Chain/franchise: ${r.slice("locations:".length).trim()}`;
+    if (r.startsWith("language:")) return "Chain/franchise: franchise language in the record";
+    if (r.startsWith("ownership:")) return `Chain/franchise: ${r.slice("ownership:".length).trim()}`;
+    return r ? `Chain/franchise: ${r}` : "Chain/franchise";
+  }
+  /** Expanded-row details with readable labels (Ethan, Oct 17, 2026):
+   * the raw registry field names never reach the screen. Known keys
+   * carry Ethan's labels, revenue figures render as dollars
+   * ($4.8M; ranges $2.4M–$7.2M), "Data as of" is a full date, and any
+   * remaining key is humanized (camelCase → words) rather than raw. */
   function profileDetails(c: MiCompany): [string, string][] {
     try {
       const d = JSON.parse(c.details || "{}") as Record<string, unknown>;
-      return Object.entries(d)
-        .filter(([k, v]) => k !== "note" && k !== "fit" && k !== "fitWhy" && k !== "signals" && v !== "" && v !== null && v !== undefined)
-        .map(([k, v]) => {
-          if (Array.isArray(v)) {
-            // Detail arrays (signals, top primes, licenses) can carry
-            // exact repeats from layered enrichments — dedupe the
-            // rendered items so no entry prints twice (Oct 14, 2026).
-            const items = v.map((x) =>
-              x && typeof x === "object"
-                ? Object.values(x as Record<string, unknown>).filter(Boolean).join(" · ")
-                : String(x)
-            );
-            const s = uniqueStrings(items.filter((t) => t.trim() !== "")).join("; ");
-            return [k, s] as [string, string];
-          }
-          return [k, String(v)] as [string, string];
-        });
+      const skip = new Set(["note", "fit", "fitWhy", "signals", "fitUnscored", "kept"]);
+      const out: [string, string][] = [];
+      const used = new Set<string>();
+      const val = (k: string) => {
+        const v = d[k];
+        return v === "" || v === null || v === undefined ? undefined : v;
+      };
+      const push = (label: string, value: string) => {
+        if (value.trim() !== "") out.push([label, value]);
+      };
+      const money = (v: unknown) => (typeof v === "number" ? fmtMoney(v) : String(v));
+      const text = (v: unknown): string => {
+        if (Array.isArray(v)) {
+          // Detail arrays (licenses, cities) can carry exact repeats
+          // from layered enrichments — dedupe the rendered items so
+          // no entry prints twice (Oct 14, 2026).
+          const items = v.map((x) =>
+            x && typeof x === "object"
+              ? Object.values(x as Record<string, unknown>).filter(Boolean).join(" · ")
+              : String(x)
+          );
+          return uniqueStrings(items.filter((t) => t.trim() !== "")).join("; ");
+        }
+        return String(v);
+      };
+      // Ethan's labeled fields, in his order.
+      const ordered: [string, string][] = [
+        ["locationCount", "Locations"],
+        ["permitCount", "Permits"],
+        ["licenseCount", "Licenses"],
+        ["commercialLocationCount", "Commercial locations"],
+        ["institutionalLocationCount", "Institutional locations"],
+        ["cities", "Cities"],
+        ["concept", "Concept"],
+        ["ownership", "Ownership"],
+        ["ownershipBasis", "Ownership basis"],
+      ];
+      for (const [k, label] of ordered) {
+        const v = val(k);
+        if (v !== undefined) {
+          push(label, text(v));
+          used.add(k);
+        }
+      }
+      const revEst = val("revenueEstimate") ?? val("estRevenue");
+      if (revEst !== undefined) push("Revenue estimate", money(revEst));
+      used.add("revenueEstimate");
+      used.add("estRevenue");
+      const lo = val("estRevenueLow");
+      const hi = val("estRevenueHigh");
+      if (lo !== undefined && hi !== undefined) push("Estimated range", `${money(lo)}–${money(hi)}`);
+      else if (lo !== undefined) push("Estimated range", money(lo));
+      else if (hi !== undefined) push("Estimated range", money(hi));
+      used.add("estRevenueLow");
+      used.add("estRevenueHigh");
+      const conf = val("estConfidence");
+      if (conf !== undefined) push("Confidence", text(conf));
+      used.add("estConfidence");
+      const method = val("estRevenueInputs");
+      if (method !== undefined) push("Revenue method", text(method));
+      used.add("estRevenueInputs");
+      const xc = [val("crossCheck"), val("sbaCrossCheck")]
+        .filter((v) => v !== undefined)
+        .map((v) => text(v))
+        .join(" ");
+      if (xc) push("Cross-check", xc);
+      used.add("crossCheck");
+      used.add("sbaCrossCheck");
+      const asOf = val("dataAsOf");
+      if (asOf !== undefined) push("Data as of", fmtFullDate(String(asOf)));
+      used.add("dataAsOf");
+      // Everything else, humanized — never a raw field name.
+      const humanize = (k: string) =>
+        k
+          .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+          .replace(/_/g, " ")
+          .replace(/^./, (ch) => ch.toUpperCase());
+      for (const [k, v] of Object.entries(d)) {
+        if (skip.has(k) || used.has(k) || v === "" || v === null || v === undefined) continue;
+        push(humanize(k), /revenue/i.test(k) && typeof v === "number" ? money(v) : text(v));
+      }
+      return out;
     } catch {
       return [];
     }
@@ -368,14 +530,27 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       : "rounded-lg px-3 py-1.5 text-xs disabled:opacity-50";
     return (
       <>
-        {c.isChain && (
+        {c.isInstitutional && (
           <p className="mb-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300">
-            ⛓ Filtered out as a chain/franchise — {c.chainReason || "matched the chain filter"}. It
-            never appears in Fits and doesn&apos;t count toward the fits cap. If it&apos;s actually
-            an independent, owner-operated business, override it below — the exemption is permanent.
+            🏛 Filtered out — {c.institutionalReason || "Institutional"}. It never appears in Fits
+            and doesn&apos;t count toward the fits totals. If it&apos;s actually an independent,
+            privately owned, for-profit business, override it below — the exemption is permanent.
           </p>
         )}
-        {!c.isChain && c.chainSuspect && (
+        {!c.isInstitutional && c.institutionalSuspect && (
+          <p className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+            ⚠ Possible institution — {c.institutionalReason}. The signal is ambiguous, so it is
+            held out of Fits until reviewed. If it&apos;s a commercial business, override it below.
+          </p>
+        )}
+        {!c.isInstitutional && c.isChain && (
+          <p className="mb-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300">
+            ⛓ Filtered out — {chainDisplayReason(c)}. It never appears in Fits and doesn&apos;t
+            count toward the fits cap. If it&apos;s actually an independent, owner-operated
+            business, override it below — the exemption is permanent.
+          </p>
+        )}
+        {!c.isInstitutional && !c.institutionalSuspect && !c.isChain && c.chainSuspect && (
           <p className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
             ⚠ Possible franchise — {c.chainReason}. Weak signal only, so it stays in Fits.
           </p>
@@ -387,8 +562,8 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           {c.website && <p><span className="text-slate-400 dark:text-white/40">Web </span><a className="underline" href={c.website.startsWith("http") ? c.website : `https://${c.website}`} target="_blank" rel="noreferrer">{c.website}</a></p>}
           {c.formedDate && <p><span className="text-slate-400 dark:text-white/40">On file since </span>{c.formedDate}</p>}
           {c.signalValue ? <p><span className="text-slate-400 dark:text-white/40">{c.signalLabel} </span>{fmtMoney(c.signalValue)}</p> : null}
-          {profileDetails(c).map(([k, v]) => (
-            <p key={k}><span className="text-slate-400 dark:text-white/40">{k} </span>{v}</p>
+          {profileDetails(c).map(([k, v], i) => (
+            <p key={`${k}-${i}`}><span className="text-slate-400 dark:text-white/40">{k} </span>{v}</p>
           ))}
           <p><span className="text-slate-400 dark:text-white/40">Source </span>{c.sourceUrl ? <a className="underline" href={c.sourceUrl} target="_blank" rel="noreferrer">{dedupeSourceTokens(c.source)}</a> : dedupeSourceTokens(c.source)}</p>
         </div>
@@ -422,6 +597,9 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           </p>
         )}
         <div className="mt-3 flex flex-wrap gap-2">
+          {(c.isInstitutional || c.institutionalSuspect) && (
+            <button disabled={busy === c.id} onClick={() => notAnInstitution(c)} className={`${btnBase} bg-emerald-600 font-semibold text-white`}>✓ Not institutional — return to Fits</button>
+          )}
           {c.isChain && (
             <button disabled={busy === c.id} onClick={() => notAChain(c)} className={`${btnBase} bg-emerald-600 font-semibold text-white`}>✓ Not a chain — return to Fits</button>
           )}
@@ -478,7 +656,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
                   view === "filtered" ? "shadow-[0_0_0_1px_#b8975a] text-[#0d1f3c] dark:text-white" : ""
                 }`}
               >
-                Filtered out{chainTotal !== null ? ` (${chainTotal.toLocaleString()})` : ""}
+                Filtered out{filteredTotal !== null ? ` (${filteredTotal.toLocaleString()})` : ""}
               </button>
             </span>
           )}
@@ -486,7 +664,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
         <p className="text-xs text-slate-500 dark:text-white/50">
           {fitOnly && view === "filtered" ? (
             <>
-              {(chainTotal ?? 0).toLocaleString()} filtered out as chains/franchises · {sources}
+              {(filteredTotal ?? 0).toLocaleString()} filtered out — chains/franchises and institutions · {sources}
             </>
           ) : fitOnly ? (
             <>
@@ -510,8 +688,8 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       {fitOnly && visible.length === 0 && (
         <p className="mb-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-500 dark:border-white/10 dark:text-white/50">
           {view === "filtered"
-            ? (chainTotal ?? 0) === 0
-              ? "Nothing is currently filtered out as a chain/franchise in this scope."
+            ? (filteredTotal ?? 0) === 0
+              ? "Nothing is currently filtered out as a chain/franchise or institution in this scope."
               : "No filtered-out companies match your search."
             : fitTotal === 0
               ? "No companies in this industry currently pass the fit rules (size, independence, focus sector)."
@@ -526,7 +704,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
               {multi && <th className={th}>Industry</th>}
               <th className={th}>City</th>
               <th className={th}>Sub-sector</th>
-              <th className={th}>Since</th>
+              {showSince && <th className={th}>Since</th>}
               <th className={th}>{withSignal || "Signal"}</th>
               <th className={th}></th>
             </tr>
@@ -556,17 +734,19 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
                     {c.status === "dismissed" && <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/20 dark:text-red-300">DISMISSED</span>}
                     {c.isChain && <span className="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">CHAIN</span>}
                     {!c.isChain && c.chainSuspect && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">POSSIBLE FRANCHISE</span>}
+                    {c.isInstitutional && <span className="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">INSTITUTIONAL</span>}
+                    {!c.isInstitutional && c.institutionalSuspect && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">POSSIBLE INSTITUTION</span>}
                   </td>
                   {multi && <td className={td}><SectorChip sector={c.sector} /></td>}
                   <td className={td}>{c.city || "—"}</td>
                   <td className={td}>{c.subsector || "—"}</td>
-                  <td className={td}>{yearOf(c.formedDate) || "—"}</td>
+                  {showSince && <td className={td}>{sinceOf(c) || "—"}</td>}
                   <td className={`${td} font-medium`}>{c.signalValue ? fmtMoney(c.signalValue) : c.employees ? `${c.employees.toLocaleString()} emp` : "—"}</td>
                   <td className={td}>{openId === c.id ? "▾" : "▸"}</td>
                 </tr>
                 {openId === c.id && (
                   <tr key={`${c.id}-detail`} className="border-t border-slate-100 bg-slate-50/60 dark:border-white/5 dark:bg-white/5">
-                    <td colSpan={multi ? 7 : 6} className="px-3 py-3">
+                    <td colSpan={(multi ? 7 : 6) - (showSince ? 0 : 1)} className="px-3 py-3">
                       {detailBlock(c, fit.fit, false)}
                     </td>
                   </tr>
@@ -606,9 +786,11 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
                     {c.status === "dismissed" && <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/20 dark:text-red-300">DISMISSED</span>}
                     {c.isChain && <span className="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">CHAIN</span>}
                     {!c.isChain && c.chainSuspect && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">POSSIBLE FRANCHISE</span>}
+                    {c.isInstitutional && <span className="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">INSTITUTIONAL</span>}
+                    {!c.isInstitutional && c.institutionalSuspect && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">POSSIBLE INSTITUTION</span>}
                   </span>
                   <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-white/50">
-                    {[c.city, c.subsector, yearOf(c.formedDate) ? `since ${yearOf(c.formedDate)}` : ""]
+                    {[c.city, c.subsector, sinceOf(c) ? `since ${sinceOf(c)}` : ""]
                       .filter(Boolean)
                       .join(" · ") || "—"}
                   </span>
@@ -640,7 +822,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       {visible.length > 300 && <p className="mt-1 text-xs text-slate-400 dark:text-white/30">Showing the top 300 — search to narrow the list.</p>}
       <p className="mt-1 text-xs text-slate-400 dark:text-white/30">
         {fitOnly && view === "filtered"
-          ? "Filtered out by the chain/franchise filter — these records are kept, never deleted, and never count toward the fits cap. “Not a chain” on a record returns it to Fits and exempts it permanently."
+          ? "Filtered out by the institutional filter (run first) and the chain/franchise filter — these records are kept, never deleted, and never count toward the fits cap. “Not institutional” / “Not a chain” on a record returns it to Fits and exempts it permanently."
           : fitOnly
             ? "Fits pass Canny's fit rules — right-sized, independent, in a focus sector. Expand any row to convert it into the acquisition pipeline."
             : "Public-registry profiles. Registry data shows existence, specialty, age, and size signals — not financials; revenue and EBITDA stay modeled at the sector level above."}

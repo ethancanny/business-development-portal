@@ -41,7 +41,7 @@
  * when the check itself cannot run.
  */
 import { neon } from "@neondatabase/serverless";
-import { logSync, importCompanies, countFits, type CompanyInput } from "./market-db";
+import { logSync, importCompanies, countFits, isInstitutionalFacilityText, hasInstitutionalNameSignal, type CompanyInput } from "./market-db";
 
 function sql() {
   const url = process.env.DATABASE_URL;
@@ -598,12 +598,29 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
   const settings = await getHospitalityFitSettings();
 
   const groupRows = await db`SELECT group_key, name, location_count, permit_ids, license_numbers, cities FROM mi_hospitality_groups`;
-  const permitRows = await db`SELECT permit_id, permit_type, business_name, city, address, zip, fetched_at FROM mi_hospitality_permits`;
-  const permitById = new Map<string, { type: string; name: string; city: string; addrKey: string; fetchedAt: string }>();
+  const permitRows = await db`SELECT permit_id, permit_type, business_name, city, address, zip, fetched_at, first_seen FROM mi_hospitality_permits`;
+  const permitById = new Map<string, { type: string; name: string; city: string; addrKey: string; fetchedAt: string; firstSeen: string; institutional: boolean }>();
   for (const p of permitRows) {
+    const pName = String(p.business_name);
+    const pType = String(p.permit_type);
+    // Institutional-location classification (Ethan, Oct 17, 2026 —
+    // §5): a permit AT an institution (school cafeteria, hospital or
+    // care-facility kitchen, jail, church kitchen) is not a
+    // commercial location. A permit classifies institutional when its
+    // facility type or holder name names an institution, the holder
+    // carries a hard institutional name signal, or the holder is a
+    // known institutional foodservice operator.
+    const norm = normalizeGroupName(pName);
+    const institutional =
+      isInstitutionalFacilityText(pType) ||
+      isInstitutionalFacilityText(pName) ||
+      hasInstitutionalNameSignal(pName) ||
+      INSTITUTIONAL_OPERATORS.some((op) => norm.includes(op));
     permitById.set(String(p.permit_id), {
-      type: String(p.permit_type), name: String(p.business_name),
+      type: pType, name: pName,
       city: String(p.city), fetchedAt: String(p.fetched_at ?? ""),
+      firstSeen: p.first_seen ? new Date(String(p.first_seen)).toISOString().slice(0, 10) : "",
+      institutional,
       addrKey: locationKeyFor(String(p.address ?? ""), String(p.zip ?? ""), String(p.permit_id)),
     });
   }
@@ -688,6 +705,8 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
 
   const inputs: CompanyInput[] = [];
   const excluded: Record<string, number> = { franchise: 0, chain: 0, institutional: 0, subsidiary: 0 };
+  let groupsWithInstitutional = 0;
+  let institutionalLocsTotal = 0;
   const fitsBySubsector: Record<string, number> = {};
   let predictedFits = 0;
   // Spot-reconciliation target: the largest group's raw recount.
@@ -709,6 +728,15 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
     const votes = new Map<string, number>();
     const cityCounts = new Map<string, number>();
     let maxFetched = "";
+    // Commercial vs institutional location classification (Ethan,
+    // Oct 17, 2026 — §5): an address is commercial when at least one
+    // permit there is commercial; it is institutional when every
+    // permit there is institutional. Only commercial locations count
+    // toward fit and the revenue model.
+    const commAddrs = new Set<string>();
+    const instAddrs = new Set<string>();
+    const facTypes = new Set<string>();
+    let earliestPermit = "";
     for (const pid of permitIds) {
       const p = permitById.get(pid);
       if (!p) continue;
@@ -716,6 +744,27 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
       votes.set(c, (votes.get(c) ?? 0) + 1);
       if (p.city) cityCounts.set(p.city, (cityCounts.get(p.city) ?? 0) + 1);
       if (p.fetchedAt > maxFetched) maxFetched = p.fetchedAt;
+      if (p.firstSeen && (!earliestPermit || p.firstSeen < earliestPermit)) earliestPermit = p.firstSeen;
+      if (p.type) facTypes.add(p.type);
+      if (p.institutional) instAddrs.add(p.addrKey);
+      else commAddrs.add(p.addrKey);
+    }
+    for (const num of licenseNums) {
+      const ak = licenseAddrByNumber.get(num);
+      if (!ak) continue;
+      const licensee = licenseeByNumber.get(num) ?? "";
+      if (hasInstitutionalNameSignal(licensee) || isInstitutionalFacilityText(licensee)) instAddrs.add(ak);
+      else commAddrs.add(ak);
+    }
+    let institutionalLocs = 0;
+    instAddrs.forEach((a) => { if (!commAddrs.has(a)) institutionalLocs++; });
+    const classifiedLocs = commAddrs.size + institutionalLocs;
+    // Unclassified groups (no resolved permits/licenses) keep the
+    // stored location count as commercial — the pre-filter behavior.
+    const commercialLocs = classifiedLocs > 0 ? commAddrs.size : locs;
+    if (institutionalLocs > 0) {
+      groupsWithInstitutional++;
+      institutionalLocsTotal += institutionalLocs;
     }
     let bestVotes = -1;
     let conceptKey = "";
@@ -731,9 +780,11 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
     const concept = CONCEPTS[conceptKey] ?? CONCEPTS.other;
 
     const perLocMid = (concept.revLow + concept.revHigh) / 2;
-    const revLow = Math.round(locs * concept.revLow);
-    const revHigh = Math.round(locs * concept.revHigh);
-    const revMid = Math.round(locs * perLocMid);
+    // Revenue models COMMERCIAL locations only (Oct 17, 2026): a
+    // school cafeteria permit is not a revenue location.
+    const revLow = Math.round(commercialLocs * concept.revLow);
+    const revHigh = Math.round(commercialLocs * concept.revHigh);
+    const revMid = Math.round(commercialLocs * perLocMid);
 
     const own = detectOwnership(groupKey);
     if (excluded[own.ownership] !== undefined) excluded[own.ownership]++;
@@ -766,7 +817,7 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
     const isFit =
       excluded[own.ownership] === undefined &&
       revMid <= 150_000_000 &&
-      (locs >= settings.minLocations || (liquorVenue && revMid >= settings.hotelMinRevenue));
+      (commercialLocs >= settings.minLocations || (liquorVenue && revMid >= settings.hotelMinRevenue));
     if (isFit) {
       predictedFits++;
       fitsBySubsector[concept.subsector] = (fitsBySubsector[concept.subsector] ?? 0) + 1;
@@ -783,8 +834,12 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
 
     const details: Record<string, unknown> = {
       locationCount: locs,
+      commercialLocationCount: commercialLocs,
+      ...(institutionalLocs > 0 ? { institutionalLocationCount: institutionalLocs } : {}),
       permitCount: permitIds.length,
       ...(licenseNums.length ? { licenseCount: licenseNums.length } : {}),
+      ...(earliestPermit ? { earliestPermitDate: earliestPermit } : {}),
+      ...(facTypes.size ? { facilityTypes: Array.from(facTypes).slice(0, 8) } : {}),
       cities: groupCities,
       concept: concept.label,
       ownership: own.ownership,
@@ -792,7 +847,7 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
       revenueEstimate: revMid,
       estRevenueLow: revLow,
       estRevenueHigh: revHigh,
-      estRevenueInputs: `${locs} location${locs === 1 ? "" : "s"} × ${moneyFmt(concept.revLow)}–${moneyFmt(concept.revHigh)} per-location range (${concept.label.toLowerCase()}, AZ) — revenue is modeled from distinct-location counts, not reported`,
+      estRevenueInputs: `${commercialLocs} commercial location${commercialLocs === 1 ? "" : "s"} × ${moneyFmt(concept.revLow)}–${moneyFmt(concept.revHigh)} per-location range (${concept.label.toLowerCase()}, AZ) — revenue is modeled from distinct-location counts, not reported`,
       estConfidence: "low",
       crossCheck,
       ...(sbaNote ? { sbaCrossCheck: sbaNote } : {}),
@@ -826,7 +881,7 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
     "hospitality-fit-xcheck",
     spotOk ? "ok" : "error",
     fits,
-    `Hospitality fit: ${groupRows.length} operator groups evaluated → ${fits} fits (${Object.entries(fitsBySubsector).map(([k, v]) => `${k} ${v}`).join(" · ") || "none"}) · local prediction ${predictedFits} (stored count is ground truth) · excluded by ownership: ${Object.entries(excluded).map(([k, v]) => `${k} ${v}`).join(", ")} · thresholds: ≥${settings.minLocations} locations or liquor-licensed hotel/venue ≥${moneyFmt(settings.hotelMinRevenue)} (portal settings) · DLLC licenses in table: ${licenseRows.length} (hotel/venue arm ${licenseRows.length ? "active" : "inactive — no license data yet"}) · spot reconciliation: ${spot ? `${spot.name} stored ${spot.stored} locations vs ${spot.recounted} recounted from raw permits/licenses, both on a distinct-street-address basis — ${spotOk ? "reconcile" : "MISMATCH"}` : "no groups to check"}`
+    `Hospitality fit: ${groupRows.length} operator groups evaluated → ${fits} fits (${Object.entries(fitsBySubsector).map(([k, v]) => `${k} ${v}`).join(" · ") || "none"}) · local prediction ${predictedFits} (stored count is ground truth) · excluded by ownership: ${Object.entries(excluded).map(([k, v]) => `${k} ${v}`).join(", ")} · institutional locations excluded from fit counting (Oct 17, 2026): ${institutionalLocsTotal} location(s) across ${groupsWithInstitutional} group(s) — permits at institutions are not commercial locations · thresholds: ≥${settings.minLocations} commercial locations or liquor-licensed hotel/venue ≥${moneyFmt(settings.hotelMinRevenue)} (portal settings) · DLLC licenses in table: ${licenseRows.length} (hotel/venue arm ${licenseRows.length ? "active" : "inactive — no license data yet"}) · spot reconciliation: ${spot ? `${spot.name} stored ${spot.stored} locations vs ${spot.recounted} recounted from raw permits/licenses, both on a distinct-street-address basis — ${spotOk ? "reconcile" : "MISMATCH"}` : "no groups to check"}`
   );
 
   return { evaluated: groupRows.length, mirrored: total, fits, fitsBySubsector, excluded };
