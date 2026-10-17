@@ -7,7 +7,16 @@ import {
   listCandidates,
   validateSource,
   type CandidateInput,
+  type OperatorCandidate,
 } from "@/lib/candidates-db";
+import { candidateSector } from "@/lib/candidates-scoring";
+
+/** Build 4: the Directory chip needs the display sector (focus sector
+ * name, or "Other") — computed server-side from the Build 2 helper so
+ * the client never re-derives it. */
+function withSector(c: OperatorCandidate) {
+  return { ...c, sector: candidateSector(c) };
+}
 
 /**
  * Operator candidates (Operator Discovery & Sourcing spec, Build 1).
@@ -36,7 +45,7 @@ export async function GET(req: NextRequest) {
     q: sp.get("q") ?? undefined,
     sort: sp.get("sort") ?? undefined,
   });
-  return NextResponse.json(candidates);
+  return NextResponse.json(candidates.map(withSector));
 }
 
 export async function POST(req: NextRequest) {
@@ -74,7 +83,7 @@ export async function POST(req: NextRequest) {
       actor
     );
     return NextResponse.json(
-      { ...candidate, merged },
+      { ...withSector(candidate), merged },
       { status: merged ? 200 : 201 }
     );
   } catch (err) {

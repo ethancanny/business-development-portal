@@ -208,7 +208,8 @@ export type PushType =
   | "stalled"
   | "quiet60_90"
   | "competingBuyer"
-  | "feedDown";
+  | "feedDown"
+  | "candidateHighScore";
 
 export const PUSH_TYPES: PushType[] = [
   "meeting60",
@@ -220,6 +221,7 @@ export const PUSH_TYPES: PushType[] = [
   "quiet60_90",
   "competingBuyer",
   "feedDown",
+  "candidateHighScore",
 ];
 
 export interface PushPreferences {
@@ -253,6 +255,9 @@ export const DEFAULT_PREFS: PushPreferences = {
     quiet60_90: true,
     competingBuyer: true,
     feedDown: true,
+    // Operator candidates scoring 80+ (spec §5 notifications): OPT-IN —
+    // off until Ethan turns it on in Settings.
+    candidateHighScore: false,
   },
   quietStart: "21:00",
   quietEnd: "07:00",

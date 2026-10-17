@@ -93,6 +93,13 @@ export interface OperatorCandidate {
   lastTouch: string;
   nextStep: string;
   targetRole: string;
+  /** Build 4 outreach: Ethan's prep note for first outreach (manual
+   * send only — the system never transmits anything). */
+  prepNotes: string;
+  /** Build 4: the Executive Sourcing record created by "Add to
+   * Directory" — the link that keeps the two systems from
+   * double-counting the same person. "" = not added yet. */
+  directoryExecId: string;
   sightings: CandidateSighting[];
   /** Build 2 scoring/matching — null score means unscored (location
    * unverified candidates are never scored, per spec). */
@@ -135,6 +142,8 @@ export interface CandidateInput {
   lastTouch?: string;
   nextStep?: string;
   targetRole?: string;
+  prepNotes?: string;
+  directoryExecId?: string;
 }
 
 type Sql = NeonQueryFunction<false, false>;
@@ -196,6 +205,9 @@ async function ensure(): Promise<void> {
   await q`ALTER TABLE operator_candidates ADD COLUMN IF NOT EXISTS scored_at TEXT NOT NULL DEFAULT ''`;
   await q`ALTER TABLE operator_candidates ADD COLUMN IF NOT EXISTS matched_targets JSONB NOT NULL DEFAULT '[]'`;
   await q`ALTER TABLE operator_candidates ADD COLUMN IF NOT EXISTS conflicts JSONB NOT NULL DEFAULT '[]'`;
+  // Build 4: outreach prep note + Directory link (additive).
+  await q`ALTER TABLE operator_candidates ADD COLUMN IF NOT EXISTS prep_notes TEXT NOT NULL DEFAULT ''`;
+  await q`ALTER TABLE operator_candidates ADD COLUMN IF NOT EXISTS directory_exec_id TEXT NOT NULL DEFAULT ''`;
   await q`CREATE TABLE IF NOT EXISTS operator_match_state (
     id TEXT PRIMARY KEY,
     payload JSONB,
@@ -330,6 +342,8 @@ function rowToCandidate(r: Record<string, unknown>): OperatorCandidate {
     lastTouch: String(r.last_touch ?? ""),
     nextStep: String(r.next_step ?? ""),
     targetRole: String(r.target_role ?? ""),
+    prepNotes: String(r.prep_notes ?? ""),
+    directoryExecId: String(r.directory_exec_id ?? ""),
     sightings: parseSightings(r.sightings),
     score: typeof r.score === "number" ? r.score : null,
     scoreFactors: parseJson<CandidateScoreFactors | null>(r.score_factors, null),
@@ -543,6 +557,8 @@ export async function createOrMergeCandidate(
     lastTouch: (input.lastTouch ?? "").trim(),
     nextStep: (input.nextStep ?? "").trim(),
     targetRole: (input.targetRole ?? "").trim(),
+    prepNotes: input.prepNotes ?? "",
+    directoryExecId: "",
     sightings: [sighting],
     score: null,
     scoreFactors: null,
@@ -669,6 +685,8 @@ const STRING_FIELDS = [
   "lastTouch",
   "nextStep",
   "targetRole",
+  "prepNotes",
+  "directoryExecId",
 ] as const;
 
 const BOOL_FIELDS = ["focusSector", "locationVerified"] as const;
@@ -743,6 +761,7 @@ export async function updateCandidate(
       fit_notes = ${next.fitNotes}, status = ${next.status},
       pass_reason = ${next.passReason}, last_touch = ${next.lastTouch},
       next_step = ${next.nextStep}, target_role = ${next.targetRole},
+      prep_notes = ${next.prepNotes}, directory_exec_id = ${next.directoryExecId},
       dedup_key = ${newKey}, updated_at = NOW()
     WHERE id = ${id}`;
   next.updatedAt = new Date().toISOString();
