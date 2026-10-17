@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getExecutives } from "@/lib/db";
+import { getTailwindReport } from "@/lib/tailwind";
 import {
   getAcquisitions,
   getEntities,
@@ -51,6 +52,7 @@ const DATASETS = [
   "sync-log",
   "sync-status",
   "competing-buyers",
+  "tailwind",
 ] as const;
 
 export async function GET(
@@ -163,6 +165,8 @@ export async function GET(
         return NextResponse.json(await getSyncLogLatestByJob());
       case "competing-buyers":
         return NextResponse.json(await getCompetingBuyers());
+      case "tailwind":
+        return NextResponse.json(await getTailwindReport());
       default:
         return NextResponse.json({ error: "Unknown dataset" }, { status: 404 });
     }
