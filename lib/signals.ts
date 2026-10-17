@@ -17,7 +17,8 @@
  *  - SBA 7(a) stamps: sba7aOwnershipLoan=true → sba_ownership_loan,
  *    dated by the stamp's most-recent loan date.
  *  - USASpending contract enrichment stamps: fedExpiring12moCount > 0
- *    → contract_expiring, dated by the latest contract end.
+ *    → contract_expiring, dated by the enrichment as-of date, with
+ *    the latest contract end in the label.
  *  - Hospitality spine: group snapshot diff (state-held) →
  *    hospitality_new_location / hospitality_permit_lapsed /
  *    license_first_seen / license_lapsed on the mirrored company, plus
@@ -341,13 +342,18 @@ async function armContracts(writer: SignalWriter, rowsById: Map<string, CompanyR
     const amount = num(d.fedExpiring12moAmount) ?? 0;
     totalAmt += amount;
     const latestEnd = isDateStr(d.fedLatestEnd) ? (d.fedLatestEnd as string) : "";
-    const date = latestEnd || (isDateStr(d.fedAsOf) ? (d.fedAsOf as string) : phoenixToday());
+    const asOf = isDateStr(d.fedAsOf) ? (d.fedAsOf as string) : "";
+    // Signal date = when the expiring-≤12-months condition was
+    // measured (the enrichment as-of); the latest contract end rides
+    // in the label. Dating the flag by a far-future contract end
+    // would sort it above everything else indefinitely.
+    const date = asOf || latestEnd || phoenixToday();
     writer.add(
       row.id,
       mk(
         "contract_expiring",
         date,
-        `${count} federal contract${count === 1 ? "" : "s"} totaling ${money(amount)} expiring within 12 months${latestEnd ? ` — latest end ${latestEnd}` : ""}`,
+        `${count} federal contract${count === 1 ? "" : "s"} totaling ${money(amount)} expiring within 12 months${asOf ? ` (as of ${asOf})` : ""}${latestEnd ? ` — latest contract end ${latestEnd}` : ""}`,
         "USASpending"
       )
     );
