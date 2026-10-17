@@ -93,6 +93,8 @@ const INST_HARD_NAME_TERMS: { seq: string[]; cat: string; label: string; notAfte
   { seq: ["ELEMENTARY"], cat: "school", label: "Elementary" },
   { seq: ["HIGH", "SCHOOL"], cat: "school", label: "High School" },
   { seq: ["PRESCHOOL"], cat: "school", label: "Preschool" },
+  { seq: ["DAYSCHOOL"], cat: "school", label: "Dayschool" },
+  { seq: ["KINDERGARTEN"], cat: "school", label: "Kindergarten" },
   { seq: ["CHARTER", "SCHOOL"], cat: "school", label: "Charter School" },
   { seq: ["CHARTER", "ACADEMY"], cat: "school", label: "Charter Academy" },
   { seq: ["SCHOOL", "DISTRICT"], cat: "school", label: "School District" },
@@ -105,8 +107,9 @@ const INST_HARD_NAME_TERMS: { seq: string[]; cat: string; label: string; notAfte
   { seq: ["DIOCESE"], cat: "religious", label: "Diocese" },
   { seq: ["CITY", "OF"], cat: "government", label: "City of" },
   { seq: ["TOWN", "OF"], cat: "government", label: "Town of" },
-  // "State of" the government — never "State-Of-The-Art".
-  { seq: ["STATE", "OF"], cat: "government", label: "State of", notAfter: ["THE"] },
+  // "State of" the government — never "State-Of-The-Art" (the
+  // tokenizer drops THE as a stopword, so ART is the tell).
+  { seq: ["STATE", "OF"], cat: "government", label: "State of", notAfter: ["THE", "ART"] },
   { seq: ["DEPARTMENT", "OF"], cat: "government", label: "Department of" },
   { seq: ["HOUSING", "AUTHORITY"], cat: "government", label: "Housing Authority" },
   { seq: ["VA", "MEDICAL"], cat: "government", label: "VA Medical" },
@@ -166,6 +169,21 @@ export function hasInstitutionalNameSignal(name: string, sector = ""): boolean {
   return detectInstitutional({ name, sector }).isInstitutional;
 }
 
+/** True when a facility NAME names an institutional facility class
+ * (school / hospital / jail ...) AND is not one of Ethan's commercial
+ * exceptions. The hospitality sync uses this for permit names; the
+ * raw isInstitutionalFacilityText stays for permit TYPES, where a
+ * class label is never a commercial business name. (First live run:
+ * "Hubbard Family Swim School" — a commercial swim school — was
+ * classified institutional because the facility keyword SCHOOL hit
+ * its name, bypassing the exception list.) */
+export function hasInstitutionalFacilityName(name: string): boolean {
+  if (!isInstitutionalFacilityText(name)) return false;
+  const nameUpper = ` ${(name ?? "").toUpperCase().replace(/['’]/g, "").replace(/[^A-Z0-9]+/g, " ")} `;
+  const exception = INSTITUTIONAL_COMMERCIAL_EXCEPTIONS.find((x) => nameUpper.includes(` ${x} `) || nameUpper.includes(` ${x}`));
+  return !exception;
+}
+
 export function detectInstitutional(
   rec: { name: string; sector?: string; details?: string }
 ): InstitutionalVerdict {
@@ -205,8 +223,21 @@ export function detectInstitutional(
   // value is for-profit evidence: it skips the entity arm (the
   // name/facility arms below still apply).
   if (structure && !/not tax exempt/i.test(structure)) {
-    if (/tax exempt/i.test(structure)) return hard("nonprofit", `entity type "${structure}" (SAM.gov registration)`);
     if (/non[-\s]?profit/i.test(structure)) return hard("nonprofit", `entity type "${structure}" (SAM.gov registration)`);
+    // "Tax Exempt" entity structure is strong but NOT decisive:
+    // SAM's separate profit-structure field disagrees for ~7% of
+    // such registrants (Oct 2026 AZ extract cross-tab: 2,034
+    // non-profit vs 153 for-profit) and the portal does not store
+    // that field — several ordinary machine shops carry it (Harter
+    // Aerospace, Precision Metal Products). Suspect, not hard flag.
+    if (/tax exempt/i.test(structure)) {
+      return {
+        isInstitutional: false,
+        reason: "",
+        suspect: true,
+        suspectReason: `Possible institution — SAM.gov registration lists a tax-exempt entity type ("${structure}"); SAM's profit-structure field disagrees for a minority of such registrants`,
+      };
+    }
     if (/government/i.test(structure)) return hard("government", `entity type "${structure}" (SAM.gov registration)`);
     if (/educational/i.test(structure)) return hard("school", `entity type "${structure}" (SAM.gov registration)`);
     if (/cooperative/i.test(structure)) return hard("cooperative", `entity type "${structure}" (SAM.gov registration)`);

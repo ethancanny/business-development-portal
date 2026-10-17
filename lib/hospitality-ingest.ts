@@ -42,6 +42,7 @@
  */
 import { neon } from "@neondatabase/serverless";
 import { logSync, importCompanies, countFits, isInstitutionalFacilityText, hasInstitutionalNameSignal, type CompanyInput } from "./market-db";
+import { hasInstitutionalFacilityName } from "./institutional";
 
 function sql() {
   const url = process.env.DATABASE_URL;
@@ -613,7 +614,7 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
     const norm = normalizeGroupName(pName);
     const institutional =
       isInstitutionalFacilityText(pType) ||
-      isInstitutionalFacilityText(pName) ||
+      hasInstitutionalFacilityName(pName) ||
       hasInstitutionalNameSignal(pName) ||
       INSTITUTIONAL_OPERATORS.some((op) => norm.includes(op));
     permitById.set(String(p.permit_id), {
@@ -753,7 +754,7 @@ async function syncHospitalityCompanies(): Promise<HospitalityFitSyncResult> {
       const ak = licenseAddrByNumber.get(num);
       if (!ak) continue;
       const licensee = licenseeByNumber.get(num) ?? "";
-      if (hasInstitutionalNameSignal(licensee) || isInstitutionalFacilityText(licensee)) instAddrs.add(ak);
+      if (hasInstitutionalNameSignal(licensee) || hasInstitutionalFacilityName(licensee)) instAddrs.add(ak);
       else commAddrs.add(ak);
     }
     let institutionalLocs = 0;
