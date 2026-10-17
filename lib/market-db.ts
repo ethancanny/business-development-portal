@@ -203,6 +203,94 @@ export interface CompanyInput {
   details?: string;
 }
 
+/* ---------------- Fit pipeline stage (Ethan, Oct 16, 2026) -------------
+ * "Fit" is a pipeline STAGE on the company record (status = 'fit'), not
+ * just the details.fit stamp. status lifecycle:
+ *   new → fit → (dismissed | added); a fit marked Keep stays status
+ *   'fit' with details.kept = true, so the mark survives the stage.
+ * details.fit remains the fit-rule verdict (re-judged at import and by
+ * the rescore paths); status tracks where the record sits. Dismissed
+ * is sticky: NO ingest, rescore, or consolidation may flip a dismissed
+ * row back to fit — importCompanies carries the dismissal through
+ * resets and re-applies it to the same company arriving under a new
+ * source identity (normalized name + website domain, or ACC entity
+ * ID when a record carries one). date_added is written once at
+ * creation and is never overwritten by later syncs; the Fit Targets
+ * section lists active fits newest-date_added-first, capped at
+ * FITS_DISPLAY_LIMIT (the single config value for that cap). */
+export const FITS_DISPLAY_LIMIT = 25;
+
+let fitStageMigration: Promise<void> | null = null;
+
+/** One-time, idempotent migration to the fit-stage model: backfill
+ * date_added from the created/first-seen timestamp, fold Keep-marked
+ * fits into status='fit' (mark preserved as details.kept), and promote
+ * untouched fits (status='new'/'keep' with a fit stamp) to
+ * status='fit'. Fits already 'added' (advanced into the deal
+ * pipeline) or 'dismissed' keep their status — no data is lost. Runs
+ * once per process; the UPDATEs no-op once applied; the counts are
+ * written to the sync log by the first run that changes anything. */
+export function runFitStageMigration(): Promise<void> {
+  if (!fitStageMigration) {
+    fitStageMigration = (async () => {
+      await ensureSchema();
+      const db = sql();
+      const backfilled = await db`
+        UPDATE mi_companies SET date_added = COALESCE(first_seen, created_at)
+        WHERE date_added IS NULL
+        RETURNING id`;
+      const keptFits = await db`
+        UPDATE mi_companies
+        SET details = (details::jsonb || '{"kept":true}'::jsonb)::text
+        WHERE status = 'keep' AND details LIKE '{%'
+          AND (details::jsonb ->> 'fit') = 'true'
+        RETURNING id`;
+      const promoted = await db`
+        UPDATE mi_companies SET status = 'fit'
+        WHERE status IN ('new', 'keep') AND details LIKE '{%'
+          AND (details::jsonb ->> 'fit') = 'true'
+        RETURNING id`;
+      const missing = await db`
+        SELECT COUNT(*)::int AS c FROM mi_companies WHERE date_added IS NULL`;
+      const fitTotal = await db`
+        SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit'`;
+      if (backfilled.length || keptFits.length || promoted.length) {
+        await logSync(
+          "fits-stage-migration",
+          "ok",
+          promoted.length,
+          `Fit stage migration: date_added backfilled on ${backfilled.length} rows (${numOrNull(missing[0]?.c) ?? 0} still missing); ${promoted.length} fits promoted to status='fit' (${keptFits.length} carried a Keep mark, preserved as details.kept); status='fit' total now ${numOrNull(fitTotal[0]?.c) ?? 0}. Fits already added/dismissed kept their status.`
+        );
+      }
+    })().catch((err) => {
+      fitStageMigration = null;
+      throw err;
+    });
+  }
+  return fitStageMigration;
+}
+
+/** Bare domain (host, no protocol/www) from a website string. */
+const domainOf = (website: string): string => {
+  const m = (website || "")
+    .toLowerCase()
+    .match(/(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)/);
+  return m ? m[1] : "";
+};
+
+/** ACC entity ID from a details JSON, when the record carries one.
+ * No spine stores one today, so this arm is dormant until one does
+ * (same posture as the ADHS CCN match). */
+const accIdOfDetails = (detailsJson: string): string => {
+  try {
+    const d = JSON.parse(detailsJson || "{}") as Record<string, unknown>;
+    const v = d.accEntityId ?? d.accId ?? d.entityId;
+    return typeof v === "string" && v.trim() ? v.trim() : "";
+  } catch {
+    return "";
+  }
+};
+
 /** Import a registry snapshot. With reset=true the source's existing rows
  * are replaced wholesale (triage status and first_seen are preserved by
  * dedup key); without it, rows upsert by (source, dedup_key). Used by the
@@ -389,6 +477,7 @@ function computeFit(r: CompanyInput): { fit: boolean; why: string; unscored?: bo
 
 export async function importCompanies(source: string, rows: CompanyInput[], reset: boolean): Promise<{ received: number; total: number }> {
   await ensureSchema();
+  await runFitStageMigration();
   await refreshHospitalityThresholds();
   const db = sql();
   const filtered = rows.filter((r) => r && r.dedupKey && r.name && r.source === source);
@@ -406,6 +495,7 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
   const clean = keyOrder.map((k) => byKey[k]);
   for (const r of clean) {
     const { fit, why, unscored, estRevenue } = computeFit(r);
+    (r as CompanyInput & { _fit?: boolean })._fit = fit;
     try {
       const d = r.details ? (JSON.parse(r.details) as Record<string, unknown>) : {};
       if (fit) {
@@ -430,15 +520,51 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
       if (r.details && r.details.trim().startsWith("{")) r.details = "{}";
     }
   }
+  // No-resurface guard (Ethan, Oct 16, 2026): a dismissed company must
+  // never come back as a fit under a new source identity. Index the
+  // existing dismissed records by normalized name + website domain
+  // (and by ACC entity ID when one is stored); an incoming row that
+  // matches inherits the dismissal — status and stamps — whatever
+  // source/dedup key it arrives under. Read BEFORE any reset delete
+  // below, so a dismissed row also matches itself here (its dedup-key
+  // carry-over is the second layer).
+  const dismissedRows = await db`
+    SELECT name, website, details, dismissed_at, dismissed_reason
+    FROM mi_companies WHERE status = 'dismissed'`;
+  const dismissedByKey = new Map<string, { at: unknown; reason: string }>();
+  for (const d of dismissedRows) {
+    const nm = normCompanyName(str(d.name));
+    if (!nm) continue;
+    const entry = { at: d.dismissed_at, reason: str(d.dismissed_reason) };
+    const dom = domainOf(str(d.website));
+    if (dom) dismissedByKey.set(`${nm}|${dom}`, entry);
+    const acc = accIdOfDetails(str(d.details));
+    if (acc) dismissedByKey.set(`${nm}|acc:${acc}`, entry);
+  }
+  const dismissedMatch = (r: CompanyInput): { at: unknown; reason: string } | undefined => {
+    const nm = normCompanyName(r.name);
+    if (!nm) return undefined;
+    const dom = domainOf(r.website ?? "");
+    if (dom) {
+      const hit = dismissedByKey.get(`${nm}|${dom}`);
+      if (hit) return hit;
+    }
+    const acc = accIdOfDetails(r.details ?? "");
+    if (acc) return dismissedByKey.get(`${nm}|acc:${acc}`);
+    return undefined;
+  };
   if (reset) {
     // Reset is scoped to the (source, sector) pairs present in this payload,
     // so one registry feeding several sector spines never wipes the others.
     const sectors = Array.from(new Set(clean.map((r) => r.sector).filter(Boolean)));
     const existing = sectors.length
-      ? await db`SELECT dedup_key, status, first_seen FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
-      : await db`SELECT dedup_key, status, first_seen FROM mi_companies WHERE source = ${source}`;
+      ? await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
+      : await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason FROM mi_companies WHERE source = ${source}`;
     const statusByKey = new Map(existing.map((r) => [str(r.dedup_key), str(r.status)]));
     const firstSeenByKey = new Map(existing.map((r) => [str(r.dedup_key), r.first_seen]));
+    const dateAddedByKey = new Map(existing.map((r) => [str(r.dedup_key), r.date_added]));
+    const dismissedAtByKey = new Map(existing.map((r) => [str(r.dedup_key), r.dismissed_at]));
+    const dismissedReasonByKey = new Map(existing.map((r) => [str(r.dedup_key), str(r.dismissed_reason)]));
     if (sectors.length) {
       await db`DELETE FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`;
     } else {
@@ -447,6 +573,9 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     for (const r of clean) {
       (r as CompanyInput & { _status?: string })._status = statusByKey.get(r.dedupKey);
       (r as CompanyInput & { _firstSeen?: unknown })._firstSeen = firstSeenByKey.get(r.dedupKey);
+      (r as CompanyInput & { _dateAdded?: unknown })._dateAdded = dateAddedByKey.get(r.dedupKey);
+      (r as CompanyInput & { _dismissedAt?: unknown })._dismissedAt = dismissedAtByKey.get(r.dedupKey);
+      (r as CompanyInput & { _dismissedReason?: string })._dismissedReason = dismissedReasonByKey.get(r.dedupKey);
     }
   }
   const CHUNK = 300;
@@ -455,22 +584,52 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     const values: string[] = [];
     const params: unknown[] = [];
     chunk.forEach((r, j) => {
-      const b = j * 23;
-      values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}, $${b + 11}, $${b + 12}, $${b + 13}, $${b + 14}, $${b + 15}, $${b + 16}, $${b + 17}, $${b + 18}, $${b + 19}, $${b + 20}, $${b + 21}, $${b + 22}, $${b + 23})`);
+      const b = j * 26;
+      values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}, $${b + 11}, $${b + 12}, $${b + 13}, $${b + 14}, $${b + 15}, $${b + 16}, $${b + 17}, $${b + 18}, $${b + 19}, $${b + 20}, $${b + 21}, $${b + 22}, $${b + 23}, $${b + 24}, $${b + 25}, $${b + 26})`);
+      const rx = r as CompanyInput & {
+        _fit?: boolean; _status?: string; _firstSeen?: unknown;
+        _dateAdded?: unknown; _dismissedAt?: unknown; _dismissedReason?: string;
+      };
+      // Stage resolution (fit-stage model): a carried dismissal always
+      // wins; a name+domain / ACC-ID match against a dismissed record
+      // inherits that dismissal; carried keep/added (human triage)
+      // survives; otherwise the stage follows this import's fit
+      // verdict — fit rows enter the stage, rows that stop fitting
+      // fall back to 'new'.
+      const guard = rx._status === "dismissed" ? undefined : dismissedMatch(r);
+      const status =
+        rx._status === "dismissed"
+          ? "dismissed"
+          : guard
+            ? "dismissed"
+            : rx._status === "keep" || rx._status === "added"
+              ? rx._status
+              : rx._fit
+                ? "fit"
+                : "new";
+      const dismissedAt =
+        status === "dismissed"
+          ? (rx._dismissedAt ?? guard?.at ?? new Date().toISOString())
+          : null;
+      const dismissedReason =
+        status === "dismissed" ? (rx._dismissedReason ?? guard?.reason ?? "") : "";
       params.push(
         newId(), r.dedupKey, r.name, r.sector, r.subsector ?? "", r.naics ?? "",
         r.city ?? "", r.state ?? "AZ", r.address ?? "", r.zip ?? "",
         r.contactName ?? "", r.contactTitle ?? "", r.phone ?? "", r.website ?? "",
         r.formedDate ?? "", r.employees ?? null, r.signalValue ?? null, r.signalLabel ?? "",
         r.source, r.sourceUrl ?? "", r.details ?? "",
-        (r as CompanyInput & { _status?: string })._status ?? "new",
-        (r as CompanyInput & { _firstSeen?: unknown })._firstSeen ?? new Date().toISOString()
+        status,
+        rx._firstSeen ?? new Date().toISOString(),
+        rx._dateAdded ?? rx._firstSeen ?? new Date().toISOString(),
+        dismissedAt,
+        dismissedReason
       );
     });
     await db.query(
       `INSERT INTO mi_companies (id, dedup_key, name, sector, subsector, naics, city, state, address, zip,
          contact_name, contact_title, phone, website, formed_date, employees, signal_value, signal_label,
-         source, source_url, details, status, first_seen)
+         source, source_url, details, status, first_seen, date_added, dismissed_at, dismissed_reason)
        VALUES ${values.join(", ")}
        ON CONFLICT (source, dedup_key, sector) DO UPDATE SET
          name = EXCLUDED.name, sector = EXCLUDED.sector, subsector = EXCLUDED.subsector, naics = EXCLUDED.naics,
@@ -478,6 +637,18 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
          contact_title = EXCLUDED.contact_title, phone = EXCLUDED.phone, website = EXCLUDED.website,
          formed_date = EXCLUDED.formed_date, employees = EXCLUDED.employees, signal_value = EXCLUDED.signal_value,
          signal_label = EXCLUDED.signal_label, source_url = EXCLUDED.source_url, details = EXCLUDED.details,
+         status = CASE
+           WHEN mi_companies.status IN ('dismissed', 'keep', 'added') THEN mi_companies.status
+           ELSE EXCLUDED.status
+         END,
+         dismissed_at = CASE
+           WHEN mi_companies.status IN ('dismissed', 'keep', 'added') THEN mi_companies.dismissed_at
+           ELSE EXCLUDED.dismissed_at
+         END,
+         dismissed_reason = CASE
+           WHEN mi_companies.status IN ('dismissed', 'keep', 'added') THEN mi_companies.dismissed_reason
+           ELSE EXCLUDED.dismissed_reason
+         END,
          last_seen = NOW(), updated_at = NOW()`,
       params
     );
@@ -496,7 +667,7 @@ export interface ConsolidateRow extends CompanyInput {
   absorb: string[];
 }
 
-const STATUS_RANK: Record<string, number> = { new: 0, dismissed: 1, keep: 2, added: 3 };
+const STATUS_RANK: Record<string, number> = { new: 0, fit: 1, dismissed: 2, keep: 3, added: 4 };
 
 /**
  * Replace groups of duplicate member rows (same company, many locations /
@@ -603,12 +774,18 @@ export async function consolidateCompanies(rowsIn: ConsolidateRow[]): Promise<{ 
   return { groups: rows.length, absorbed: absorbKeys.length };
 }
 
+/** Active fits = rows in the fit STAGE (status='fit'). Since Oct 16,
+ * 2026 this — not the details stamp — is the count every surface
+ * reconciles to (Fit Targets pills, the section counter, Overview
+ * tiles, hospitality meta). details.fit stays the rule verdict that
+ * feeds the stage at import/rescore time. */
 export async function countFits(sector?: string): Promise<number> {
   await ensureSchema();
+  await runFitStageMigration();
   const db = sql();
   const rows = sector
-    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND details LIKE '{%' AND (details::jsonb ->> 'fit') = 'true'`
-    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE details LIKE '{%' AND (details::jsonb ->> 'fit') = 'true'`;
+    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND status = 'fit'`
+    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit'`;
   return Number((rows as unknown as { c: number }[])[0]?.c ?? 0);
 }
 
@@ -616,7 +793,9 @@ export async function countFits(sector?: string): Promise<number> {
  * change, without waiting for the weekly spine rebuild. Only the fit
  * stamps inside details are touched — fit / fitWhy / fitUnscored /
  * estRevenue; every other details key (consolidation, members, enrichment)
- * is preserved. Returns the next offset, or -1 when the sector is done. */
+ * is preserved. The fit STAGE follows the verdict for rows in the
+ * automatic stages ('new'/'fit'); human stages never move. Returns the
+ * next offset, or -1 when the sector is done. */
 function rowToCompanyInput(r: Record<string, unknown>): CompanyInput {
   return {
     dedupKey: str(r.dedup_key), name: str(r.name), sector: str(r.sector),
@@ -631,15 +810,18 @@ function rowToCompanyInput(r: Record<string, unknown>): CompanyInput {
 }
 
 /** Re-judge ONE company row's fit stamps in place. Returns the new
- * details JSON and whether the fit stamps changed. Non-JSON details
- * pass through untouched, as at import. */
-function judgeDetails(input: CompanyInput): { details: string; changed: boolean } {
+ * details JSON, whether the fit stamps changed, and the fit verdict
+ * itself (the rescore paths use it to keep the fit STAGE in step —
+ * only for rows in the automatic stages 'new'/'fit'; dismissed /
+ * keep / added are human decisions an ingest never overrides).
+ * Non-JSON details pass through untouched, as at import. */
+function judgeDetails(input: CompanyInput): { details: string; changed: boolean; fit: boolean } {
   const { fit, why, unscored, estRevenue } = computeFit(input);
   let d: Record<string, unknown> = {};
   try {
     d = input.details ? (JSON.parse(input.details) as Record<string, unknown>) : {};
   } catch {
-    return { details: input.details ?? "", changed: false };
+    return { details: input.details ?? "", changed: false, fit: false };
   }
   const before = JSON.stringify({ f: d.fit, w: d.fitWhy, u: d.fitUnscored, e: d.estRevenue });
   if (fit) { d.fit = true; d.fitWhy = why; } else { delete d.fit; delete d.fitWhy; }
@@ -648,11 +830,19 @@ function judgeDetails(input: CompanyInput): { details: string; changed: boolean 
   else if (estRevenue === null) delete d.estRevenue;
   else if (typeof d.revenueEstimate === "number") d.estRevenue = d.revenueEstimate;
   const after = JSON.stringify({ f: d.fit, w: d.fitWhy, u: d.fitUnscored, e: d.estRevenue });
-  return { details: JSON.stringify(d), changed: before !== after };
+  return { details: JSON.stringify(d), changed: before !== after, fit };
+}
+
+/** The stage a re-judged row should hold: automatic stages follow the
+ * fit verdict; human stages (dismissed / keep / added) never move. */
+function stageAfterRejudge(current: string, fit: boolean): string {
+  if (current === "new" || current === "fit") return fit ? "fit" : "new";
+  return current;
 }
 
 export async function rescoreCompanies(sector: string | undefined, offset: number, pageSize = 1500): Promise<{ processed: number; changed: number; nextOffset: number }> {
   await ensureSchema();
+  await runFitStageMigration();
   await refreshHospitalityThresholds();
   const db = sql();
   const rows = sector
@@ -662,8 +852,9 @@ export async function rescoreCompanies(sector: string | undefined, offset: numbe
   for (const r of rows) {
     const input = rowToCompanyInput(r as Record<string, unknown>);
     const judged = judgeDetails(input);
-    if (judged.changed) {
-      await db`UPDATE mi_companies SET details = ${judged.details} WHERE id = ${r.id}`;
+    const stage = stageAfterRejudge(str(r.status), judged.fit);
+    if (judged.changed || stage !== str(r.status)) {
+      await db`UPDATE mi_companies SET details = ${judged.details}, status = ${stage} WHERE id = ${r.id}`;
       changed++;
     }
   }
@@ -677,6 +868,7 @@ export async function rescoreCompanies(sector: string | undefined, offset: numbe
 export async function rescoreCompaniesByIds(ids: string[]): Promise<number> {
   if (!ids.length) return 0;
   await ensureSchema();
+  await runFitStageMigration();
   await refreshHospitalityThresholds();
   const db = sql();
   let changed = 0;
@@ -687,8 +879,9 @@ export async function rescoreCompaniesByIds(ids: string[]): Promise<number> {
     for (const r of rows as Record<string, unknown>[]) {
       const input = rowToCompanyInput(r);
       const judged = judgeDetails(input);
-      if (judged.changed) {
-        await db`UPDATE mi_companies SET details = ${judged.details} WHERE id = ${r.id as string}`;
+      const stage = stageAfterRejudge(str(r.status), judged.fit);
+      if (judged.changed || stage !== str(r.status)) {
+        await db`UPDATE mi_companies SET details = ${judged.details}, status = ${stage} WHERE id = ${r.id as string}`;
         changed++;
       }
     }
@@ -819,15 +1012,8 @@ export async function countCompanies(sector?: string): Promise<number> {
   return numOrNull(rows[0]?.n) ?? 0;
 }
 
-export async function getCompanies(sector?: string, limit = 600, offset = 0): Promise<MiCompany[]> {
-  await ensureSchema();
-  const db = sql();
-  const lim = Math.min(Math.max(limit, 1), 5000);
-  const off = Math.max(offset, 0);
-  const rows = sector
-    ? await db`SELECT * FROM mi_companies WHERE sector = ${sector} ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim} OFFSET ${off}`
-    : await db`SELECT * FROM mi_companies ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim} OFFSET ${off}`;
-  return rows.map((r) => ({
+function mapCompanyRow(r: Record<string, unknown>): MiCompany {
+  return {
     id: str(r.id), dedupKey: str(r.dedup_key), name: str(r.name), sector: str(r.sector),
     subsector: str(r.subsector), naics: str(r.naics), city: str(r.city), state: str(r.state),
     address: str(r.address), zip: str(r.zip), contactName: str(r.contact_name),
@@ -837,12 +1023,110 @@ export async function getCompanies(sector?: string, limit = 600, offset = 0): Pr
     source: str(r.source), sourceUrl: str(r.source_url), details: str(r.details),
     status: str(r.status) as MiCompany["status"],
     firstSeen: String(r.first_seen), lastSeen: String(r.last_seen),
-  }));
+    dateAdded: String(r.date_added ?? r.first_seen ?? ""),
+    dismissedAt: r.dismissed_at ? String(r.dismissed_at) : null,
+    dismissedReason: str(r.dismissed_reason),
+  };
+}
+
+export async function getCompanies(sector?: string, limit = 600, offset = 0): Promise<MiCompany[]> {
+  await ensureSchema();
+  const db = sql();
+  const lim = Math.min(Math.max(limit, 1), 5000);
+  const off = Math.max(offset, 0);
+  const rows = sector
+    ? await db`SELECT * FROM mi_companies WHERE sector = ${sector} ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim} OFFSET ${off}`
+    : await db`SELECT * FROM mi_companies ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim} OFFSET ${off}`;
+  return rows.map((r) => mapCompanyRow(r as Record<string, unknown>));
 }
 
 export async function setCompanyStatus(id: string, status: MiCompany["status"]): Promise<void> {
   await ensureSchema();
   await sql()`UPDATE mi_companies SET status = ${status}, updated_at = NOW() WHERE id = ${id}`;
+}
+
+/** The Fit Targets section feed (Ethan, Oct 16, 2026): active fits
+ * (status='fit') ONLY, ALWAYS newest date_added first — never sorted
+ * by score — capped at FITS_DISPLAY_LIMIT. Backfill is inherent: the
+ * query always returns the current top-N, so when a fit leaves the
+ * stage the next most recently added fit slides in on the next read.
+ * fitTotal is the uncapped count of active fits in the same scope. */
+export async function getFitCompanies(sectors?: string[]): Promise<{ companies: MiCompany[]; fitTotal: number }> {
+  await ensureSchema();
+  await runFitStageMigration();
+  const db = sql();
+  const list = (sectors ?? []).filter(Boolean);
+  const totalRows = list.length
+    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND sector = ANY(${list})`
+    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit'`;
+  const rows = list.length
+    ? await db`SELECT * FROM mi_companies WHERE status = 'fit' AND sector = ANY(${list}) ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`
+    : await db`SELECT * FROM mi_companies WHERE status = 'fit' ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`;
+  return {
+    companies: rows.map((r) => mapCompanyRow(r as Record<string, unknown>)),
+    fitTotal: Number((totalRows as unknown as { c: number }[])[0]?.c ?? 0),
+  };
+}
+
+/** Dismiss a company (fit-stage exit with tracking): stamps
+ * dismissed_at + the optional reason. Dismissal is sticky — see the
+ * guards in importCompanies. */
+export async function dismissCompany(id: string, reason = ""): Promise<void> {
+  await ensureSchema();
+  await runFitStageMigration();
+  await sql()`
+    UPDATE mi_companies
+    SET status = 'dismissed', dismissed_at = NOW(),
+        dismissed_reason = ${reason.trim().slice(0, 300)}, updated_at = NOW()
+    WHERE id = ${id}`;
+}
+
+/** Restore a dismissed company: back to status='fit' when its fit
+ * stamp still stands (else 'new'), dismissal stamps cleared. Its
+ * date_added never moved, so it re-enters the section at its
+ * original position. Returns the new status. */
+export async function restoreCompany(id: string): Promise<MiCompany["status"]> {
+  await ensureSchema();
+  await runFitStageMigration();
+  const db = sql();
+  const rows = await db`SELECT details FROM mi_companies WHERE id = ${id}`;
+  let fit = false;
+  try {
+    fit = (JSON.parse(str(rows[0]?.details || "{}")) as Record<string, unknown>).fit === true;
+  } catch {
+    fit = false;
+  }
+  const status = (fit ? "fit" : "new") as MiCompany["status"];
+  await db`
+    UPDATE mi_companies
+    SET status = ${status}, dismissed_at = NULL, dismissed_reason = '', updated_at = NOW()
+    WHERE id = ${id}`;
+  return status;
+}
+
+/** Keep-mark a company. On a fit, the mark is details.kept and the
+ * stage stays 'fit' (the record keeps its place in the fits
+ * section); on any other row it is the classic status='keep'.
+ * Returns the resulting status. */
+export async function keepCompany(id: string): Promise<MiCompany["status"]> {
+  await ensureSchema();
+  await runFitStageMigration();
+  const db = sql();
+  const rows = await db`SELECT status, details FROM mi_companies WHERE id = ${id}`;
+  if (!rows.length) return "new";
+  if (str(rows[0].status) === "fit") {
+    let d: Record<string, unknown> = {};
+    try {
+      d = JSON.parse(str(rows[0].details || "{}")) as Record<string, unknown>;
+    } catch {
+      d = {};
+    }
+    d.kept = true;
+    await db`UPDATE mi_companies SET details = ${JSON.stringify(d)}, updated_at = NOW() WHERE id = ${id}`;
+    return "fit";
+  }
+  await db`UPDATE mi_companies SET status = 'keep', updated_at = NOW() WHERE id = ${id}`;
+  return "keep";
 }
 
 /* ---------------- Multiples ---------------- */
