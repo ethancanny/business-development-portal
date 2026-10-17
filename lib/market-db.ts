@@ -337,6 +337,616 @@ export async function refreshHospitalityThresholds(force = false): Promise<Hospi
   return value;
 }
 
+/* ---------------- Chain / franchise filter (Ethan, Oct 16, 2026) -------------
+ * Canny only wants independent, owner-operated targets. Detection runs
+ * in the central write path (importCompanies — every scraper, spine,
+ * and email-driven creation flows through it), in the rescore paths,
+ * and as a batch pass over existing records (runChainDetectionBatch).
+ *
+ * HARD signals (any one flags is_chain, with the rule in chain_reason):
+ *   list      — name or website domain matches the maintained exclusion
+ *               list of national chains / franchise brands (settings).
+ *   language  — franchise language in the record's own text: "franchise
+ *               opportunities", "own a franchise", "franchisee",
+ *               "franchise disclosure document", or the token "FDD".
+ *   locations — the same business name at >= threshold locations in
+ *               multiple states, or >= threshold locations anywhere.
+ *   ownership — the hospitality ownership detector stamped the group
+ *               franchise / chain / subsidiary / institutional.
+ *   parent    — a recorded parent (details.parentName / parentEntity /
+ *               accParent) matches the exclusion list, i.e. the record
+ *               is a subsidiary/unit of a known national brand.
+ *   acc       — an ACC registered-agent field on the record matches the
+ *               list. DORMANT: no spine stores ACC agent fields today;
+ *               the hook fires the day a record carries one.
+ * WEAK signals (never exclude; tag chain_suspect = "Possible
+ * franchise", the record stays in Fits): the name merely RESEMBLES a
+ * list brand (stem-level match), a bare "franchise" mention without
+ * franchise-system language, or location counts one short of a
+ * threshold.
+ * LOCAL-OPERATOR PROTECTION: own-brand locations all in Arizona below
+ * the anywhere threshold never fire the location rule — a 3–8 location
+ * Arizona operator is the target profile, not a chain.
+ * chain_exempt (the "Not a chain" override) is permanent: detection
+ * skips exempt records everywhere, forever.
+ * Dismissed records are never written by detection in any path. */
+
+export interface ChainFilterSettings {
+  /** Display names of national chains / franchise brands to exclude. */
+  brands: string[];
+  /** Same name at >= this many locations across 2+ states = chain. */
+  multiStateLocations: number;
+  /** Same name at >= this many locations anywhere = chain. */
+  anywhereLocations: number;
+}
+
+/** Starter exclusion list (Ethan, Oct 16, 2026): seeded into settings
+ * on first read; afterwards the Settings screen owns the list. The
+ * restaurant/hotel/convenience core mirrors the hospitality spine's
+ * NATIONAL_BRANDS (lib/hospitality-ingest.ts — that list is not
+ * exported, so the seed duplicates it by design; the two lists serve
+ * different matchers and may drift independently). */
+export const CHAIN_BRAND_SEED: string[] = [
+  // Fast food & restaurants
+  "McDonald's", "Burger King", "Wendy's", "Taco Bell", "KFC", "Pizza Hut", "Domino's",
+  "Subway", "Starbucks", "Dunkin'", "Chipotle", "Dairy Queen", "Sonic Drive-In", "Arby's",
+  "Jack in the Box", "Carl's Jr.", "Hardee's", "Little Caesars", "Papa John's", "Jimmy John's",
+  "Jersey Mike's", "Firehouse Subs", "Five Guys", "Chick-fil-A", "Raising Cane's",
+  "In-N-Out Burger", "Whataburger", "Dutch Bros", "Denny's", "IHOP", "Applebee's", "Chili's",
+  "Olive Garden", "Buffalo Wild Wings", "Hooters", "Red Robin", "Texas Roadhouse",
+  "Outback Steakhouse", "LongHorn Steakhouse", "Cheesecake Factory", "P.F. Chang's",
+  "Panera Bread", "Wingstop", "Popeyes", "Church's Chicken", "Del Taco", "El Pollo Loco",
+  "Wienerschnitzel", "Baskin-Robbins", "Cold Stone Creamery", "Smoothie King", "Jamba",
+  "Tropical Smoothie Cafe", "Qdoba", "Blaze Pizza", "MOD Pizza", "CAVA", "Shake Shack",
+  "Culver's", "Freddy's", "Portillo's", "Einstein Bros. Bagels", "Krispy Kreme",
+  "Waffle House", "Wetzel's Pretzels", "Smashburger", "Nothing Bundt Cakes", "Scooter's Coffee",
+  "Port of Subs", "Hawaiian Bros", "Cafe Rio", "Bahama Buck's", "Hissho Sushi",
+  "Tropical Sno", "Yogurtini", "Ono Hawaiian BBQ",
+  // Auto service & parts
+  "Jiffy Lube", "Midas", "Meineke", "AAMCO", "Valvoline", "Firestone", "Goodyear",
+  "Discount Tire", "Les Schwab", "Big O Tires", "Pep Boys", "O'Reilly Auto Parts",
+  "AutoZone", "Advance Auto Parts", "NAPA Auto Parts", "Christian Brothers Automotive",
+  "Grease Monkey", "Take 5 Oil Change", "Caliber Collision", "Maaco", "Tuffy",
+  "Precision Tune Auto Care",
+  // Fitness
+  "Planet Fitness", "LA Fitness", "Orangetheory Fitness", "Anytime Fitness", "Gold's Gym",
+  "24 Hour Fitness", "Crunch Fitness", "Club Pilates", "Life Time Fitness", "Snap Fitness",
+  "F45 Training", "Pure Barre", "Workout Anytime", "UFC Gym", "Esporta Fitness",
+  // Home services
+  "Mr. Rooter", "Roto-Rooter", "Aire Serv", "Mr. Electric", "Mr. Handyman",
+  "Stanley Steemer", "SERVPRO", "ServiceMaster", "Benjamin Franklin Plumbing",
+  "One Hour Air Conditioning", "Orkin", "Terminix", "Truly Nolen", "TruGreen",
+  "Lawn Doctor", "Mosquito Joe", "Two Men and a Truck",
+  // Hair, beauty & personal care
+  "Great Clips", "Supercuts", "Sport Clips", "Fantastic Sams", "Hair Cuttery",
+  "Cost Cutters", "Massage Envy", "European Wax Center", "Amazing Lash Studio",
+  "Hand & Stone", "Drybar",
+  // Senior care (franchise home care + national operators)
+  "Home Instead", "Visiting Angels", "Comfort Keepers", "BrightStar Care", "Right at Home",
+  "Synergy HomeCare", "Senior Helpers", "Amada Senior Care", "Griswold Home Care",
+  "Homewatch CareGivers", "Always Best Care", "Brookdale Senior Living",
+  "Sunrise Senior Living", "Atria Senior Living",
+  // Childcare & education franchises
+  "KinderCare", "Primrose Schools", "The Goddard School", "Childtime", "Tutor Time",
+  "Kumon", "Mathnasium", "Huntington Learning Center", "Sylvan Learning",
+  "The Learning Experience", "Kiddie Academy",
+  // Cleaning
+  "Molly Maid", "Merry Maids", "The Maids", "MaidPro", "JAN-PRO", "Coverall",
+  "Stratus Building Solutions",
+  // Retail & convenience
+  "7-Eleven", "Circle K", "Couche-Tard", "QuikTrip", "Casey's", "Speedway",
+  "Dollar General", "Family Dollar", "Dollar Tree", "CVS", "Walgreens", "Rite Aid",
+  "Ace Hardware", "True Value", "U-Haul", "Public Storage", "Extra Space Storage",
+  "The UPS Store", "FedEx Office", "Batteries Plus", "GNC", "The Vitamin Shoppe",
+  "Sally Beauty", "Pet Supplies Plus", "Petco", "PetSmart", "Tractor Supply",
+  "Harbor Freight", "Five Below", "ALDI", "Walmart", "Wal Mart", "Walmart Neighborhood Market",
+  "Walmart Supercenter", "Total Wine & More", "Fry's Food", "Fry's Food Stores",
+  "Fry's Marketplace", "Safeway", "Albertsons", "Sprouts Farmers Market",
+  // Hotels
+  "Marriott", "Hilton", "Hyatt", "Holiday Inn", "Hampton Inn", "La Quinta", "Motel 6",
+  "Super 8", "Best Western", "Comfort Inn", "Days Inn", "Wyndham", "Choice Hotels",
+  "Extended Stay America", "Red Roof Inn", "Quality Inn", "Sleep Inn", "Econo Lodge",
+  "Ramada", "Courtyard", "Fairfield Inn", "Residence Inn", "Hilton Garden Inn",
+  "Homewood Suites", "Embassy Suites", "DoubleTree", "Radisson",
+  // Tax & accounting storefronts
+  "H&R Block", "Jackson Hewitt", "Liberty Tax",
+  // Institutional foodservice / national parents (subsidiary arm)
+  "Aramark", "Sodexo", "Compass Group", "Chartwells", "Levy Restaurants",
+  "Delaware North", "Legends Hospitality",
+  // Other national service chains on AZ records
+  "Aspen Dental", "Western Dental", "Banfield Pet Hospital", "VCA Animal Hospitals",
+  "Visionworks", "LensCrafters", "Pearle Vision",
+];
+
+export const CHAIN_SETTINGS_DEFAULT: ChainFilterSettings = {
+  brands: CHAIN_BRAND_SEED,
+  multiStateLocations: 5,
+  anywhereLocations: 10,
+};
+
+interface CompiledChainSettings extends ChainFilterSettings {
+  /** Per-brand token sequences for word-boundary matching. */
+  brandTokens: string[][];
+  /** Per-brand joined (space-free) forms for domain / squashed-name matching. */
+  brandJoined: string[];
+  /** Display names aligned with brandTokens/brandJoined. */
+  brandNames: string[];
+}
+
+function compileChainSettings(s: ChainFilterSettings): CompiledChainSettings {
+  const brandTokens: string[][] = [];
+  const brandJoined: string[] = [];
+  const brandNames: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of s.brands) {
+    const name = String(raw ?? "").trim();
+    if (!name) continue;
+    const toks = chainTokens(name);
+    if (!toks.length) continue;
+    const joined = toks.join("");
+    if (seen.has(joined)) continue;
+    seen.add(joined);
+    brandTokens.push(toks);
+    brandJoined.push(joined);
+    brandNames.push(name);
+  }
+  return { ...s, brandTokens, brandJoined, brandNames };
+}
+
+/** Brand/name tokenizer: uppercase, apostrophes dropped (so DENNY'S
+ * and Denny's agree), punctuation becomes spaces, corporate suffixes
+ * dropped. Token-sequence matching gives word boundaries for free —
+ * "ALDI" matches the Aldi group but never "ESMERALDITA". */
+export function chainTokens(s: string): string[] {
+  return (s || "")
+    .toUpperCase()
+    .replace(/['’]/g, "")
+    .replace(/&/g, " AND ")
+    .replace(/[^A-Z0-9]+/g, " ")
+    .split(" ")
+    .map((t) => t.trim())
+    .filter((t) => t && !["INC", "LLC", "LTD", "CORP", "CORPORATION", "CO", "COMPANY", "LP", "LLP", "PLC", "THE"].includes(t));
+}
+
+const stemToken = (t: string): string => (t.length > 3 && t.endsWith("S") ? t.slice(0, -1) : t);
+
+function tokensContainSeq(hay: string[], needle: string[]): boolean {
+  if (!needle.length || needle.length > hay.length) return false;
+  for (let i = 0; i + needle.length <= hay.length; i++) {
+    let ok = true;
+    for (let j = 0; j < needle.length; j++) {
+      if (hay[i + j] !== needle[j]) { ok = false; break; }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+let chainSettingsCache: { value: CompiledChainSettings; at: number } | null = null;
+
+export function chainSettings(): CompiledChainSettings {
+  return chainSettingsCache?.value ?? compileChainSettings(CHAIN_SETTINGS_DEFAULT);
+}
+
+async function ensureChainStateTable(): Promise<void> {
+  const db = sql();
+  await db`CREATE TABLE IF NOT EXISTS mi_chain_state (
+    key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '', updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
+}
+
+export async function refreshChainSettings(force = false): Promise<CompiledChainSettings> {
+  if (!force && chainSettingsCache && Date.now() - chainSettingsCache.at < 300_000) {
+    return chainSettingsCache.value;
+  }
+  const value: ChainFilterSettings = {
+    brands: [...CHAIN_SETTINGS_DEFAULT.brands],
+    multiStateLocations: CHAIN_SETTINGS_DEFAULT.multiStateLocations,
+    anywhereLocations: CHAIN_SETTINGS_DEFAULT.anywhereLocations,
+  };
+  try {
+    await ensureChainStateTable();
+    const db = sql();
+    const rows = await db`SELECT key, value FROM mi_chain_state WHERE key IN ('exclusion_list', 'threshold_multistate', 'threshold_anywhere')`;
+    let seeded = false;
+    const byKey = new Map(rows.map((r) => [str(r.key), str(r.value)]));
+    if (byKey.has("exclusion_list")) {
+      try {
+        const parsed = JSON.parse(byKey.get("exclusion_list") || "[]") as unknown;
+        if (Array.isArray(parsed)) value.brands = parsed.map((x) => String(x)).filter(Boolean);
+      } catch { /* keep seed */ }
+    } else {
+      seeded = true;
+    }
+    const ms = Number(byKey.get("threshold_multistate"));
+    if (Number.isFinite(ms) && ms >= 2 && ms <= 100) value.multiStateLocations = Math.round(ms);
+    const aw = Number(byKey.get("threshold_anywhere"));
+    if (Number.isFinite(aw) && aw >= 2 && aw <= 200) value.anywhereLocations = Math.round(aw);
+    if (seeded) {
+      await db`INSERT INTO mi_chain_state (key, value) VALUES ('exclusion_list', ${JSON.stringify(value.brands)})
+        ON CONFLICT (key) DO NOTHING`;
+      await db`INSERT INTO mi_chain_state (key, value) VALUES ('threshold_multistate', ${String(value.multiStateLocations)})
+        ON CONFLICT (key) DO NOTHING`;
+      await db`INSERT INTO mi_chain_state (key, value) VALUES ('threshold_anywhere', ${String(value.anywhereLocations)})
+        ON CONFLICT (key) DO NOTHING`;
+    }
+  } catch {
+    // Settings table unreachable — compiled defaults apply.
+  }
+  const compiled = compileChainSettings(value);
+  chainSettingsCache = { value: compiled, at: Date.now() };
+  return compiled;
+}
+
+export async function getChainFilterSettings(): Promise<ChainFilterSettings> {
+  const c = await refreshChainSettings();
+  return {
+    brands: [...c.brandNames],
+    multiStateLocations: c.multiStateLocations,
+    anywhereLocations: c.anywhereLocations,
+  };
+}
+
+export async function setChainFilterSettings(s: ChainFilterSettings): Promise<ChainFilterSettings> {
+  await ensureSchema();
+  await ensureChainStateTable();
+  const db = sql();
+  const brands: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of s.brands ?? []) {
+    const name = String(raw ?? "").trim().slice(0, 80);
+    if (!name || name.length < 2) continue;
+    const k = chainTokens(name).join("");
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    brands.push(name);
+    if (brands.length >= 1000) break;
+  }
+  const ms = Math.min(100, Math.max(2, Math.round(s.multiStateLocations || 5)));
+  const aw = Math.min(200, Math.max(2, Math.round(s.anywhereLocations || 10)));
+  await db`INSERT INTO mi_chain_state (key, value) VALUES ('exclusion_list', ${JSON.stringify(brands)})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
+  await db`INSERT INTO mi_chain_state (key, value) VALUES ('threshold_multistate', ${String(ms)})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
+  await db`INSERT INTO mi_chain_state (key, value) VALUES ('threshold_anywhere', ${String(aw)})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
+  chainSettingsCache = null;
+  const saved = await refreshChainSettings(true);
+  return {
+    brands: [...saved.brandNames],
+    multiStateLocations: saved.multiStateLocations,
+    anywhereLocations: saved.anywhereLocations,
+  };
+}
+
+/** Location evidence for the locations rule. Callers that scan the
+ * whole company universe (the batch pass) pass real same-name counts;
+ * the import path passes undefined and detection falls back to the
+ * record's own locationCount (hospitality groups carry the resolved
+ * multi-location evidence on the row). */
+export interface ChainNameCounts {
+  /** Rows + on-row location counts under this normalized name. */
+  anywhere: number;
+  /** Rows sharing the name that sit in 2+ distinct states. */
+  multiStateRows: number;
+  /** Distinct states among same-name rows. */
+  states: number;
+}
+
+export interface ChainVerdict {
+  isChain: boolean;
+  reason: string;
+  suspect: boolean;
+  suspectReason: string;
+}
+
+const CHAIN_FRANCHISE_PHRASES = [
+  "franchise opportunities",
+  "franchising opportunities",
+  "own a franchise",
+  "franchise disclosure document",
+  "franchisee",
+];
+
+/** The detection core (pure; settings-compiled). rec.details is the
+ * record's details JSON string; counts is the optional universe-level
+ * same-name evidence from the batch pass. */
+export function detectChain(
+  rec: { name: string; website?: string; details?: string },
+  settings: CompiledChainSettings,
+  counts?: ChainNameCounts
+): ChainVerdict {
+  let d: Record<string, unknown> = {};
+  try {
+    d = rec.details ? (JSON.parse(rec.details) as Record<string, unknown>) : {};
+  } catch {
+    d = {};
+  }
+  const nameTokens = chainTokens(rec.name ?? "");
+  const weak: string[] = [];
+
+  // (e/ownership) — a recorded ownership verdict from the hospitality
+  // ownership detector (or any spine that stamps one).
+  const ownership = String(d.ownership ?? "").toLowerCase();
+  if (ownership === "franchise" || ownership === "chain") {
+    return { isChain: true, reason: `ownership: ownership detector stamped "${ownership}"${typeof d.ownershipBasis === "string" && d.ownershipBasis ? ` — ${d.ownershipBasis}` : ""}`, suspect: false, suspectReason: "" };
+  }
+  if (ownership === "subsidiary") {
+    return { isChain: true, reason: "parent: ownership detector stamped \"subsidiary\" — a unit of a larger parent, not an independent operator", suspect: false, suspectReason: "" };
+  }
+  if (ownership === "institutional") {
+    return { isChain: true, reason: "parent: ownership detector stamped \"institutional\" — a unit of a national institutional operator", suspect: false, suspectReason: "" };
+  }
+
+  // (a) exclusion list — name (token sequence), then squashed forms,
+  // then the website domain.
+  for (let i = 0; i < settings.brandTokens.length; i++) {
+    if (tokensContainSeq(nameTokens, settings.brandTokens[i])) {
+      return { isChain: true, reason: `list: name matches chain/franchise exclusion list — "${settings.brandNames[i]}"`, suspect: false, suspectReason: "" };
+    }
+  }
+  const nameJoined = nameTokens.join("");
+  for (let i = 0; i < settings.brandJoined.length; i++) {
+    const bj = settings.brandJoined[i];
+    if (bj.length >= 6 && nameJoined.includes(bj)) {
+      return { isChain: true, reason: `list: name matches chain/franchise exclusion list — "${settings.brandNames[i]}"`, suspect: false, suspectReason: "" };
+    }
+  }
+  const dom = domainOf(rec.website ?? "");
+  if (dom) {
+    const domTokens = chainTokens(dom.replace(/\.(com|net|org|io|co|us|biz|info)$/i, ""));
+    const domJoined = domTokens.join("");
+    for (let i = 0; i < settings.brandTokens.length; i++) {
+      if (
+        tokensContainSeq(domTokens, settings.brandTokens[i]) ||
+        (settings.brandJoined[i].length >= 5 && domJoined === settings.brandJoined[i])
+      ) {
+        return { isChain: true, reason: `domain: website domain ${dom} matches exclusion list — "${settings.brandNames[i]}"`, suspect: false, suspectReason: "" };
+      }
+    }
+  }
+
+  // (e) recorded parent matches the list.
+  const parentText = [d.parentName, d.parentEntity, d.accParent]
+    .filter((v) => typeof v === "string" && v.trim())
+    .join(" ");
+  if (parentText) {
+    const pTokens = chainTokens(parentText);
+    for (let i = 0; i < settings.brandTokens.length; i++) {
+      if (tokensContainSeq(pTokens, settings.brandTokens[i])) {
+        return { isChain: true, reason: `parent: recorded parent "${parentText}" matches exclusion list — "${settings.brandNames[i]}" (subsidiary / unit of a national brand)`, suspect: false, suspectReason: "" };
+      }
+    }
+  }
+
+  // (d) ACC registered-agent hook — dormant until a spine stores ACC
+  // agent fields on the record; fires on the fields below when present.
+  const agentText = [d.accAgent, d.accAgentName, d.registeredAgent, d.statutoryAgent]
+    .filter((v) => typeof v === "string" && v.trim())
+    .join(" ");
+  if (agentText) {
+    const aTokens = chainTokens(agentText);
+    for (let i = 0; i < settings.brandTokens.length; i++) {
+      if (tokensContainSeq(aTokens, settings.brandTokens[i])) {
+        return { isChain: true, reason: `acc: ACC registered agent "${agentText}" matches national brand — "${settings.brandNames[i]}"`, suspect: false, suspectReason: "" };
+      }
+    }
+  }
+
+  // (b) franchise language in the record's own text.
+  const text = `${rec.name ?? ""} ${rec.details ?? ""}`.toLowerCase();
+  for (const phrase of CHAIN_FRANCHISE_PHRASES) {
+    if (text.includes(phrase)) {
+      return { isChain: true, reason: `language: franchise language in record — "${phrase}"`, suspect: false, suspectReason: "" };
+    }
+  }
+  if (/\bfdd\b/.test(text)) {
+    return { isChain: true, reason: "language: franchise language in record — \"FDD\" (franchise disclosure document)", suspect: false, suspectReason: "" };
+  }
+
+  // (c) locations. AZ-only evidence below the anywhere threshold is
+  // protected (local multi-location operator) and never fires.
+  const ownLoc = typeof d.locationCount === "number" && d.locationCount > 0 ? Math.floor(d.locationCount) : 0;
+  const anywhere = Math.max(ownLoc, counts?.anywhere ?? 0);
+  const multiRows = counts?.multiStateRows ?? 0;
+  const stateCount = counts?.states ?? 0;
+  if (anywhere >= settings.anywhereLocations) {
+    return { isChain: true, reason: `locations: ${anywhere} locations under this name (chain threshold: ${settings.anywhereLocations}+ anywhere)`, suspect: false, suspectReason: "" };
+  }
+  if (multiRows >= settings.multiStateLocations && stateCount >= 2) {
+    return { isChain: true, reason: `locations: name appears at ${multiRows} locations across ${stateCount} states (chain threshold: ${settings.multiStateLocations}+ in multiple states)`, suspect: false, suspectReason: "" };
+  }
+
+  // ---- weak signals only from here: tag "Possible franchise". ----
+  // Name resembles a list brand at stem level (e.g. "McDonald" vs the
+  // listed "McDonald's") without an exact match.
+  const stemName = nameTokens.map(stemToken);
+  for (let i = 0; i < settings.brandTokens.length; i++) {
+    const stemBrand = settings.brandTokens[i].map(stemToken);
+    if (tokensContainSeq(stemName, stemBrand)) {
+      weak.push(`name resembles exclusion-list brand "${settings.brandNames[i]}"`);
+      break;
+    }
+  }
+  if (/\bfranchis\w*\b/.test(text)) {
+    weak.push("bare \"franchise\" mention without franchise-system language");
+  }
+  if (anywhere === settings.anywhereLocations - 1 && anywhere > 1) {
+    weak.push(`${anywhere} locations — one under the ${settings.anywhereLocations}-location chain threshold`);
+  }
+  if (multiRows === settings.multiStateLocations - 1 && stateCount >= 2) {
+    weak.push(`${multiRows} locations across ${stateCount} states — one under the ${settings.multiStateLocations}-location multi-state threshold`);
+  }
+  return { isChain: false, reason: "", suspect: weak.length > 0, suspectReason: weak.join("; ") };
+}
+
+/** Same-name location evidence across the whole company universe, for
+ * the batch pass (the locations rule's multi-state / anywhere arms
+ * need counts no single record carries). One paged light scan. */
+export async function buildChainNameCounts(): Promise<Map<string, ChainNameCounts>> {
+  await ensureSchema();
+  const db = sql();
+  const map = new Map<string, { rows: number; locSum: number; maxLoc: number; states: Set<string> }>();
+  const PAGE = 5000;
+  for (let offset = 0; ; offset += PAGE) {
+    const rows = await db`
+      SELECT name, state,
+        CASE WHEN details LIKE '{%' THEN (details::jsonb ->> 'locationCount') END AS loc
+      FROM mi_companies ORDER BY id LIMIT ${PAGE} OFFSET ${offset}`;
+    for (const r of rows) {
+      const key = normCompanyName(str(r.name));
+      if (!key) continue;
+      let e = map.get(key);
+      if (!e) {
+        e = { rows: 0, locSum: 0, maxLoc: 0, states: new Set<string>() };
+        map.set(key, e);
+      }
+      e.rows += 1;
+      const loc = numOrNull(r.loc);
+      if (loc !== null && loc > 0) {
+        e.locSum += Math.floor(loc);
+        if (loc > e.maxLoc) e.maxLoc = Math.floor(loc);
+      }
+      const st = str(r.state).trim().toUpperCase();
+      if (st) e.states.add(st);
+    }
+    if (rows.length < PAGE) break;
+  }
+  const out = new Map<string, ChainNameCounts>();
+  map.forEach((e, key) => {
+    out.set(key, {
+      anywhere: Math.max(e.rows, e.maxLoc, Math.min(e.locSum, 100000)),
+      multiStateRows: e.states.size >= 2 ? e.rows : 0,
+      states: e.states.size,
+    });
+  });
+  return out;
+}
+
+/** Batch detection pass over existing records (paged like
+ * rescoreCompanies; returns nextOffset or -1). Skips dismissed records
+ * entirely (detection never writes them) and chain-exempt records
+ * (the override is permanent). Only changed rows are written. */
+export async function runChainDetectionBatch(
+  offset: number,
+  pageSize = 1500,
+  counts?: Map<string, ChainNameCounts>
+): Promise<{
+  processed: number; flagged: number; suspected: number; cleared: number;
+  skippedDismissed: number; skippedExempt: number; byRule: Record<string, number>;
+  nextOffset: number;
+}> {
+  await ensureSchema();
+  const settings = await refreshChainSettings();
+  const db = sql();
+  const rows = await db`SELECT * FROM mi_companies ORDER BY id LIMIT ${pageSize} OFFSET ${offset}`;
+  let flagged = 0, suspected = 0, cleared = 0, skippedDismissed = 0, skippedExempt = 0;
+  const byRule: Record<string, number> = {};
+  const updates: { id: string; isChain: boolean; reason: string; suspect: boolean }[] = [];
+  for (const r of rows) {
+    const row = r as Record<string, unknown>;
+    if (str(row.status) === "dismissed") { skippedDismissed++; continue; }
+    if (row.chain_exempt === true) { skippedExempt++; continue; }
+    const c = counts?.get(normCompanyName(str(row.name)));
+    const v = detectChain(
+      { name: str(row.name), website: str(row.website), details: str(row.details) },
+      settings,
+      c
+    );
+    const curChain = row.is_chain === true;
+    const curSuspect = row.chain_suspect === true;
+    const curReason = str(row.chain_reason);
+    const nextReason = v.isChain ? v.reason : v.suspect ? v.suspectReason : "";
+    if (v.isChain !== curChain || v.suspect !== curSuspect || nextReason !== curReason) {
+      updates.push({ id: str(row.id), isChain: v.isChain, reason: nextReason, suspect: v.suspect });
+      if (v.isChain && !curChain) {
+        flagged++;
+        const rule = v.reason.split(":")[0] || "unknown";
+        byRule[rule] = (byRule[rule] ?? 0) + 1;
+      } else if (v.suspect && !curSuspect && !v.isChain) {
+        suspected++;
+      } else if (!v.isChain && !v.suspect && (curChain || curSuspect)) {
+        cleared++;
+      }
+    }
+  }
+  const CH = 300;
+  for (let i = 0; i < updates.length; i += CH) {
+    const chunk = updates.slice(i, i + CH);
+    const values: string[] = [];
+    const params: unknown[] = [];
+    chunk.forEach((u, j) => {
+      const b = j * 4;
+      values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4})`);
+      params.push(u.id, u.isChain, u.reason, u.suspect);
+    });
+    await db.query(
+      `UPDATE mi_companies AS c
+       SET is_chain = v.is_chain, chain_reason = v.reason, chain_suspect = v.suspect, updated_at = NOW()
+       FROM (VALUES ${values.join(", ")}) AS v(id, is_chain, reason, suspect)
+       WHERE c.id = v.id`,
+      params
+    );
+  }
+  return {
+    processed: rows.length, flagged, suspected, cleared,
+    skippedDismissed, skippedExempt, byRule,
+    nextOffset: rows.length < pageSize ? -1 : offset + rows.length,
+  };
+}
+
+/** All chain-flagged companies (the Filtered Out view), newest
+ * date_added first. Not deleted, never in the fits feed — listed here
+ * with the reason so Ethan can override false positives. */
+export async function getFilteredCompanies(sectors?: string[]): Promise<{ companies: MiCompany[]; chainTotal: number }> {
+  await ensureSchema();
+  const db = sql();
+  const list = (sectors ?? []).filter(Boolean);
+  const totalRows = list.length
+    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE is_chain = true AND sector = ANY(${list})`
+    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE is_chain = true`;
+  const rows = list.length
+    ? await db`SELECT * FROM mi_companies WHERE is_chain = true AND sector = ANY(${list}) ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT 500`
+    : await db`SELECT * FROM mi_companies WHERE is_chain = true ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT 500`;
+  return {
+    companies: rows.map((r) => mapCompanyRow(r as Record<string, unknown>)),
+    chainTotal: Number((totalRows as unknown as { c: number }[])[0]?.c ?? 0),
+  };
+}
+
+/** "Not a chain" override (Ethan, Oct 16, 2026): clears the flag and
+ * records a PERMANENT exemption — detection skips exempt records in
+ * every path, so an overridden company is never re-flagged. Its fit
+ * stage and date_added are untouched, so it returns to the Fits
+ * section at its original position. */
+export async function markNotChain(id: string): Promise<void> {
+  await ensureSchema();
+  await sql()`
+    UPDATE mi_companies
+    SET is_chain = false, chain_reason = '', chain_suspect = false,
+        chain_exempt = true, updated_at = NOW()
+    WHERE id = ${id}`;
+}
+
+/** Chain stats for the settings card / verification. */
+export async function countChainStats(): Promise<{ chain: number; suspect: number; exempt: number; chainFits: number }> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`
+    SELECT
+      COUNT(*) FILTER (WHERE is_chain)::int AS chain,
+      COUNT(*) FILTER (WHERE chain_suspect AND NOT is_chain)::int AS suspect,
+      COUNT(*) FILTER (WHERE chain_exempt)::int AS exempt,
+      COUNT(*) FILTER (WHERE is_chain AND status = 'fit')::int AS chain_fits
+    FROM mi_companies`;
+  const r = (rows as unknown as Record<string, unknown>[])[0] ?? {};
+  return {
+    chain: Number(r.chain ?? 0),
+    suspect: Number(r.suspect ?? 0),
+    exempt: Number(r.exempt ?? 0),
+    chainFits: Number(r.chain_fits ?? 0),
+  };
+}
+
 /** Acquisition-fit heuristic, computed at import so every spine (and the
  * weekly refresh) gets it for free. A "fit" is an established, right-sized
  * target — not a startup, not a whale. The reasoning is stored on the row
@@ -479,6 +1089,7 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
   await ensureSchema();
   await runFitStageMigration();
   await refreshHospitalityThresholds();
+  await refreshChainSettings();
   const db = sql();
   const filtered = rows.filter((r) => r && r.dedupKey && r.name && r.source === source);
   // Dedupe by dedupKey (last occurrence wins). A multi-row
@@ -519,6 +1130,16 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
       // skip anything not starting with '{').
       if (r.details && r.details.trim().startsWith("{")) r.details = "{}";
     }
+    // Chain/franchise detection (Ethan, Oct 16, 2026) runs here — the
+    // central write path — so every scraper, spine, and email-driven
+    // creation is judged. Record-level evidence only at import; the
+    // batch pass adds universe-level same-name location counts.
+    // Exempt ("Not a chain") records are protected at write time
+    // below and are never re-flagged.
+    (r as CompanyInput & { _chain?: ChainVerdict })._chain = detectChain(
+      { name: r.name, website: r.website ?? "", details: r.details ?? "" },
+      chainSettings()
+    );
   }
   // No-resurface guard (Ethan, Oct 16, 2026): a dismissed company must
   // never come back as a fit under a new source identity. Index the
@@ -558,13 +1179,28 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     // so one registry feeding several sector spines never wipes the others.
     const sectors = Array.from(new Set(clean.map((r) => r.sector).filter(Boolean)));
     const existing = sectors.length
-      ? await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
-      : await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason FROM mi_companies WHERE source = ${source}`;
+      ? await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
+      : await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt FROM mi_companies WHERE source = ${source}`;
     const statusByKey = new Map(existing.map((r) => [str(r.dedup_key), str(r.status)]));
     const firstSeenByKey = new Map(existing.map((r) => [str(r.dedup_key), r.first_seen]));
     const dateAddedByKey = new Map(existing.map((r) => [str(r.dedup_key), r.date_added]));
     const dismissedAtByKey = new Map(existing.map((r) => [str(r.dedup_key), r.dismissed_at]));
     const dismissedReasonByKey = new Map(existing.map((r) => [str(r.dedup_key), str(r.dismissed_reason)]));
+    // Chain state carried through a reset: an exemption is permanent,
+    // and a dismissed row keeps its chain fields exactly (detection
+    // never writes dismissed records). Everyone else is re-judged by
+    // the fresh detection above.
+    const chainCarryByKey = new Map(
+      existing.map((r) => [
+        str(r.dedup_key),
+        {
+          isChain: r.is_chain === true,
+          reason: str(r.chain_reason),
+          suspect: r.chain_suspect === true,
+          exempt: r.chain_exempt === true,
+        },
+      ])
+    );
     if (sectors.length) {
       await db`DELETE FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`;
     } else {
@@ -576,6 +1212,8 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
       (r as CompanyInput & { _dateAdded?: unknown })._dateAdded = dateAddedByKey.get(r.dedupKey);
       (r as CompanyInput & { _dismissedAt?: unknown })._dismissedAt = dismissedAtByKey.get(r.dedupKey);
       (r as CompanyInput & { _dismissedReason?: string })._dismissedReason = dismissedReasonByKey.get(r.dedupKey);
+      (r as CompanyInput & { _chainCarried?: { isChain: boolean; reason: string; suspect: boolean; exempt: boolean } })._chainCarried =
+        chainCarryByKey.get(r.dedupKey);
     }
   }
   const CHUNK = 300;
@@ -584,11 +1222,13 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     const values: string[] = [];
     const params: unknown[] = [];
     chunk.forEach((r, j) => {
-      const b = j * 26;
-      values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}, $${b + 11}, $${b + 12}, $${b + 13}, $${b + 14}, $${b + 15}, $${b + 16}, $${b + 17}, $${b + 18}, $${b + 19}, $${b + 20}, $${b + 21}, $${b + 22}, $${b + 23}, $${b + 24}, $${b + 25}, $${b + 26})`);
+      const b = j * 30;
+      values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}, $${b + 11}, $${b + 12}, $${b + 13}, $${b + 14}, $${b + 15}, $${b + 16}, $${b + 17}, $${b + 18}, $${b + 19}, $${b + 20}, $${b + 21}, $${b + 22}, $${b + 23}, $${b + 24}, $${b + 25}, $${b + 26}, $${b + 27}, $${b + 28}, $${b + 29}, $${b + 30})`);
       const rx = r as CompanyInput & {
         _fit?: boolean; _status?: string; _firstSeen?: unknown;
         _dateAdded?: unknown; _dismissedAt?: unknown; _dismissedReason?: string;
+        _chain?: ChainVerdict;
+        _chainCarried?: { isChain: boolean; reason: string; suspect: boolean; exempt: boolean };
       };
       // Stage resolution (fit-stage model): a carried dismissal always
       // wins; a name+domain / ACC-ID match against a dismissed record
@@ -613,6 +1253,34 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
           : null;
       const dismissedReason =
         status === "dismissed" ? (rx._dismissedReason ?? guard?.reason ?? "") : "";
+      // Chain resolution: a carried "Not a chain" exemption always
+      // wins (exempt records are never re-flagged); a row resolving
+      // to dismissed keeps its carried chain fields verbatim —
+      // detection never writes dismissed records (on the upsert path
+      // the ON CONFLICT CASEs below give the same protection against
+      // the stored row); everyone else takes this import's verdict.
+      const carriedChain = rx._chainCarried;
+      const verdict = rx._chain;
+      const chainIsChain = carriedChain?.exempt
+        ? false
+        : status === "dismissed"
+          ? (carriedChain?.isChain ?? false)
+          : (verdict?.isChain ?? false);
+      const chainReason = carriedChain?.exempt
+        ? ""
+        : status === "dismissed"
+          ? (carriedChain?.reason ?? "")
+          : verdict?.isChain
+            ? verdict.reason
+            : verdict?.suspect
+              ? verdict.suspectReason
+              : "";
+      const chainSuspect = carriedChain?.exempt
+        ? false
+        : status === "dismissed"
+          ? (carriedChain?.suspect ?? false)
+          : (verdict?.suspect ?? false);
+      const chainExempt = carriedChain?.exempt ?? false;
       params.push(
         newId(), r.dedupKey, r.name, r.sector, r.subsector ?? "", r.naics ?? "",
         r.city ?? "", r.state ?? "AZ", r.address ?? "", r.zip ?? "",
@@ -623,13 +1291,18 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
         rx._firstSeen ?? new Date().toISOString(),
         rx._dateAdded ?? rx._firstSeen ?? new Date().toISOString(),
         dismissedAt,
-        dismissedReason
+        dismissedReason,
+        chainIsChain,
+        chainReason,
+        chainSuspect,
+        chainExempt
       );
     });
     await db.query(
       `INSERT INTO mi_companies (id, dedup_key, name, sector, subsector, naics, city, state, address, zip,
          contact_name, contact_title, phone, website, formed_date, employees, signal_value, signal_label,
-         source, source_url, details, status, first_seen, date_added, dismissed_at, dismissed_reason)
+         source, source_url, details, status, first_seen, date_added, dismissed_at, dismissed_reason,
+         is_chain, chain_reason, chain_suspect, chain_exempt)
        VALUES ${values.join(", ")}
        ON CONFLICT (source, dedup_key, sector) DO UPDATE SET
          name = EXCLUDED.name, sector = EXCLUDED.sector, subsector = EXCLUDED.subsector, naics = EXCLUDED.naics,
@@ -649,6 +1322,22 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
            WHEN mi_companies.status IN ('dismissed', 'keep', 'added') THEN mi_companies.dismissed_reason
            ELSE EXCLUDED.dismissed_reason
          END,
+         is_chain = CASE
+           WHEN mi_companies.chain_exempt THEN false
+           WHEN mi_companies.status = 'dismissed' THEN mi_companies.is_chain
+           ELSE EXCLUDED.is_chain
+         END,
+         chain_reason = CASE
+           WHEN mi_companies.chain_exempt THEN ''
+           WHEN mi_companies.status = 'dismissed' THEN mi_companies.chain_reason
+           ELSE EXCLUDED.chain_reason
+         END,
+         chain_suspect = CASE
+           WHEN mi_companies.chain_exempt THEN false
+           WHEN mi_companies.status = 'dismissed' THEN mi_companies.chain_suspect
+           ELSE EXCLUDED.chain_suspect
+         END,
+         chain_exempt = mi_companies.chain_exempt,
          last_seen = NOW(), updated_at = NOW()`,
       params
     );
@@ -784,8 +1473,8 @@ export async function countFits(sector?: string): Promise<number> {
   await runFitStageMigration();
   const db = sql();
   const rows = sector
-    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND status = 'fit'`
-    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit'`;
+    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND status = 'fit' AND is_chain = false`
+    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false`;
   return Number((rows as unknown as { c: number }[])[0]?.c ?? 0);
 }
 
@@ -840,10 +1529,38 @@ function stageAfterRejudge(current: string, fit: boolean): string {
   return current;
 }
 
+/** Chain-detection refresh for ONE existing row (rescore / restore
+ * paths): re-judges the record-level rules against the row's current
+ * details and writes the chain fields when they changed. Skips
+ * dismissed rows (detection never writes them) and exempt rows (the
+ * "Not a chain" override is permanent). Returns true on a write. */
+async function refreshRowChain(r: Record<string, unknown>, details: string): Promise<boolean> {
+  if (str(r.status) === "dismissed" || r.chain_exempt === true) return false;
+  const v = detectChain(
+    { name: str(r.name), website: str(r.website), details },
+    chainSettings()
+  );
+  const reason = v.isChain ? v.reason : v.suspect ? v.suspectReason : "";
+  if (
+    v.isChain === (r.is_chain === true) &&
+    v.suspect === (r.chain_suspect === true) &&
+    reason === str(r.chain_reason)
+  ) {
+    return false;
+  }
+  const db = sql();
+  await db`
+    UPDATE mi_companies
+    SET is_chain = ${v.isChain}, chain_reason = ${reason}, chain_suspect = ${v.suspect}, updated_at = NOW()
+    WHERE id = ${str(r.id)}`;
+  return true;
+}
+
 export async function rescoreCompanies(sector: string | undefined, offset: number, pageSize = 1500): Promise<{ processed: number; changed: number; nextOffset: number }> {
   await ensureSchema();
   await runFitStageMigration();
   await refreshHospitalityThresholds();
+  await refreshChainSettings();
   const db = sql();
   const rows = sector
     ? await db`SELECT * FROM mi_companies WHERE sector = ${sector} ORDER BY id LIMIT ${pageSize} OFFSET ${offset}`
@@ -853,10 +1570,11 @@ export async function rescoreCompanies(sector: string | undefined, offset: numbe
     const input = rowToCompanyInput(r as Record<string, unknown>);
     const judged = judgeDetails(input);
     const stage = stageAfterRejudge(str(r.status), judged.fit);
+    const chainChanged = await refreshRowChain(r as Record<string, unknown>, judged.details);
     if (judged.changed || stage !== str(r.status)) {
       await db`UPDATE mi_companies SET details = ${judged.details}, status = ${stage} WHERE id = ${r.id}`;
-      changed++;
     }
+    if (judged.changed || stage !== str(r.status) || chainChanged) changed++;
   }
   return { processed: rows.length, changed, nextOffset: rows.length < pageSize ? -1 : offset + rows.length };
 }
@@ -870,6 +1588,7 @@ export async function rescoreCompaniesByIds(ids: string[]): Promise<number> {
   await ensureSchema();
   await runFitStageMigration();
   await refreshHospitalityThresholds();
+  await refreshChainSettings();
   const db = sql();
   let changed = 0;
   const CHUNK = 400;
@@ -880,10 +1599,11 @@ export async function rescoreCompaniesByIds(ids: string[]): Promise<number> {
       const input = rowToCompanyInput(r);
       const judged = judgeDetails(input);
       const stage = stageAfterRejudge(str(r.status), judged.fit);
+      const chainChanged = await refreshRowChain(r, judged.details);
       if (judged.changed || stage !== str(r.status)) {
         await db`UPDATE mi_companies SET details = ${judged.details}, status = ${stage} WHERE id = ${r.id as string}`;
-        changed++;
       }
+      if (judged.changed || stage !== str(r.status) || chainChanged) changed++;
     }
   }
   return changed;
@@ -1026,6 +1746,10 @@ function mapCompanyRow(r: Record<string, unknown>): MiCompany {
     dateAdded: String(r.date_added ?? r.first_seen ?? ""),
     dismissedAt: r.dismissed_at ? String(r.dismissed_at) : null,
     dismissedReason: str(r.dismissed_reason),
+    isChain: r.is_chain === true,
+    chainReason: str(r.chain_reason),
+    chainSuspect: r.chain_suspect === true,
+    chainExempt: r.chain_exempt === true,
   };
 }
 
@@ -1057,11 +1781,11 @@ export async function getFitCompanies(sectors?: string[]): Promise<{ companies: 
   const db = sql();
   const list = (sectors ?? []).filter(Boolean);
   const totalRows = list.length
-    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND sector = ANY(${list})`
-    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit'`;
+    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false AND sector = ANY(${list})`
+    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false`;
   const rows = list.length
-    ? await db`SELECT * FROM mi_companies WHERE status = 'fit' AND sector = ANY(${list}) ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`
-    : await db`SELECT * FROM mi_companies WHERE status = 'fit' ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`;
+    ? await db`SELECT * FROM mi_companies WHERE status = 'fit' AND is_chain = false AND sector = ANY(${list}) ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`
+    : await db`SELECT * FROM mi_companies WHERE status = 'fit' AND is_chain = false ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`;
   return {
     companies: rows.map((r) => mapCompanyRow(r as Record<string, unknown>)),
     fitTotal: Number((totalRows as unknown as { c: number }[])[0]?.c ?? 0),
@@ -1088,6 +1812,7 @@ export async function dismissCompany(id: string, reason = ""): Promise<void> {
 export async function restoreCompany(id: string): Promise<MiCompany["status"]> {
   await ensureSchema();
   await runFitStageMigration();
+  await refreshChainSettings();
   const db = sql();
   const rows = await db`SELECT details FROM mi_companies WHERE id = ${id}`;
   let fit = false;
@@ -1101,6 +1826,13 @@ export async function restoreCompany(id: string): Promise<MiCompany["status"]> {
     UPDATE mi_companies
     SET status = ${status}, dismissed_at = NULL, dismissed_reason = '', updated_at = NOW()
     WHERE id = ${id}`;
+  // Detection never wrote this row while it was dismissed, so judge
+  // it now (unless exempt): a restored chain goes to the Filtered
+  // Out view, not back into Fits.
+  const full = await db`SELECT * FROM mi_companies WHERE id = ${id}`;
+  if (full.length) {
+    await refreshRowChain(full[0] as Record<string, unknown>, str(full[0].details));
+  }
   return status;
 }
 
