@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { MiCompany } from "@/lib/types";
 import { uniqueStrings, dedupeSourceTokens } from "@/lib/format";
+import { normalizeSignalForDisplay } from "@/lib/signals-core";
 import CompanyLogo from "@/components/CompanyLogo";
 import SectorChip from "@/components/SectorChip";
 
@@ -315,7 +316,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
     try {
       const d = JSON.parse(c.details || "{}") as Record<string, unknown>;
       return Object.entries(d)
-        .filter(([k, v]) => k !== "note" && k !== "fit" && k !== "fitWhy" && v !== "" && v !== null && v !== undefined)
+        .filter(([k, v]) => k !== "note" && k !== "fit" && k !== "fitWhy" && k !== "signals" && v !== "" && v !== null && v !== undefined)
         .map(([k, v]) => {
           if (Array.isArray(v)) {
             // Detail arrays (signals, top primes, licenses) can carry
@@ -340,6 +341,21 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       return String((JSON.parse(c.details || "{}") as Record<string, unknown>).note ?? "");
     } catch {
       return "";
+    }
+  }
+  /** Owner-transition signals (Phase 4): review flags only — type,
+   * date, source — rendered newest first. Legacy filing/news entries
+   * are normalized onto the same shape for display. */
+  function signalsOf(c: MiCompany): { type: string; date: string; label: string; source: string }[] {
+    try {
+      const d = JSON.parse(c.details || "{}") as Record<string, unknown>;
+      const arr = Array.isArray(d.signals) ? (d.signals as unknown[]) : [];
+      return arr
+        .map(normalizeSignalForDisplay)
+        .filter((sg) => sg.label)
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    } catch {
+      return [];
     }
   }
 
@@ -382,6 +398,22 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           </p>
         )}
         {profileNote(c) && <p className="mt-2 text-xs text-slate-500 dark:text-white/50">{profileNote(c)}</p>}
+        {signalsOf(c).length > 0 && (
+          <div className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-white/5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-white/40">Review signals</p>
+            <ul className="mt-1 space-y-1">
+              {signalsOf(c).slice(0, 8).map((sg, i) => (
+                <li key={`${sg.type}-${sg.date}-${i}`} className="flex items-baseline justify-between gap-3 text-xs text-slate-600 dark:text-white/75">
+                  <span>⚑ {sg.label}</span>
+                  <span className="shrink-0 text-slate-400 dark:text-white/40">{sg.date}{sg.source ? ` · ${sg.source}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+            {signalsOf(c).length > 8 && (
+              <p className="mt-1 text-[11px] text-slate-400 dark:text-white/40">+{signalsOf(c).length - 8} earlier signals</p>
+            )}
+          </div>
+        )}
         {c.status === "dismissed" && (
           <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300">
             ✕ Dismissed{c.dismissedAt ? ` ${c.dismissedAt.slice(0, 10)}` : ""}
