@@ -71,7 +71,7 @@ export function DealCardGrid({
           <div
             key={d.id}
             onClick={() => onSelect(d)}
-            className="card-surface cursor-pointer overflow-hidden transition hover:shadow-lg"
+            className="card-surface card-hover cursor-pointer overflow-hidden"
           >
             <div
               className="img-grade h-20"
@@ -150,7 +150,7 @@ export function ExecCardGrid({
         <div
           key={e.id}
           onClick={() => onSelect(e)}
-          className="card-surface cursor-pointer p-4 transition hover:shadow-lg"
+          className="card-surface card-hover cursor-pointer p-4"
         >
           <div className="flex items-start gap-3">
             <PersonAvatar name={e.name} photoUrl={e.photoUrl} size={44} />
@@ -220,7 +220,7 @@ export function PairingCardGrid({
           <div
             key={`${d.id}-${op.id}`}
             onClick={() => onSelectDeal(d)}
-            className="card-surface cursor-pointer overflow-hidden transition hover:shadow-lg"
+            className="card-surface card-hover cursor-pointer overflow-hidden"
           >
             <div
               className="img-grade h-16"

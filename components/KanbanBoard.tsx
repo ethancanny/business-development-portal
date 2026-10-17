@@ -42,7 +42,7 @@ export default function KanbanBoard<T>({
             </div>
             <div className="flex max-h-[calc(100vh-320px)] flex-col gap-2 overflow-y-auto">
               {column.length === 0 && (
-                <p className="rounded-lg border border-dashed border-slate-300 bg-white/50 p-3 text-center text-xs text-slate-400 dark:border-white/15 dark:bg-white/5 dark:text-white/40">
+                <p className="rounded-card border border-dashed border-slate-300 bg-white/50 p-3 text-center text-xs text-caption dark:border-white/15 dark:bg-white/5">
                   {emptyText}
                 </p>
               )}
@@ -50,7 +50,7 @@ export default function KanbanBoard<T>({
                 <button
                   key={getId(item)}
                   onClick={() => onSelect(item)}
-                  className="rounded-lg border border-transparent bg-white p-3 text-left shadow-sm transition hover:shadow-md dark:border-white/10 dark:bg-[#0d1f3c] dark:shadow-none dark:hover:border-[#b8975a]/60 dark:hover:shadow-lg"
+                  className="rounded-card border border-transparent bg-white p-3 text-left shadow-card transition duration-200 hover:shadow-lift dark:border-white/10 dark:bg-[#0d1f3c] dark:shadow-none dark:hover:border-[#b8975a]/60"
                 >
                   {renderCard(item)}
                 </button>

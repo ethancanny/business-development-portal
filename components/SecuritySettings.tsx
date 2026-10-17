@@ -32,7 +32,7 @@ const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#b8975a] focus:outline-none dark:border-white/15 dark:bg-[#0d1f3c] dark:text-[#e8dfc8] dark:placeholder:text-white/30";
 
 const primaryBtn =
-  "rounded-lg bg-[#0d1f3c] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1a3455] disabled:opacity-50 dark:bg-[#b8975a] dark:text-[#0d1f3c] dark:hover:bg-[#d4b37a]";
+  "btn btn-primary";
 
 const ghostBtn =
   "rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-[#b8975a]/60 disabled:opacity-50 dark:border-white/15 dark:text-white/70";

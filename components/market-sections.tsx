@@ -49,13 +49,13 @@ export function Section({
         }`}
       >
         <span>
-          <span className="block text-lg font-bold text-[#0d1f3c] dark:text-white">{title}</span>
-          {sub && <span className="block text-xs text-slate-500 dark:text-white/40">{sub}</span>}
+          <span className="block font-display text-[22px] font-semibold leading-tight text-[#0d1f3c] dark:text-white">{title}</span>
+          {sub && <span className="block text-xs text-slate-500 dark:text-white/60">{sub}</span>}
         </span>
         <span className="text-xl leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
       </button>
       {open && (
-        <div className="pt-4 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0">
+        <div className="page-enter pt-4 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0">
           {children}
         </div>
       )}
@@ -83,10 +83,10 @@ export function SubSection({
         aria-expanded={open}
         className="-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 pb-1.5 text-left transition-colors duration-200 hover:bg-[#f0f4fa] dark:hover:bg-white/[0.05]"
       >
-        <span className="text-base font-bold text-[#0d1f3c] dark:text-white">{title}</span>
+        <span className="font-display text-lg font-semibold text-[#0d1f3c] dark:text-white">{title}</span>
         <span className="text-lg leading-none text-[#8a6f3c] dark:text-[#d4b37a]">{open ? "▾" : "▸"}</span>
       </button>
-      {open && <div className="pt-3">{children}</div>}
+      {open && <div className="page-enter pt-3">{children}</div>}
     </div>
   );
 }
@@ -110,10 +110,10 @@ export function FullSection({
     <section className="mb-8">
       <div className="border-b-2 border-[#b8975a] pb-2">
         {kicker && (
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8a6f3c] dark:text-[#d4b37a]">{kicker}</p>
+          <p className="text-[11px] font-bold uppercase tracking-label text-[#8a6f3c] dark:text-[#d4b37a]">{kicker}</p>
         )}
-        <h2 className="text-xl font-bold text-[#0d1f3c] dark:text-white">{title}</h2>
-        {sub && <p className="mt-0.5 text-xs text-slate-500 dark:text-white/40">{sub}</p>}
+        <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">{title}</h2>
+        {sub && <p className="mt-0.5 text-xs text-slate-500 dark:text-white/60">{sub}</p>}
       </div>
       <div className="pt-4">{children}</div>
     </section>

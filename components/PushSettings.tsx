@@ -205,7 +205,7 @@ export default function PushSettings() {
           <button
             type="button"
             onClick={sendTest}
-            className="rounded-lg bg-[#0d1f3c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1a3455] dark:bg-[#b8975a] dark:text-[#0d1f3c] dark:hover:bg-[#d4b37a]"
+            className="btn btn-primary"
           >
             Send test notification
           </button>
@@ -391,7 +391,7 @@ export default function PushSettings() {
           type="button"
           onClick={save}
           disabled={saveState === "saving"}
-          className="rounded-lg bg-[#0d1f3c] px-5 py-2 text-sm font-semibold text-white hover:bg-[#1a3455] disabled:opacity-50 dark:bg-[#b8975a] dark:text-[#0d1f3c] dark:hover:bg-[#d4b37a]"
+          className="btn btn-primary"
         >
           {saveState === "saving" ? "Saving…" : "Save settings"}
         </button>

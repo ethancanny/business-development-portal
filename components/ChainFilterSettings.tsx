@@ -254,7 +254,7 @@ export default function ChainFilterSettings() {
         <button
           onClick={save}
           disabled={busy || settings === null}
-          className="rounded-lg bg-[#0d1f3c] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+          className="btn btn-primary"
         >
           {busy ? "Saving…" : "Save chain filter"}
         </button>
