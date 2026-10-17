@@ -273,7 +273,12 @@ export type ActivityType =
   | "task.created"
   | "task.completed"
   | "task.reopened"
-  | "task.deleted";
+  | "task.deleted"
+  | "candidate.created"
+  | "candidate.updated"
+  | "candidate.status"
+  | "candidate.merged"
+  | "candidate.deleted";
 
 export interface ActivityEvent {
   id: string;
