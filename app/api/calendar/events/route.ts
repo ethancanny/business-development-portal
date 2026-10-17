@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { createGraphEvent, msConnected, type EventDraft } from "@/lib/microsoft";
+import {
+  applyReminderChoice,
+  parseReminderInput,
+  reminderDraftMinutes,
+  type ReminderInput,
+} from "@/lib/reminder";
 
-function draftOf(body: Record<string, unknown>): EventDraft {
+function draftOf(body: Record<string, unknown>): { draft: EventDraft; reminder: ReminderInput } {
   const p = (body.payload ?? body) as Record<string, unknown>;
   const rawAtt = p.attendees;
   const attendeeEmails = Array.isArray(rawAtt)
@@ -10,12 +16,17 @@ function draftOf(body: Record<string, unknown>): EventDraft {
     : typeof rawAtt === "string"
       ? rawAtt.split(/[,;]/)
       : [];
+  const reminder = parseReminderInput(p.reminder);
   return {
-    title: String(p.title ?? "").trim(),
-    startsAt: String(p.startsAt ?? ""),
-    endsAt: String(p.endsAt ?? ""),
-    location: String(p.location ?? ""),
-    attendeeEmails,
+    reminder,
+    draft: {
+      title: String(p.title ?? "").trim(),
+      startsAt: String(p.startsAt ?? ""),
+      endsAt: String(p.endsAt ?? ""),
+      location: String(p.location ?? ""),
+      attendeeEmails,
+      reminderMinutes: reminderDraftMinutes(reminder),
+    },
   };
 }
 
@@ -31,12 +42,17 @@ export async function POST(req: NextRequest) {
     );
   }
   const body = await req.json().catch(() => ({}));
-  const draft = draftOf(body as Record<string, unknown>);
+  const { draft, reminder } = draftOf(body as Record<string, unknown>);
   if (!draft.title || !draft.startsAt) {
     return NextResponse.json({ error: "title and startsAt required" }, { status: 400 });
   }
   try {
     const ev = await createGraphEvent(draft);
+    if (ev) {
+      // Portal-side store for the push checker (best-effort: the Graph
+      // event already carries the reminder natively).
+      await applyReminderChoice(ev.eventId, reminder).catch(() => undefined);
+    }
     return NextResponse.json({ ok: true, event: ev });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

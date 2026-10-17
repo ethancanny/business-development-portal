@@ -188,6 +188,7 @@ export async function deleteSubscriptionByEndpoint(endpoint: string): Promise<vo
 
 export type PushType =
   | "meeting60"
+  | "eventReminder"
   | "followups"
   | "fitSignals"
   | "newListing"
@@ -198,6 +199,7 @@ export type PushType =
 
 export const PUSH_TYPES: PushType[] = [
   "meeting60",
+  "eventReminder",
   "followups",
   "fitSignals",
   "newListing",
@@ -220,6 +222,7 @@ export interface PushPreferences {
 export const DEFAULT_PREFS: PushPreferences = {
   types: {
     meeting60: true,
+    eventReminder: true,
     followups: true,
     fitSignals: true,
     newListing: true,

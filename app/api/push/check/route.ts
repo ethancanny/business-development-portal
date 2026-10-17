@@ -9,7 +9,12 @@ import {
 } from "@/lib/push-db";
 import { getContacts, getDealFlow, getDeals, getExecutives, getTasks } from "@/lib/db";
 import { getInvestors } from "@/lib/investors-db";
-import { getCalendarEvents } from "@/lib/calendar-db";
+import {
+  getCalendarEvents,
+  getEventReminderChoices,
+  getReminderArmedEvents,
+} from "@/lib/calendar-db";
+import { reminderOffsetLabel } from "@/lib/reminder";
 import { getAcquisitions, getCompetingBuyers, getSyncLogLatestByJob } from "@/lib/market-db";
 import { dealFocusSector } from "@/lib/valuation";
 import { shouldAutoDismiss } from "@/lib/az-location";
@@ -79,9 +84,14 @@ async function evalMeetings(now: Date): Promise<EvalOutcome> {
     return null;
   };
 
+  // An explicit per-event reminder choice (including Off) governs the
+  // event's alerting — the generic meeting alert must not double-fire.
+  const explicitChoices = await getEventReminderChoices(events.map((e) => e.eventId));
+
   let candidates = 0;
   let sent = 0;
   for (const ev of events) {
+    if (explicitChoices.has(ev.eventId)) continue;
     if (ev.dismissed || ev.allDay) continue;
     const start = Date.parse(ev.startsAt);
     if (Number.isNaN(start)) continue;
@@ -105,6 +115,77 @@ async function evalMeetings(now: Date): Promise<EvalOutcome> {
       detailTitle: "Meeting in about an hour",
       detailBody: `${person} — ${ev.title} at ${timeStr}`,
       url: `/directory?q=${encodeURIComponent(person)}`,
+    });
+    if (res.status === "sent") sent += 1;
+  }
+  return { candidates, sent };
+}
+
+/* a2. Per-event reminder alarms (Ethan, Oct 16, 2026). Each event with
+ * an explicit portal reminder choice fires ONE push at start − offset.
+ * The dedupe key carries the event id + offset + start instant, so
+ * changing the choice or rescheduling re-arms under a fresh key and the
+ * old firing can never repeat; deleted events vanish from the mirror
+ * (and their choice row with them), so they never fire. All-day events
+ * anchor at 9:00 AM Phoenix on the event day: the offset counts back
+ * from that anchor (1 day = 9 AM the day before; at-start = 9 AM day
+ * of). The fire window runs from the fire instant until the event
+ * starts (timed) or 9 PM on the day (all-day), so a reminder suppressed
+ * by quiet hours retries on later sweeps instead of being lost — and
+ * explicit alarms skip the daily feed cap (see sendToUser skipDailyCap)
+ * while still honoring the type toggle and quiet hours. */
+async function evalEventReminders(now: Date): Promise<EvalOutcome> {
+  const from = `${phoenixDate(new Date(now.getTime() - 2 * DAY))}T00:00:00`;
+  const to = `${phoenixDate(new Date(now.getTime() + 3 * DAY))}T23:59:59`;
+  const armed = await getReminderArmedEvents(from, to);
+  let candidates = 0;
+  let sent = 0;
+  for (const { event: ev, minutes } of armed) {
+    const start = Date.parse(ev.startsAt);
+    if (Number.isNaN(start)) continue;
+    let fireAt: number;
+    let until: number;
+    if (ev.allDay) {
+      const anchor = Date.parse(`${ev.startsAt.slice(0, 10)}T09:00:00-07:00`);
+      if (Number.isNaN(anchor)) continue;
+      fireAt = anchor - minutes * 60000;
+      until = anchor + 12 * 3600 * 1000;
+    } else {
+      fireAt = start - minutes * 60000;
+      until = start;
+    }
+    if (now.getTime() < fireAt || now.getTime() >= until) continue;
+    candidates += 1;
+    const entityKey = `rem:${ev.eventId}:${minutes}:${ev.startsAt}`;
+    if (await alreadySent("eventReminder", entityKey, 30)) continue;
+    const timeStr = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Phoenix",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(start));
+    let when: string;
+    if (ev.allDay) {
+      const dayStr = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Phoenix",
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      }).format(new Date(start));
+      when = `all-day event · ${dayStr}`;
+    } else if (minutes === 0) {
+      when = `starting now (${timeStr})`;
+    } else {
+      when = `starts in ${reminderOffsetLabel(minutes).replace(/ before$/, "")} (${timeStr})`;
+    }
+    const res = await sendToUser(USER, {
+      type: "eventReminder",
+      entityKey,
+      genericTitle: "Event reminder",
+      genericBody: "An event you set a reminder for is coming up.",
+      detailTitle: "Event reminder",
+      detailBody: `${ev.title} — ${when}`,
+      url: "/calendar",
+      skipDailyCap: true,
     });
     if (res.status === "sent") sent += 1;
   }
@@ -357,6 +438,7 @@ export async function POST(req: NextRequest) {
   };
 
   await run("meeting60", () => evalMeetings(now));
+  await run("eventReminder", () => evalEventReminders(now));
   await run("followups", () => evalFollowups(now));
   await run("fitSignals", () => evalFitSignals(now));
   await run("newListing", () => evalNewListings(now));

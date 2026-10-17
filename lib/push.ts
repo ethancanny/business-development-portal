@@ -85,6 +85,10 @@ export interface SendOptions {
   url: string;
   /** Test sends only: skip toggle / quiet-hours / cap enforcement. */
   bypass?: boolean;
+  /** Skip ONLY the daily per-type cap (toggle + quiet hours still
+   * apply). Used for explicit per-event reminder alarms: a cap designed
+   * for feeds must never silently swallow an alarm Ethan set himself. */
+  skipDailyCap?: boolean;
 }
 
 export interface SendResult {
@@ -214,7 +218,7 @@ export async function sendToUser(userEmail: string, opts: SendOptions): Promise<
       return { status: "skipped-quiet" };
     }
 
-    const sentToday = await countSentToday(userEmail, type, phoenixDate());
+    const sentToday = opts.skipDailyCap ? 0 : await countSentToday(userEmail, type, phoenixDate());
     if (sentToday >= prefs.dailyCapPerType) {
       await logPush({
         userEmail, type, entityKey: opts.entityKey,
