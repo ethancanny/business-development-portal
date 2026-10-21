@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import TaskList from "@/components/TaskList";
 import PageHero from "@/components/PageHero";
 import { StatTile } from "@/components/ui";
+import PlatformOverview from "@/components/PlatformOverview";
 import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiCompany, type MiIndicatorObs, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
@@ -1043,6 +1044,12 @@ export default function Overview() {
           </div>
         )}
       </section>
+
+      {/* Platform summary (Phase 1, Oct 21, 2026) — summary-table
+          widgets + company cards, self-fetching from
+          /api/platform/overview; degrades to an error state while
+          the database is unavailable. */}
+      <PlatformOverview />
 
       {/* Today & this week (Oct 14, 2026) — Tasks & follow-ups and
           the Weekly summary combined into one section directly under
