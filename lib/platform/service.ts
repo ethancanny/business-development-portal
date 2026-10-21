@@ -1,6 +1,6 @@
 import { ensureSchema as ensureLegacySchema } from "../db-postgres";
 import { ensurePlatformSchema, sql, str, num, isoOrNull } from "./db";
-import { runBackfillOnce } from "./migrate";
+import { runBackfillOnce, topUpBackfill } from "./migrate";
 import {
   ensureBuiltinJobs,
   enqueueUniqueJob,
@@ -78,6 +78,15 @@ export async function ensurePlatform(): Promise<void> {
     } catch (err) {
       console.error("[platform] summary bootstrap failed", err);
     }
+  }
+  // Backfill top-up: rows created in the legacy tables after the
+  // one-time backfill (e.g. by the Oct 21 outage-recovery import) are
+  // picked up by an idempotent re-run, gated to once per hour by the
+  // 'phase1-backfill-topup' marker. Never breaks reads.
+  try {
+    await topUpBackfill(sql());
+  } catch (err) {
+    console.error("[platform] backfill top-up failed", err);
   }
 }
 

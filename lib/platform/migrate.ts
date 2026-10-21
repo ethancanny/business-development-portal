@@ -14,11 +14,15 @@ import { str, type Sql } from "./db";
  */
 
 export const BACKFILL_KEY = "phase1-backfill-v1";
+export const TOPUP_KEY = "phase1-backfill-topup";
 
-export async function runBackfillOnce(db: Sql): Promise<{ ran: boolean }> {
+export async function runBackfillOnce(
+  db: Sql,
+  force = false
+): Promise<{ ran: boolean }> {
   const marker = await db`
     SELECT key FROM core.migration_state WHERE key = ${BACKFILL_KEY} LIMIT 1`;
-  if (marker.length) return { ran: false };
+  if (marker.length && !force) return { ran: false };
 
   // --- deals → companies (+ core.deals link) ---
   // Stage mapping: 'Closed Won' → portfolio; Diligence/Negotiation/
@@ -44,13 +48,16 @@ export async function runBackfillOnce(db: Sql): Promise<{ ran: boolean }> {
         ' ' || coalesce(d.city, ''))
     FROM deals d
     WHERE d.company_name <> ''
-    ON CONFLICT (legacy_deal_id) WHERE legacy_deal_id IS NOT NULL DO NOTHING`;
+    ON CONFLICT (legacy_deal_id) WHERE legacy_deal_id IS NOT NULL
+    DO UPDATE SET stage = EXCLUDED.stage, deal_stage = EXCLUDED.deal_stage,
+      updated_at = now()`;
 
   await db`
     INSERT INTO core.deals (id, company_id, stage, updated_at)
     SELECT d.id, 'co_' || d.id, d.stage, d.updated_at
     FROM deals d
-    ON CONFLICT (id) DO NOTHING`;
+    ON CONFLICT (id) DO UPDATE SET stage = EXCLUDED.stage,
+      company_id = EXCLUDED.company_id, updated_at = now()`;
 
   // --- executives → people (operators) ---
   await db`
@@ -216,5 +223,56 @@ export async function runBackfillOnce(db: Sql): Promise<{ ran: boolean }> {
       ${`companies=${str(c.companies)} people=${str(c.people)} organizations=${str(c.organizations)} documents=${str(c.documents)} participants=${str(c.participants)}`})
     ON CONFLICT (key) DO NOTHING`;
 
+  return { ran: true };
+}
+
+/**
+ * Backfill top-up (added Oct 21, 2026, after the Neon recovery): the
+ * one-time backfill can run while other writers (e.g. the outage-backlog
+ * recovery import) are still creating rows in the legacy source tables.
+ * A strict run-once marker would skip those rows forever. Every backfill
+ * statement is idempotent (INSERT … ON CONFLICT), so re-running is safe:
+ * this pass re-runs them at most once per hour (gated by the
+ * 'phase1-backfill-topup' marker's done_at) and the two deal inserts
+ * upsert stage, so late-created deals/executives/investors/contacts/
+ * participants/fits are picked up and deal stage mirrors stay fresh.
+ * Edits to people/organizations still flow through contact_updated
+ * events (Phase 2 owns Directory sync semantics).
+ */
+export async function topUpBackfill(db: Sql): Promise<{ ran: boolean }> {
+  const marker = await db`
+    SELECT done_at FROM core.migration_state WHERE key = ${TOPUP_KEY} LIMIT 1`;
+  if (marker.length) {
+    const doneAt = (marker[0] as Record<string, unknown>).done_at;
+    const t = doneAt ? new Date(String(doneAt)).getTime() : 0;
+    if (t && Date.now() - t < 60 * 60 * 1000) return { ran: false };
+  }
+  // Source-deletion propagation: a backfilled row whose stable legacy
+  // source has since been deleted is soft-deleted here, so removed
+  // profiles do not resurface through the platform layer. Deliberately
+  // NOT applied to mi_companies-sourced companies — spine rebuilds
+  // re-key mi rows, so absence there does not mean deletion.
+  await db`
+    UPDATE core.people p SET deleted_at = now(), updated_at = now()
+    WHERE p.deleted_at IS NULL AND p.legacy_exec_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM executives e WHERE e.id = p.legacy_exec_id)`;
+  await db`
+    UPDATE core.people p SET deleted_at = now(), updated_at = now()
+    WHERE p.deleted_at IS NULL AND p.legacy_investor_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM investors i WHERE i.id = p.legacy_investor_id)`;
+  await db`
+    UPDATE core.people p SET deleted_at = now(), updated_at = now()
+    WHERE p.deleted_at IS NULL AND p.legacy_contact_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM contacts c WHERE c.id = p.legacy_contact_id)`;
+  await db`
+    UPDATE core.companies c SET deleted_at = now(), updated_at = now()
+    WHERE c.deleted_at IS NULL AND c.legacy_deal_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM deals d WHERE d.id = c.legacy_deal_id)`;
+  await runBackfillOnce(db, true);
+  await db`
+    INSERT INTO core.migration_state (key, done_at, detail)
+    VALUES (${TOPUP_KEY}, now(), 'hourly idempotent top-up')
+    ON CONFLICT (key) DO UPDATE SET done_at = now(),
+      detail = 'hourly idempotent top-up'`;
   return { ran: true };
 }
