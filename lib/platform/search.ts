@@ -158,12 +158,22 @@ export async function searchAll(
     }
   }
 
-  items.sort((a, b) => {
+  // Dedupe identical hits (e.g. an activity row and its backfilled
+  // core.activity_log copy surface the same note twice).
+  const seen = new Set<string>();
+  const deduped = items.filter((it) => {
+    const key = `${it.kind}|${it.title}|${it.updatedAt ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  deduped.sort((a, b) => {
     const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
     const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
     return tb - ta;
   });
-  const out = items.slice(0, lim);
+  const out = deduped.slice(0, lim);
   logUsage("search", out.length, num(JSON.stringify(out).length));
   return out;
 }

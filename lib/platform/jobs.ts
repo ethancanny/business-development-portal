@@ -146,6 +146,27 @@ export async function runJobNow(id: string): Promise<{ ok: boolean; error?: stri
 }
 
 /**
+ * Drain due queued jobs (oldest first). This is the "immediate
+ * background job" mechanism on serverless: platform API calls invoke it
+ * opportunistically after enqueueing, so event-driven work (summary
+ * refreshes) completes without a polling loop.
+ */
+export async function runDueJobs(limit = 3): Promise<number> {
+  const db = sql();
+  const rows = await db`
+    SELECT id FROM core.jobs
+    WHERE status = 'queued' AND run_after <= now()
+    ORDER BY created_at ASC
+    LIMIT ${limit}`;
+  let ran = 0;
+  for (const r of rows) {
+    const res = await runJobNow(str((r as Record<string, unknown>).id));
+    if (res.ok) ran += 1;
+  }
+  return ran;
+}
+
+/**
  * Register the standing jobs. Registration only — an external
  * scheduler/cron triggers execution (PROJECT_RULES.md cadence config in
  * lib/platform/config.ts). Idempotent per 24h window.

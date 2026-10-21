@@ -6,13 +6,21 @@ import {
   mergeDuplicates,
 } from "@/lib/platform/service";
 
+/** Accept both singular ('company'/'person', used by the Settings
+ * panel) and plural ('companies'/'people', the service vocabulary). */
+function normKind(raw: string): "companies" | "people" | null {
+  if (raw === "companies" || raw === "company") return "companies";
+  if (raw === "people" || raw === "person") return "people";
+  return null;
+}
+
 export async function GET(req: NextRequest) {
   if (!getSessionUser()) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   await ensurePlatform();
-  const kind = req.nextUrl.searchParams.get("kind") ?? "companies";
-  if (kind !== "companies" && kind !== "people") {
+  const kind = normKind(req.nextUrl.searchParams.get("kind") ?? "companies");
+  if (!kind) {
     return NextResponse.json(
       { error: "kind must be 'companies' or 'people'" },
       { status: 400 }
@@ -33,10 +41,10 @@ export async function POST(req: NextRequest) {
     keepId?: unknown;
     mergeId?: unknown;
   };
-  const kind = typeof body.kind === "string" ? body.kind : "";
+  const kind = normKind(typeof body.kind === "string" ? body.kind : "");
   const keepId = typeof body.keepId === "string" ? body.keepId : "";
   const mergeId = typeof body.mergeId === "string" ? body.mergeId : "";
-  if (kind !== "companies" && kind !== "people") {
+  if (!kind) {
     return NextResponse.json(
       { error: "kind must be 'companies' or 'people'" },
       { status: 400 }

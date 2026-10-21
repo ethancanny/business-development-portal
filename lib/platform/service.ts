@@ -1,7 +1,14 @@
 import { ensureSchema as ensureLegacySchema } from "../db-postgres";
 import { ensurePlatformSchema, sql, str, num, isoOrNull } from "./db";
 import { runBackfillOnce } from "./migrate";
-import { ensureBuiltinJobs, listJobs, retryJob, runJobNow } from "./jobs";
+import {
+  ensureBuiltinJobs,
+  enqueueUniqueJob,
+  listJobs,
+  retryJob,
+  runDueJobs,
+  runJobNow,
+} from "./jobs";
 import { getOverview } from "./summaries";
 import { findDuplicates, merge } from "./dedupe";
 import { cached } from "./cache";
@@ -53,6 +60,23 @@ export async function ensurePlatform(): Promise<void> {
       backfillSettled = true;
     } catch (err) {
       console.error("[platform] backfill failed (will retry)", err);
+    }
+    // First-run bootstrap: if no Overview summary has ever been built,
+    // enqueue the refresh and drain due jobs inline — the serverless
+    // form of the rules' "immediate background job". Later refreshes
+    // are event-driven (see events.ts). Never breaks reads.
+    try {
+      const db = sql();
+      const existing = await db`
+        SELECT id FROM core.overview_summary WHERE id = 'main' LIMIT 1`;
+      if (!existing.length) {
+        await enqueueUniqueJob("refresh_overview_summary", {
+          reason: "bootstrap",
+        });
+        await runDueJobs(3);
+      }
+    } catch (err) {
+      console.error("[platform] summary bootstrap failed", err);
     }
   }
 }
@@ -130,6 +154,25 @@ export async function listCompanies(
   const cards = rows.map((r) => rowToCard(r as Record<string, unknown>));
   logUsage("companies_list", cards.length, JSON.stringify(cards).length);
   return cards;
+}
+
+export async function countCompanies(
+  filters: CompanyFilters
+): Promise<number> {
+  const db = sql();
+  const stage = (filters.stage ?? "").trim();
+  const vertical = (filters.vertical ?? "").trim();
+  const q = (filters.q ?? "").trim();
+  const like = `%${q}%`;
+  const rows = await db`
+    SELECT count(*)::int AS n
+    FROM core.companies c
+    WHERE c.deleted_at IS NULL
+      AND (${stage} = '' OR c.stage = ${stage})
+      AND (${vertical} = '' OR c.vertical = ${vertical})
+      AND (${q} = '' OR c.normalized_name ILIKE ${like}
+        OR c.search_vector @@ plainto_tsquery('english', ${q}))`;
+  return rows.length ? num((rows[0] as Record<string, unknown>).n) : 0;
 }
 
 export async function getCompanyDetail(id: string): Promise<CompanyDetail | null> {
