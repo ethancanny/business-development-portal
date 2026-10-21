@@ -224,6 +224,7 @@ export async function getCompanyDetail(id: string): Promise<CompanyDetail | null
         entityKind: str(p.entity_kind),
         entityId: str(p.entity_id),
         entityName: str(p.entity_name),
+        name: str(p.entity_name),
         role: str(p.role),
         status: str(p.status),
         createdAt: isoOrNull(p.created_at) ?? "",
@@ -247,17 +248,22 @@ export async function getCompanyDetail(id: string): Promise<CompanyDetail | null
         message: str(t.message),
         source: str(t.source),
         createdAt: isoOrNull(t.created_at) ?? "",
+        at: isoOrNull(t.created_at) ?? "",
       };
     });
 
     const dealRows = await db`
-      SELECT id, company_id, stage, updated_at FROM core.deals
-      WHERE company_id = ${id}
-      ORDER BY updated_at DESC LIMIT 50`;
+      SELECT cd.id, cd.company_id, cd.stage, cd.updated_at,
+        coalesce(ld.company_name, '') AS company_name
+      FROM core.deals cd
+      LEFT JOIN deals ld ON ld.id = cd.id
+      WHERE cd.company_id = ${id}
+      ORDER BY cd.updated_at DESC LIMIT 50`;
     const deals = dealRows.map((r) => {
       const d = r as Record<string, unknown>;
       return {
         id: str(d.id),
+        name: str(d.company_name),
         companyId: d.company_id ? str(d.company_id) : null,
         stage: str(d.stage),
         updatedAt: isoOrNull(d.updated_at) ?? "",
@@ -301,6 +307,7 @@ export async function getCompanyDetail(id: string): Promise<CompanyDetail | null
         companyId: d.company_id ? str(d.company_id) : null,
         dealId: d.deal_id ? str(d.deal_id) : null,
         createdAt: isoOrNull(d.created_at) ?? "",
+        at: isoOrNull(d.created_at) ?? "",
       };
     });
 

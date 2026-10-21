@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(50, Math.max(1, isFinite(limitRaw) ? limitRaw : 20));
   const results = await searchAll(q, type, limit);
   return NextResponse.json(
-    { results },
+    { results, items: results },
     { headers: { "Cache-Control": "private, max-age=300" } }
   );
 }

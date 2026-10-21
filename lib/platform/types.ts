@@ -112,6 +112,8 @@ export interface Participant {
   entityKind: string;
   entityId: string;
   entityName: string;
+  /** Alias of entityName for UI consumers. */
+  name: string;
   role: string;
   status: string;
   createdAt: string;
@@ -125,6 +127,8 @@ export interface TimelineItem {
   message: string;
   source: string;
   createdAt: string;
+  /** Alias of createdAt for UI consumers. */
+  at: string;
 }
 
 export interface CompanyDetail {
@@ -140,7 +144,14 @@ export interface CompanyDetail {
   participants: Participant[];
   timeline: TimelineItem[];
   linked: {
-    deals: { id: string; companyId: string | null; stage: string; updatedAt: string }[];
+    deals: {
+      id: string;
+      /** Company name from the legacy deal record (display label). */
+      name: string;
+      companyId: string | null;
+      stage: string;
+      updatedAt: string;
+    }[];
     tasks: { id: string; title: string; dueDate: string; done: boolean; owner: string }[];
     documents: {
       id: string;
@@ -151,6 +162,8 @@ export interface CompanyDetail {
       companyId: string | null;
       dealId: string | null;
       createdAt: string;
+      /** Alias of createdAt for UI consumers. */
+      at: string;
     }[];
   };
 }
