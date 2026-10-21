@@ -1,6 +1,10 @@
 import { ensureSchema as ensureLegacySchema } from "../db-postgres";
 import { ensurePlatformSchema, sql, str, num, isoOrNull } from "./db";
-import { runBackfillOnce, topUpBackfill } from "./migrate";
+import {
+  repairNormalizedNames,
+  runBackfillOnce,
+  topUpBackfill,
+} from "./migrate";
 import {
   ensureBuiltinJobs,
   enqueueUniqueJob,
@@ -87,6 +91,13 @@ export async function ensurePlatform(): Promise<void> {
     await topUpBackfill(sql());
   } catch (err) {
     console.error("[platform] backfill top-up failed", err);
+  }
+  // One-time normalized_name repair (Phase 2; marker-guarded inside).
+  // Never breaks reads.
+  try {
+    await repairNormalizedNames(sql());
+  } catch (err) {
+    console.error("[platform] normalized-name repair failed", err);
   }
 }
 

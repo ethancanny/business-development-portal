@@ -15,6 +15,7 @@ import { str, type Sql } from "./db";
 
 export const BACKFILL_KEY = "phase1-backfill-v1";
 export const TOPUP_KEY = "phase1-backfill-topup";
+export const NORMALIZED_REPAIR_KEY = "phase2-normalized-repair-v1";
 
 export async function runBackfillOnce(
   db: Sql,
@@ -274,5 +275,139 @@ export async function topUpBackfill(db: Sql): Promise<{ ran: boolean }> {
     VALUES (${TOPUP_KEY}, now(), 'hourly idempotent top-up')
     ON CONFLICT (key) DO UPDATE SET done_at = now(),
       detail = 'hourly idempotent top-up'`;
+  return { ran: true };
+}
+
+/**
+ * One-time repair (Phase 2): the first deployed build of
+ * core.normalize_name() lost the backslash in its whitespace-collapse
+ * pattern ('\s+' arrived as 's+'), so normalized_name values written by
+ * the original backfill had runs of the letter "s" replaced by spaces
+ * ("Salt Creek Capital" -> "alt creek capital"). SQL-side comparisons
+ * were unaffected (both sides equally corrupted), but comparisons
+ * against the TS normalizeName() — e.g. the Directory import dedupe —
+ * missed. The function definition has since been corrected; this pass
+ * recomputes the stored values once, merging organizations whose
+ * corrected names collide (keeper = most linked people, then oldest).
+ */
+export async function repairNormalizedNames(
+  db: Sql
+): Promise<{ ran: boolean }> {
+  const marker = await db`
+    SELECT key FROM core.migration_state
+    WHERE key = ${NORMALIZED_REPAIR_KEY} LIMIT 1`;
+  if (marker.length) return { ran: false };
+
+  await db`
+    UPDATE core.people
+    SET normalized_name = core.normalize_name(name)
+    WHERE deleted_at IS NULL
+      AND normalized_name IS DISTINCT FROM core.normalize_name(name)`;
+  await db`
+    UPDATE core.companies
+    SET normalized_name = core.normalize_name(name)
+    WHERE deleted_at IS NULL
+      AND normalized_name IS DISTINCT FROM core.normalize_name(name)`;
+
+  // Organizations carry a unique index on normalized_name: resolve
+  // collisions first (merge into the best-referenced org), then rewrite.
+  const orgRows = await db`
+    SELECT o.id, o.name, core.normalize_name(o.name) AS corrected,
+      (SELECT count(*) FROM core.people p
+        WHERE p.organization_id = o.id AND p.deleted_at IS NULL) AS refs,
+      o.created_at
+    FROM core.organizations o
+    WHERE o.deleted_at IS NULL`;
+  type OrgRow = {
+    id: string;
+    name: string;
+    corrected: string;
+    refs: number;
+    createdMs: number;
+  };
+  const orgs: OrgRow[] = orgRows.map((r) => {
+    const rec = r as Record<string, unknown>;
+    const ca = rec.created_at ? new Date(String(rec.created_at)).getTime() : 0;
+    return {
+      id: str(rec.id),
+      name: str(rec.name),
+      corrected: str(rec.corrected),
+      refs: Number(rec.refs ?? 0) || 0,
+      createdMs: isFinite(ca) ? ca : 0,
+    };
+  });
+  const groups = new Map<string, OrgRow[]>();
+  for (const o of orgs) {
+    if (!o.corrected) continue;
+    const g = groups.get(o.corrected) ?? [];
+    g.push(o);
+    groups.set(o.corrected, g);
+  }
+  const tagsReg = await db`SELECT to_regclass('directory.type_tags') AS reg`;
+  const hasTags = Boolean(
+    (tagsReg[0] as Record<string, unknown> | undefined)?.reg
+  );
+  let merged = 0;
+  for (const group of Array.from(groups.values())) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort(
+      (a, b) =>
+        b.refs - a.refs || a.createdMs - b.createdMs || a.id.localeCompare(b.id)
+    );
+    const keeper = sorted[0];
+    for (const loser of sorted.slice(1)) {
+      await db`
+        UPDATE core.people
+        SET organization_id = ${keeper.id},
+            organization_name = ${keeper.name},
+            updated_at = now()
+        WHERE organization_id = ${loser.id} AND deleted_at IS NULL`;
+      if (hasTags) {
+        await db`
+          INSERT INTO directory.type_tags (entity_kind, entity_id, type)
+          SELECT 'organization', ${keeper.id}, type
+          FROM directory.type_tags
+          WHERE entity_kind = 'organization' AND entity_id = ${loser.id}
+          ON CONFLICT DO NOTHING`;
+        await db`
+          DELETE FROM directory.type_tags
+          WHERE entity_kind = 'organization' AND entity_id = ${loser.id}`;
+      }
+      await db`
+        UPDATE core.organizations
+        SET deleted_at = now(), updated_at = now()
+        WHERE id = ${loser.id}`;
+      await db`
+        INSERT INTO core.audit_log (entity_kind, entity_id, actor, action, changes)
+        VALUES ('organization', ${keeper.id}, 'phase2-repair', 'merge',
+          ${JSON.stringify({
+            mergedId: loser.id,
+            mergedName: loser.name,
+            reason: "normalized-name repair",
+          })}::jsonb)`;
+      merged++;
+    }
+  }
+  // Rewrite stored values; a residual unique conflict (against a
+  // soft-deleted row) leaves that row for the duplicates review.
+  let rewritten = 0;
+  for (const o of orgs) {
+    try {
+      const res = await db`
+        UPDATE core.organizations
+        SET normalized_name = ${o.corrected}
+        WHERE id = ${o.id} AND deleted_at IS NULL
+          AND normalized_name IS DISTINCT FROM ${o.corrected}
+        RETURNING id`;
+      if (Array.isArray(res) && res.length) rewritten++;
+    } catch {
+      /* unique conflict — leave for manual merge */
+    }
+  }
+  await db`
+    INSERT INTO core.migration_state (key, done_at, detail)
+    VALUES (${NORMALIZED_REPAIR_KEY}, now(),
+      ${`recomputed normalized_name on people/companies/organizations; org merges: ${merged}; org rows rewritten: ${rewritten}`})
+    ON CONFLICT (key) DO NOTHING`;
   return { ran: true };
 }
