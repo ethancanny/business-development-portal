@@ -1,0 +1,269 @@
+"use client";
+
+/**
+ * Notification center (Phase 2, workstream D): ONE bell, ONE list.
+ * It merges core.notifications for the signed-in user (mentions and
+ * other collaboration notifications, added this phase) with the
+ * EXISTING unread concept — unread deal_flow / Activity items, the
+ * same set lib/badge.ts counts. Platform items mark read through
+ * POST /api/platform/notifications; Activity items simply link to
+ * /activity, where their established read flow runs — nothing is
+ * forked or double-marked. NO interval polling (platform rules):
+ * data is fetched on mount and again when the panel opens.
+ *
+ * Mounted by AppShell as a floating navy/gold bell at the top-right,
+ * below the header band (mirrors the mobile drawer's hamburger on
+ * the left), so it needs no header/layout changes.
+ */
+
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import ActivityFeed from "@/components/ActivityFeed";
+import { fmtRelTime } from "@/lib/format";
+
+interface NotificationItem {
+  id: string;
+  source: "platform" | "activity";
+  kind: string;
+  title: string;
+  body: string;
+  href: string;
+  read: boolean;
+  createdAt: string;
+}
+
+function IconBell({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className ?? "h-6 w-6"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </svg>
+  );
+}
+
+export default function NotificationCenter() {
+  const pathname = usePathname() ?? "";
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"notifications" | "activity">("notifications");
+  const [items, setItems] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  const load = async () => {
+    try {
+      const res = await fetch("/api/platform/notifications");
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        items?: NotificationItem[];
+        unreadCount?: number;
+      };
+      setItems(Array.isArray(data.items) ? data.items : []);
+      setUnreadCount(
+        typeof data.unreadCount === "number" ? data.unreadCount : 0
+      );
+      setLoaded(true);
+    } catch {
+      /* the bell is best-effort chrome — never break the shell */
+    }
+  };
+
+  // Fetch on mount only; re-fetch when the panel opens. No polling.
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (open) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open ]);
+
+  // Navigation closes the panel.
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  // Outside click + Escape close the panel.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open ]);
+
+  const markRead = async (item: NotificationItem) => {
+    if (item.source !== "platform" || item.read) return;
+    setItems((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, read: true } : i))
+    );
+    setUnreadCount((n) => Math.max(0, n - 1));
+    try {
+      await fetch("/api/platform/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: item.id }),
+      });
+    } catch {
+      /* optimistic state stands; next open re-fetches the truth */
+    }
+  };
+
+  const markAllRead = async () => {
+    setItems((prev) =>
+      prev.map((i) => (i.source === "platform" ? { ...i, read: true } : i))
+    );
+    setUnreadCount((n) =>
+      // Activity (deal_flow) unread stay counted until triaged/read
+      // on /activity — only the platform share clears here.
+      Math.max(0, n - items.filter((i) => i.source === "platform" && !i.read).length)
+    );
+    try {
+      await fetch("/api/platform/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true }),
+      });
+    } catch {
+      /* best-effort */
+    }
+  };
+
+  // Login has no shell chrome (matches AppShell's own rule).
+  if (pathname === "/login" || pathname === "/offline") return null;
+
+  return (
+    <div ref={rootRef} className="fixed right-3 z-40 lg:right-5" style={{ top: "calc(64px + env(safe-area-inset-top))" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={
+          unreadCount > 0
+            ? `Notifications, ${unreadCount} unread`
+            : "Notifications"
+        }
+        aria-expanded={open}
+        className="relative flex h-11 w-11 items-center justify-center rounded-full bg-[#0d1f3c] text-[#d4b37a] shadow-lg ring-1 ring-[#b8975a]/50 transition hover:bg-[#16305a]"
+      >
+        <IconBell className="h-5 w-5" />
+        {unreadCount > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white dark:ring-navy-700">
+            {unreadCount > 9 ? "9+" : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 flex max-h-[70vh] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#12294d]">
+          <div className="flex items-center gap-1 border-b border-slate-100 px-3 pt-3 dark:border-white/10">
+            <button
+              type="button"
+              onClick={() => setTab("notifications")}
+              aria-pressed={tab === "notifications"}
+              className={`chip ${tab === "notifications" ? "chip-active" : ""}`}
+            >
+              Notifications
+              {unreadCount > 0 ? ` (${unreadCount})` : ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("activity")}
+              aria-pressed={tab === "activity"}
+              className={`chip ${tab === "activity" ? "chip-active" : ""}`}
+            >
+              Activity
+            </button>
+            {tab === "notifications" && (
+              <button
+                type="button"
+                onClick={markAllRead}
+                className="ml-auto shrink-0 rounded px-2 py-1 text-xs font-semibold text-gold-700 transition hover:bg-[#f0f4fa] dark:text-gold-400 dark:hover:bg-white/5"
+              >
+                Mark all read
+              </button>
+            )}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {tab === "activity" ? (
+              <ActivityFeed limit={25} />
+            ) : !loaded ? (
+              <div className="space-y-3" aria-busy="true">
+                <div className="skel h-12" />
+                <div className="skel h-12" />
+                <span className="sr-only">Loading notifications…</span>
+              </div>
+            ) : items.length === 0 ? (
+              <p className="px-1 py-4 text-sm text-caption">
+                You&apos;re all caught up — no notifications.
+              </p>
+            ) : (
+              <ul className="divide-y divide-slate-100 dark:divide-white/5">
+                {items.map((item) => (
+                  <li key={`${item.source}-${item.id}`}>
+                    <Link
+                      href={item.href || "/overview"}
+                      onClick={() => {
+                        void markRead(item);
+                        setOpen(false);
+                      }}
+                      className={`block px-1 py-2.5 transition hover:bg-[#f0f4fa] dark:hover:bg-white/5 ${
+                        item.read ? "opacity-70" : ""
+                      }`}
+                    >
+                      <span className="flex items-baseline gap-2">
+                        {!item.read && (
+                          <span
+                            aria-hidden
+                            className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full bg-red-600"
+                          />
+                        )}
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#0d1f3c] dark:text-white">
+                          {item.title}
+                        </span>
+                        <span className="shrink-0 text-[11px] text-caption">
+                          {item.createdAt ? fmtRelTime(item.createdAt) : ""}
+                        </span>
+                      </span>
+                      {item.body && (
+                        <span className="mt-0.5 line-clamp-2 block pl-4 text-xs leading-snug text-caption">
+                          {item.body}
+                        </span>
+                      )}
+                      {item.source === "activity" && (
+                        <span className="mt-1 block pl-4 text-[11px] font-medium text-gold-700 dark:text-gold-400">
+                          Opens in Activity
+                        </span>
+                      )}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
