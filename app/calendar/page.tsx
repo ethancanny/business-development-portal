@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
+import CalendarExtras from "@/components/CalendarExtras";
 import type { CalendarEvent } from "@/lib/calendar-db";
 
 /**
@@ -179,7 +180,7 @@ export default function CalendarPage() {
   const [editRemoved, setEditRemoved] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [ms, setMs] = useState<MsStatus | null>(null);
-  const [view, setView] = useState<"list" | "calendar">("list");
+  const [view, setView] = useState<"list" | "calendar" | "agenda">("list");
   const [cursor, setCursor] = useState<{ y: number; m: number }>(() => phoenixCursor());
 
   const loadPending = async () => {
@@ -236,7 +237,7 @@ export default function CalendarPage() {
     }
   };
 
-  const switchView = (v: "list" | "calendar", keepEvents = false) => {
+  const switchView = (v: "list" | "calendar" | "agenda", keepEvents = false) => {
     setView(v);
     try {
       localStorage.setItem("ccp-cal-view", v);
@@ -977,6 +978,16 @@ export default function CalendarPage() {
             >
               ▦ Calendar
             </button>
+            <button
+              onClick={() => switchView("agenda", true)}
+              className={`px-3 py-1.5 text-sm font-semibold transition ${
+                view === "agenda"
+                  ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                  : "text-slate-500 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/[0.06]"
+              }`}
+            >
+              ◷ Agenda
+            </button>
           </div>
         </div>
 
@@ -1021,7 +1032,9 @@ export default function CalendarPage() {
           </div>
         )}
 
-        {view === "calendar" ? (
+        {view === "agenda" ? (
+          <CalendarExtras />
+        ) : view === "calendar" ? (
           calendarView
         ) : loading ? (
           <p className="text-sm text-slate-400 dark:text-white/40">Loading calendar…</p>
@@ -1034,6 +1047,15 @@ export default function CalendarPage() {
             {section("Upcoming", upcoming)}
             {section("Earlier this week", past)}
           </>
+        )}
+
+        {view !== "agenda" && (
+          <div className="mt-10 border-t border-slate-200 pt-6 dark:border-white/10">
+            <h3 className="mb-4 text-sm font-bold uppercase tracking-wider text-[#0d1f3c] dark:text-white">
+              Platform layers — tasks, deadlines &amp; deal dates
+            </h3>
+            <CalendarExtras />
+          </div>
         )}
       </div>
     </div>
