@@ -23,6 +23,8 @@ import {
   type CompanyCard,
 } from "@/components/CompanyCards";
 import { fmtDate, fmtRelTime } from "@/lib/format";
+import Comments from "@/components/Comments";
+import ActivityFeed from "@/components/ActivityFeed";
 
 interface CompanyDetail extends CompanyCard {
   source: string | null;
@@ -375,6 +377,22 @@ export default function CompanyProfilePage() {
                 ))}
               </ol>
             )}
+          </section>
+
+          {/* Discussion (Phase 2, workstream D): comments + @mentions */}
+          <section className="card-surface p-5" aria-label="Discussion">
+            <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
+              Discussion
+            </h2>
+            <Comments entityKind="company" entityId={c.id} />
+          </section>
+
+          {/* Platform activity feed (Phase 2, workstream D) */}
+          <section className="card-surface p-5" aria-label="Activity feed">
+            <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
+              Activity feed
+            </h2>
+            <ActivityFeed entityKind="company" entityId={c.id} />
           </section>
         </div>
 

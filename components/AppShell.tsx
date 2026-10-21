@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Sidebar, { NavList, SidebarBrand } from "@/components/Sidebar";
 import GlobalSearch from "@/components/GlobalSearch";
+import NotificationCenter from "@/components/NotificationCenter";
 import { IconClose } from "@/components/icons";
 
 const COLLAPSED_KEY = "ccp-sidebar-collapsed";
@@ -135,6 +136,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       >
         {children}
       </div>
+
+      <NotificationCenter />
 
       <GlobalSearch />
     </>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import PageHero from "@/components/PageHero";
+import UnifiedTasks from "@/components/UnifiedTasks";
 
 /**
  * Business Development hub (Phase 1 platform restructure): the
@@ -69,6 +70,18 @@ export default function BusinessDevelopmentPage() {
             </Link>
           ))}
         </div>
+        <section className="mt-10">
+          <h2 className="font-display text-2xl font-semibold text-navy-900 dark:text-white">
+            Tasks &amp; follow-ups
+          </h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-white/60">
+            Every open task across deals and operators — dated tasks appear
+            on the Calendar automatically.
+          </p>
+          <div className="mt-4">
+            <UnifiedTasks />
+          </div>
+        </section>
         <p className="mt-6 text-sm text-slate-400 dark:text-white/40">
           The existing CRM, now under Business Development — every record
           here links to the central company record, so deals, people, and
