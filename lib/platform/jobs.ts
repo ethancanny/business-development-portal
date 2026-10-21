@@ -103,6 +103,15 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
           })}::jsonb)`;
       return;
     }
+    case "refresh_generated_events": {
+      // Phase 2 (Calendar): regenerate calgen.generated_events from the
+      // registered generators (tasks today; later modules plug in via
+      // lib/calgen/registry.ts). Portal-side views only — no Outlook
+      // writes, no notifications.
+      const { regenerateGeneratedEvents } = await import("../calgen/service");
+      await regenerateGeneratedEvents();
+      return;
+    }
     case "dedupe_scan": {
       // Pairs are computed on demand by dedupe.findDuplicates(); the scan
       // job just exercises both kinds so failures surface in the job log.

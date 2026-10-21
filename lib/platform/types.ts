@@ -64,7 +64,13 @@ export interface OverviewSummary {
   updatedAt: string | null;
 }
 
-export type SearchItemKind = "company" | "person" | "document" | "task" | "note";
+export type SearchItemKind =
+  | "company"
+  | "person"
+  | "organization"
+  | "document"
+  | "task"
+  | "note";
 
 export interface SearchItem {
   kind: SearchItemKind;

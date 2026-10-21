@@ -100,6 +100,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   tasks[idx] = updated;
   await saveTasks(tasks);
+  // Phase 2: keep the calendar generated-events layer fresh.
+  try {
+    const { requestGeneratedEventsRefresh } = await import("@/lib/calgen/service");
+    await requestGeneratedEventsRefresh();
+  } catch { /* generated layer refresh is best-effort */ }
 
   const user = getSessionUser();
   const actor = user?.name ?? "Someone";
@@ -147,6 +152,11 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     }
   }
   await saveTasks(tasks);
+  // Phase 2: keep the calendar generated-events layer fresh.
+  try {
+    const { requestGeneratedEventsRefresh } = await import("@/lib/calgen/service");
+    await requestGeneratedEventsRefresh();
+  } catch { /* generated layer refresh is best-effort */ }
   const user = getSessionUser();
   await logActivity({
     type: "task.deleted",

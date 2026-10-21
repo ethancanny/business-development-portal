@@ -70,6 +70,11 @@ export async function POST(req: NextRequest) {
   const tasks = await getTasks();
   tasks.push(task);
   await saveTasks(tasks);
+  // Phase 2: keep the calendar generated-events layer fresh.
+  try {
+    const { requestGeneratedEventsRefresh } = await import("@/lib/calgen/service");
+    await requestGeneratedEventsRefresh();
+  } catch { /* generated layer refresh is best-effort */ }
   await logActivity({
     type: "task.created",
     actor: user.name,

@@ -11,6 +11,15 @@ import type { SearchItem, SearchItemKind } from "./types";
 
 const KINDS: SearchItemKind[] = ["company", "person", "document", "task", "note"];
 
+/**
+ * Phase 2 (Directory): organizations are searchable as kind
+ * "organization". SearchItemKind in types.ts does not yet include it,
+ * so it is carried here as a local extension and cast at the push site;
+ * runtime consumers (GlobalSearch) treat kind as a plain string.
+ */
+type SearchKind = SearchItemKind | "organization";
+const ALL_KINDS: SearchKind[] = [...KINDS, "organization"];
+
 export async function searchAll(
   q: string,
   type?: string,
@@ -19,8 +28,8 @@ export async function searchAll(
   const query = (q ?? "").trim();
   if (!query) return [];
   const lim = Math.min(50, Math.max(1, limit || 20));
-  const want = (k: SearchItemKind): boolean =>
-    !type || type === "all" || type === k || !KINDS.includes(type as SearchItemKind);
+  const want = (k: SearchKind): boolean =>
+    !type || type === "all" || type === k || !ALL_KINDS.includes(type as SearchKind);
   const like = `%${query}%`;
   const db = sql();
   const items: SearchItem[] = [];
@@ -65,6 +74,29 @@ export async function searchAll(
         id: str(rec.id),
         title: str(rec.name),
         subtitle: [str(rec.title), str(rec.organization_name), str(rec.kind)]
+          .filter(Boolean)
+          .join(" · "),
+        href: `/directory?q=${encodeURIComponent(str(rec.name))}`,
+        updatedAt: isoOrNull(rec.updated_at),
+      });
+    }
+  }
+
+  if (want("organization")) {
+    const rows = await db`
+      SELECT id, name, kind, website, updated_at
+      FROM core.organizations
+      WHERE deleted_at IS NULL
+        AND (normalized_name ILIKE ${like} OR name ILIKE ${like})
+      ORDER BY updated_at DESC
+      LIMIT ${lim}`;
+    for (const r of rows) {
+      const rec = r as Record<string, unknown>;
+      items.push({
+        kind: "organization" as SearchItemKind,
+        id: str(rec.id),
+        title: str(rec.name),
+        subtitle: [str(rec.kind), str(rec.website)]
           .filter(Boolean)
           .join(" · "),
         href: `/directory?q=${encodeURIComponent(str(rec.name))}`,
