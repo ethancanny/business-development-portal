@@ -9,6 +9,7 @@ import Fab from "@/components/Fab";
 import LockScreen from "@/components/LockScreen";
 import PageTransition from "@/components/PageTransition";
 import Toast from "@/components/Toast";
+import AppShell from "@/components/AppShell";
 
 // Premium redesign (Oct 14, 2026): serif display + clean sans, loaded
 // once at the root and shared via CSS variables (see tailwind.config).
@@ -104,9 +105,11 @@ export default function RootLayout({
         />
         <ThemeProvider>
           <SiteHeader />
-          <div className="page-pad overflow-x-clip">
-            <PageTransition>{children}</PageTransition>
-          </div>
+          <AppShell>
+            <div className="page-pad overflow-x-clip">
+              <PageTransition>{children}</PageTransition>
+            </div>
+          </AppShell>
           <PwaShell />
           <Fab />
           <MobileNav />
