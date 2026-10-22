@@ -725,8 +725,8 @@ function textToGrids(text: string): Grid[] {
   // Phase 3's XLSX extractor emits "# Sheet: <name>" chunks of CSV.
   if (/# Sheet:/.test(text)) {
     const grids: Grid[] = [];
-    const parts = text.split(/^# Sheet:.*$/m);
-    const names = Array.from(text.matchAll(/^# Sheet:(.*)$/m)).map((x) =>
+    const parts = text.split(/^# Sheet:.*$/gm);
+    const names = Array.from(text.matchAll(/^# Sheet:(.*)$/gm)).map((x) =>
       x[1].trim()
     );
     parts.slice(1).forEach((part, i) => {
