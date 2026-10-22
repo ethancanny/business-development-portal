@@ -37,7 +37,7 @@ const ACTIONS: {
   { label: "Add contact", href: "/directory?new=contact", Icon: IconAddContact },
 ];
 
-const HIDDEN_ROUTES = ["/market-intel", "/analytics", "/audit-trail", "/calendar"];
+const HIDDEN_ROUTES = ["/market-intel", "/analytics", "/settings/audit-trail", "/calendar"];
 
 export default function Fab() {
   const pathname = usePathname();

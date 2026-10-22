@@ -9,11 +9,11 @@
  * POST /api/platform/notifications; Activity items simply link to
  * /activity, where their established read flow runs — nothing is
  * forked or double-marked. NO interval polling (platform rules):
- * data is fetched on mount and again when the panel opens.
+ * Data is fetched on mount and again when the panel opens.
  *
- * Mounted by AppShell as a floating navy/gold bell at the top-right,
- * below the header band (mirrors the mobile drawer's hamburger on
- * the left), so it needs no header/layout changes.
+ * Rendered in-flow by the TopBar (Navigation Restructure): the bell
+ * trigger + dropdown live inside a relative container — no fixed
+ * positioning (the old placement assumed the removed 64px header).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -154,7 +154,7 @@ export default function NotificationCenter() {
   if (pathname === "/login" || pathname === "/offline") return null;
 
   return (
-    <div ref={rootRef} className="fixed right-3 z-40 lg:right-5" style={{ top: "calc(64px + env(safe-area-inset-top))" }}>
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

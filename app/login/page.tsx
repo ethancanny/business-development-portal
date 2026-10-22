@@ -116,7 +116,7 @@ export default function LoginPage() {
           className="h-12 w-auto"
         />
         <h1 className="mt-4 text-2xl font-bold text-[#0d1f3c] dark:text-white">
-          Business Development Portal
+          Canny Capital Portal
         </h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-[#c8bfa8]">
           Sign in to track your pipelines

@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Inter } from "next/font/google";
 import "./globals.css";
-import SiteHeader from "@/components/SiteHeader";
 import ThemeProvider, { ThemeInitScript } from "@/components/ThemeProvider";
 import PwaShell from "@/components/PwaShell";
 import MobileNav from "@/components/MobileNav";
@@ -27,7 +26,7 @@ const fontSans = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Business Development Portal | Canny Capital Partners",
+  title: "Canny Capital Portal | Canny Capital Partners",
   description: "Track acquisition deals and executive sourcing pipelines",
   // The web app manifest comes from app/manifest.ts (auto-linked by Next
   // at /manifest.webmanifest).
@@ -104,7 +103,6 @@ export default function RootLayout({
           style={{ height: "env(safe-area-inset-top)" }}
         />
         <ThemeProvider>
-          <SiteHeader />
           <AppShell>
             <div className="page-pad overflow-x-clip">
               <PageTransition>{children}</PageTransition>

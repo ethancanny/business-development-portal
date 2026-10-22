@@ -5,16 +5,13 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "@/components/ThemeProvider";
 import {
-  IconActivity,
-  IconActivityFilled,
+  IconAnalytics,
   IconAuditTrail,
   IconCalendar,
   IconClose,
   IconDirectory,
   IconDirectoryFilled,
   IconLogOut,
-  IconMarketIntel,
-  IconMarketIntelFilled,
   IconMoon,
   IconMore,
   IconMoreFilled,
@@ -25,6 +22,7 @@ import {
   IconSettings,
   IconSun,
 } from "@/components/icons";
+import { isNavActive } from "@/components/Sidebar";
 
 /**
  * Mobile bottom tab bar + "More" sheet (CRM Phase 2; polished Oct 14,
@@ -42,10 +40,12 @@ import {
  * target. Tab changes fire a light haptic (guarded). Attention
  * badges ride the SAME server computation as the app-icon badge
  * (GET /api/push/badge → lib/badge): due/overdue follow-ups count
- * on Overview, unread Activity items on Activity — never a local
- * count. "Market Intel" is labeled "Intel" (label text only; the
- * route is unchanged). The bar slides away while the keyboard is
- * open (`kb-open` on <html>, styled in globals.css).
+ * on Overview, unread notifications on Business Development — never
+ * a local count. Bottom tabs are the top destinations (Overview,
+ * Calendar, Business Development, Directory) + a More sheet with
+ * the remaining modules (Navigation Restructure). The bar slides
+ * away while the keyboard is open (`kb-open` on <html>, styled in
+ * globals.css).
  *
  * More sheet: sits above the floating bar (the bar stays visible
  * and its More tab reads active via the slid pill), backdrop dims
@@ -57,6 +57,50 @@ import {
 
 type IconFn = (p: { className?: string }) => React.ReactNode;
 
+function lineIcon(children: React.ReactNode): IconFn {
+  return function LineIcon({ className }: { className?: string }) {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className={className ?? "h-6 w-6"}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {children}
+      </svg>
+    );
+  };
+}
+
+const IconDueDiligence = lineIcon(
+  <>
+    <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    <path d="m9 14 2 2 4-4" />
+  </>
+);
+
+const IconInvestors = lineIcon(
+  <>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8" />
+    <path d="M12 6v2" />
+    <path d="M12 16v2" />
+  </>
+);
+
+const IconCommunications = lineIcon(
+  <>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    <path d="M8 9h8" />
+    <path d="M8 13h5" />
+  </>
+);
+
 const TABS: {
   href: string;
   label: string;
@@ -65,9 +109,8 @@ const TABS: {
   badgeKey?: "dueFollowups" | "unreadNotifications";
 }[] = [
   { href: "/overview", label: "Overview", Icon: IconOverview, IconFilled: IconOverviewFilled, badgeKey: "dueFollowups" },
-  { href: "/pipeline", label: "Pipeline", Icon: IconPipeline, IconFilled: IconPipelineFilled },
-  { href: "/activity", label: "Activity", Icon: IconActivity, IconFilled: IconActivityFilled, badgeKey: "unreadNotifications" },
-  { href: "/market-intel", label: "Intel", Icon: IconMarketIntel, IconFilled: IconMarketIntelFilled },
+  { href: "/calendar", label: "Calendar", Icon: IconCalendar, IconFilled: IconCalendar },
+  { href: "/business-development", label: "Business Development", Icon: IconPipeline, IconFilled: IconPipelineFilled, badgeKey: "unreadNotifications" },
   { href: "/directory", label: "Directory", Icon: IconDirectory, IconFilled: IconDirectoryFilled },
 ];
 
@@ -76,12 +119,15 @@ const MORE_LINKS: {
   label: string;
   Icon: IconFn;
 }[] = [
-  { href: "/calendar", label: "Calendar", Icon: IconCalendar },
-  { href: "/audit-trail", label: "Audit Trail", Icon: IconAuditTrail },
+  { href: "/due-diligence", label: "Due Diligence", Icon: IconDueDiligence },
+  { href: "/investors-capital", label: "Investors & Capital", Icon: IconInvestors },
+  { href: "/portfolio-monitoring", label: "Portfolio Monitoring", Icon: IconAnalytics },
+  { href: "/communications", label: "Communications", Icon: IconCommunications },
   { href: "/settings", label: "Settings", Icon: IconSettings },
+  { href: "/settings/audit-trail", label: "Audit Trail", Icon: IconAuditTrail },
 ];
 
-const MORE_INDEX = TABS.length; // the More button is the 6th slot
+const MORE_INDEX = TABS.length; // the More button is the slot after the tabs
 
 export default function MobileNav() {
   const pathname = usePathname();
@@ -99,8 +145,7 @@ export default function MobileNav() {
   const tabRefs = useRef<(HTMLElement | null)[]>([]);
   const [pill, setPill] = useState<{ x: number; w: number } | null>(null);
 
-  const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(href + "/");
+  const isActive = (href: string) => isNavActive(pathname ?? "", href);
 
   const moreRouteActive = MORE_LINKS.some((l) => isActive(l.href));
   const activeIndex = moreOpen
@@ -293,7 +338,7 @@ export default function MobileNav() {
           )}
         </span>
         <span
-          className={`text-[11px] leading-none transition-colors duration-200 ${
+          className={`max-w-full truncate px-0.5 text-center text-[11px] leading-none transition-colors duration-200 ${
             active
               ? "font-semibold text-white"
               : "font-medium text-slate-600 dark:text-[#c3cede]"
