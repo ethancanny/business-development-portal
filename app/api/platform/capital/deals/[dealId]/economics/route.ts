@@ -45,20 +45,25 @@ export async function POST(
       body.inputs && typeof body.inputs === "object" && !Array.isArray(body.inputs)
         ? (body.inputs as Record<string, unknown>)
         : body;
+    // Presence-based key pick: an explicit null CLEARS the field back
+    // to param inheritance, so `??` (which treats null as absent)
+    // must not be used to select between the camel/snake spellings.
+    const pick = (camel: string, snake: string): number | null | undefined =>
+      sNum(camel in src ? src[camel] : src[snake]);
     const patch: EconomicsInputsPatch = {
-      ebitdaOverride: sNum(src.ebitdaOverride ?? src.ebitda_override),
-      entryMultiple: sNum(src.entryMultiple ?? src.entry_multiple),
-      leverageMultiple: sNum(src.leverageMultiple ?? src.leverage_multiple),
-      exitMultiple: sNum(src.exitMultiple ?? src.exit_multiple),
-      growthPct: sNum(src.growthPct ?? src.growth_pct),
-      holdYears: sNum(src.holdYears ?? src.hold_years),
-      advisoryFeePct: sNum(src.advisoryFeePct ?? src.advisory_fee_pct),
-      financingFeePct: sNum(src.financingFeePct ?? src.financing_fee_pct),
-      mgmtFeePct: sNum(src.mgmtFeePct ?? src.mgmt_fee_pct),
-      prefPct: sNum(src.prefPct ?? src.pref_pct),
-      carryPct: sNum(src.carryPct ?? src.carry_pct),
-      rolloverEquity: sNum(src.rolloverEquity ?? src.rollover_equity),
-      debtPaydownPct: sNum(src.debtPaydownPct ?? src.debt_paydown_pct),
+      ebitdaOverride: pick("ebitdaOverride", "ebitda_override"),
+      entryMultiple: pick("entryMultiple", "entry_multiple"),
+      leverageMultiple: pick("leverageMultiple", "leverage_multiple"),
+      exitMultiple: pick("exitMultiple", "exit_multiple"),
+      growthPct: pick("growthPct", "growth_pct"),
+      holdYears: pick("holdYears", "hold_years"),
+      advisoryFeePct: pick("advisoryFeePct", "advisory_fee_pct"),
+      financingFeePct: pick("financingFeePct", "financing_fee_pct"),
+      mgmtFeePct: pick("mgmtFeePct", "mgmt_fee_pct"),
+      prefPct: pick("prefPct", "pref_pct"),
+      carryPct: pick("carryPct", "carry_pct"),
+      rolloverEquity: pick("rolloverEquity", "rollover_equity"),
+      debtPaydownPct: pick("debtPaydownPct", "debt_paydown_pct"),
     };
     const result = await saveAndComputeEconomics(
       params.dealId,
