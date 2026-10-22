@@ -28,6 +28,10 @@ import SiteVisitsTab from "@/components/diligence/SiteVisitsTab";
 import RedFlagsTab from "@/components/diligence/RedFlagsTab";
 import ClosingTab from "@/components/diligence/ClosingTab";
 import BpmnTab from "@/components/diligence/BpmnTab";
+import DocIntTab from "@/components/diligence/DocIntTab";
+import RecordsTab from "@/components/diligence/RecordsTab";
+import MemoTab from "@/components/diligence/MemoTab";
+import RiskTab from "@/components/diligence/RiskTab";
 
 const TABS = [
   { key: "checklist", label: "Checklist" },
@@ -42,6 +46,10 @@ const TABS = [
   { key: "red-flags", label: "Red Flags" },
   { key: "closing", label: "Closing" },
   { key: "bpmn", label: "Process Maps" },
+  { key: "docint", label: "Doc Intel" },
+  { key: "records", label: "Record Checks" },
+  { key: "memo", label: "IC Memo" },
+  { key: "risk", label: "Risk Score" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -267,6 +275,10 @@ export default function DiligenceWorkspace({ dealId }: { dealId: string }) {
         {tab === "red-flags" && <RedFlagsTab {...tabProps} />}
         {tab === "closing" && <ClosingTab {...tabProps} />}
         {tab === "bpmn" && <BpmnTab {...tabProps} />}
+        {tab === "docint" && <DocIntTab {...tabProps} />}
+        {tab === "records" && <RecordsTab {...tabProps} />}
+        {tab === "memo" && <MemoTab {...tabProps} />}
+        {tab === "risk" && <RiskTab {...tabProps} />}
       </div>
     </div>
   );

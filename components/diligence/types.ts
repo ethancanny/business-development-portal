@@ -373,3 +373,150 @@ export function splitList(text: string): string[] {
     .map((s) => s.trim())
     .filter(Boolean);
 }
+
+/* --------------------- Part 5B: Doc Intel / Records / Memo / Risk --------------------- */
+
+/** One provider leg of the document-intelligence status payload. */
+export interface DocintProviderStatus {
+  configured: boolean;
+  detail: string;
+}
+
+/** GET /api/platform/diligence/docint/status */
+export interface DocintStatus {
+  activeProvider: string;
+  azure: DocintProviderStatus;
+  local: DocintProviderStatus;
+}
+
+/** One extraction run row (POST extract response / runs list). */
+export interface DocintRun {
+  id: string;
+  dealId?: string;
+  documentId?: string | null;
+  provider: string;
+  status: string;
+  pages?: number | null;
+  pageCount?: number | null;
+  fieldsExtracted?: number | null;
+  fieldCount?: number | null;
+  error?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+/** One extracted field awaiting (or past) human review. */
+export interface DocintField {
+  id: string;
+  runId: string;
+  documentId: string;
+  fieldKey: string;
+  label: string;
+  valueText: string | null;
+  confidence: number | null;
+  page: number | null;
+  passage: string | null;
+  status: string; // provisional | confirmed | corrected | rejected
+  correctedValue: string | null;
+  appliedContractId: string | null;
+}
+
+/** One point-in-time snapshot of an external record check. */
+export interface RecordSnapshot {
+  id: string;
+  checkType: string;
+  sourceName: string;
+  sourceUrl: string | null;
+  route: string; // automated | manual
+  resultStatus: string; // clear | finding | unknown
+  summary: string;
+  checkedAt: string | null;
+  enteredBy: string | null;
+  changed: boolean;
+  changeSummary: string | null;
+}
+
+/** One check type in the records register, with its latest snapshot. */
+export interface RecordCheckType {
+  key: string;
+  label: string;
+  defaultSource: string;
+  automation: string; // automated | manual
+  automationNote: string;
+  latest: RecordSnapshot | null;
+  refreshDue: boolean;
+}
+
+export interface MemoCitation {
+  kind: string;
+  id: string;
+  label: string;
+}
+
+export interface MemoSection {
+  key: string;
+  title: string;
+  body: string;
+  citations: MemoCitation[];
+}
+
+/** The IC memo row (GET /api/platform/diligence/memo → memo). */
+export interface MemoData {
+  id: string;
+  version: number;
+  status: string; // draft | approved
+  payload: { sections: MemoSection[] };
+  generatedBy: string | null;
+  generatedAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+}
+
+/** A risk-score source: plain label or a linkable reference. */
+export type RiskSource =
+  | string
+  | { label?: string; name?: string; href?: string; url?: string }
+  | null;
+
+export interface RiskComponent {
+  key: string;
+  label: string;
+  weight: number;
+  subscore: number;
+  value: string | number | null;
+  detail: string;
+  source: RiskSource;
+}
+
+export interface RiskDriver {
+  key?: string;
+  label?: string;
+  title?: string;
+  subscore?: number | null;
+  value?: string | number | null;
+  detail?: string;
+  source?: RiskSource;
+  /** Backend drivers carry a direct link to the source record. */
+  href?: string;
+}
+
+/** The current risk score (GET /api/platform/diligence/risk → current). */
+export interface RiskCurrent {
+  id: string;
+  score: number;
+  band: string; // Low | Moderate | Elevated | High
+  components: RiskComponent[];
+  drivers: Array<RiskDriver | string>;
+  changes: Record<string, unknown> | null;
+  triggerSource?: string | null;
+  createdAt: string;
+}
+
+export interface RiskHistoryItem {
+  id: string;
+  score: number;
+  band: string;
+  triggerSource: string | null;
+  createdAt: string;
+  changes: Record<string, unknown> | null;
+}
