@@ -15,7 +15,7 @@ import { str, type Sql } from "./db";
 
 export const BACKFILL_KEY = "phase1-backfill-v1";
 export const TOPUP_KEY = "phase1-backfill-topup";
-export const NORMALIZED_REPAIR_KEY = "phase2-normalized-repair-v2";
+export const NORMALIZED_REPAIR_KEY = "phase2-normalized-repair-v3";
 
 export async function runBackfillOnce(
   db: Sql,
@@ -297,6 +297,15 @@ export async function repairNormalizedNames(
     SELECT key FROM core.migration_state
     WHERE key = ${NORMALIZED_REPAIR_KEY} LIMIT 1`;
   if (marker.length) return { ran: false };
+
+  // The organizations unique index on normalized_name is not partial,
+  // so a soft-deleted org's value blocks the corrected value of a live
+  // org forever. Tombstone deleted orgs' normalized names first.
+  await db`
+    UPDATE core.organizations
+    SET normalized_name = 'deleted:' || id
+    WHERE deleted_at IS NOT NULL
+      AND normalized_name NOT LIKE 'deleted:%'`;
 
   await db`
     UPDATE core.people
