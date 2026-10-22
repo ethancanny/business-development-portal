@@ -26,6 +26,7 @@ import { fmtDate, fmtRelTime } from "@/lib/format";
 import Comments from "@/components/Comments";
 import ActivityFeed from "@/components/ActivityFeed";
 import FinancialsSection from "@/components/FinancialsSection";
+import FinancialAnalysis from "@/components/FinancialAnalysis";
 
 interface CompanyDetail extends CompanyCard {
   source: string | null;
@@ -291,6 +292,8 @@ export default function CompanyProfilePage() {
           </section>
 
           <FinancialsSection companyId={c.id} companyName={c.name} />
+
+          <FinancialAnalysis companyId={c.id} />
 
           {/* Photo gallery */}
           <section className="card-surface p-5" aria-label="Photos">

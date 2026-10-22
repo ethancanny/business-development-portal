@@ -21,6 +21,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { EmptyState, ErrorState, SkeletonRows } from "@/components/ui";
+import IntegrityPanel, {
+  type IntegrityCheckResult,
+} from "@/components/IntegrityPanel";
 import { fmtDate, fmtMoney } from "@/lib/format";
 
 /* ---------------- Types (API contract) ---------------- */
@@ -278,6 +281,10 @@ export default function FinancialReview({ setId }: { setId: string }) {
   } | null>(null);
   const [justPosted, setJustPosted] = useState(false);
 
+  // Part 4B integrity suite (live, includes this draft set) — fetched
+  // once the set loads; rendered under the checks panel.
+  const [integrityResults, setIntegrityResults] = useState<IntegrityCheckResult[] | null>(null);
+
   const [showRestate, setShowRestate] = useState(false);
   const [restateReason, setRestateReason] = useState("");
   const [restateBusy, setRestateBusy] = useState(false);
@@ -343,6 +350,31 @@ export default function FinancialReview({ setId }: { setId: string }) {
   useEffect(() => {
     void loadSet();
   }, [loadSet]);
+
+  // Fetch the Part 4B integrity suite for this set once it has loaded
+  // (posted company sets + this draft via setId). Best-effort: a failed
+  // fetch leaves the panel hidden rather than blocking review.
+  useEffect(() => {
+    if (!finSet) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/platform/financials/analysis/integrity?companyId=${encodeURIComponent(finSet.companyId)}&setId=${encodeURIComponent(finSet.id)}`
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { results?: IntegrityCheckResult[] };
+        if (!cancelled) {
+          setIntegrityResults(Array.isArray(data.results) ? data.results : []);
+        }
+      } catch {
+        /* integrity panel is auxiliary */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [finSet]);
 
   const selectedLine = useMemo(
     () => lines.find((l) => l.id === selectedLineId) ?? null,
@@ -1032,6 +1064,16 @@ export default function FinancialReview({ setId }: { setId: string }) {
               <p className="mt-2 text-xs text-caption">Checks refresh when you save the draft.</p>
             )}
           </section>
+
+          {/* Integrity suite (Part 4B) — live checks incl. this draft set */}
+          {integrityResults !== null && (
+            <section className="card-surface p-5" aria-label="Integrity checks">
+              <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
+                Integrity checks
+              </h2>
+              <IntegrityPanel results={integrityResults} />
+            </section>
+          )}
 
           {/* Actions */}
           <section className="card-surface p-5" aria-label="Actions">
