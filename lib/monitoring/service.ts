@@ -444,29 +444,59 @@ export async function handoffDealClosed(
     };
   });
 
-  const id = `monpc_${newId()}`;
-  const inserted = await db`
-    INSERT INTO monitoring.portfolio_companies
-      (id, company_id, deal_id, status, closed_at, closed_by,
-       baseline_company, baseline_financials, underwriting,
-       vc_targets, vc_plan_id, participants, source)
-    VALUES (${id}, ${companyId}, ${dealId}, 'active', now(), ${actor},
-      ${JSON.stringify(baselineCompany)}::jsonb,
-      ${baselineFinancials ? JSON.stringify(baselineFinancials) : null}::jsonb,
-      ${underwriting ? JSON.stringify(underwriting) : null}::jsonb,
-      ${vcTargets ? JSON.stringify(vcTargets) : null}::jsonb,
-      ${vcPlanId},
-      ${JSON.stringify(participants)}::jsonb,
-      'deal_closed')
-    ON CONFLICT (company_id) DO NOTHING
-    RETURNING *`;
-  const row = inserted.length
-    ? (inserted[0] as Record<string, unknown>)
-    : (
-        await db`
-          SELECT * FROM monitoring.portfolio_companies
-          WHERE company_id = ${companyId} LIMIT 1`
-      )[0] as Record<string, unknown>;
+  // Write the copy. A prior SOFT-DELETED row for this company (e.g. a
+  // closed-then-removed portfolio record) still occupies the
+  // company_id unique slot: resurrect it with THIS close's fresh
+  // baseline instead of inserting (an INSERT ... DO NOTHING would
+  // silently return the deleted row and the company would never
+  // re-enter monitoring — found by the Phase 8 battery, run 2).
+  const deletedRows = await db`
+    SELECT id FROM monitoring.portfolio_companies
+    WHERE company_id = ${companyId} AND deleted_at IS NOT NULL LIMIT 1`;
+  let row: Record<string, unknown>;
+  if (deletedRows.length) {
+    const deletedId = str(
+      (deletedRows[0] as Record<string, unknown>).id
+    );
+    const restored = await db`
+      UPDATE monitoring.portfolio_companies
+      SET deleted_at = NULL, deal_id = ${dealId}, status = 'active',
+          closed_at = now(), closed_by = ${actor},
+          baseline_company = ${JSON.stringify(baselineCompany)}::jsonb,
+          baseline_financials = ${baselineFinancials ? JSON.stringify(baselineFinancials) : null}::jsonb,
+          underwriting = ${underwriting ? JSON.stringify(underwriting) : null}::jsonb,
+          vc_targets = ${vcTargets ? JSON.stringify(vcTargets) : null}::jsonb,
+          vc_plan_id = ${vcPlanId},
+          participants = ${JSON.stringify(participants)}::jsonb,
+          source = 'deal_closed', updated_at = now()
+      WHERE id = ${deletedId}
+      RETURNING *`;
+    row = restored[0] as Record<string, unknown>;
+  } else {
+    const id = `monpc_${newId()}`;
+    const inserted = await db`
+      INSERT INTO monitoring.portfolio_companies
+        (id, company_id, deal_id, status, closed_at, closed_by,
+         baseline_company, baseline_financials, underwriting,
+         vc_targets, vc_plan_id, participants, source)
+      VALUES (${id}, ${companyId}, ${dealId}, 'active', now(), ${actor},
+        ${JSON.stringify(baselineCompany)}::jsonb,
+        ${baselineFinancials ? JSON.stringify(baselineFinancials) : null}::jsonb,
+        ${underwriting ? JSON.stringify(underwriting) : null}::jsonb,
+        ${vcTargets ? JSON.stringify(vcTargets) : null}::jsonb,
+        ${vcPlanId},
+        ${JSON.stringify(participants)}::jsonb,
+        'deal_closed')
+      ON CONFLICT (company_id) DO NOTHING
+      RETURNING *`;
+    row = inserted.length
+      ? (inserted[0] as Record<string, unknown>)
+      : (
+          await db`
+            SELECT * FROM monitoring.portfolio_companies
+            WHERE company_id = ${companyId} AND deleted_at IS NULL LIMIT 1`
+        )[0] as Record<string, unknown>;
+  }
 
   const name = str(baselineCompany.name) || companyId;
   await logActivity({
