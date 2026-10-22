@@ -28,6 +28,12 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
+  /** Phase 9: session role claim ('guest' for company-scoped
+   * management logins; absent for partner sessions). */
+  role?: string;
+  /** Phase 9: company scope claim for management logins — the core
+   * company ids this session may reach. Absent = partner session. */
+  companyIds?: string[];
 }
 
 export async function verifyCredentials(
@@ -37,16 +43,35 @@ export async function verifyCredentials(
   const partner = PARTNERS.find(
     (p) => p.email.toLowerCase() === email.trim().toLowerCase()
   );
-  if (!partner) return null;
-  const ok = await bcrypt.compare(password, partner.passwordHash);
-  if (!ok) return null;
-  return { id: partner.id, name: partner.name, email: partner.email };
+  if (partner) {
+    const ok = await bcrypt.compare(password, partner.passwordHash);
+    if (!ok) return null;
+    return { id: partner.id, name: partner.name, email: partner.email };
+  }
+  // Phase 9: company-scoped management logins (portfolio-company
+  // teams) live in core.user_roles with a bcrypt password hash —
+  // partners are checked FIRST and never fall through to this path.
+  // Dynamic import: lib/portmgmt/users.ts must not import this module.
+  try {
+    const { findLoginUser } = await import("./portmgmt/users");
+    const loginUser = await findLoginUser(email);
+    if (!loginUser) return null;
+    const ok = await bcrypt.compare(password, loginUser.passwordHash);
+    if (!ok) return null;
+    return { id: loginUser.id, name: loginUser.name, email: loginUser.email };
+  } catch {
+    return null;
+  }
 }
 
 export type SessionUser = AuthUser & { epoch?: number };
 
-export function signToken(user: AuthUser, epoch = 0): string {
-  return jwt.sign({ ...user, epoch }, JWT_SECRET, {
+export function signToken(
+  user: AuthUser,
+  epoch = 0,
+  extraClaims?: Partial<AuthUser>
+): string {
+  return jwt.sign({ ...user, ...(extraClaims ?? {}), epoch }, JWT_SECRET, {
     expiresIn: TOKEN_TTL_SECONDS,
   });
 }

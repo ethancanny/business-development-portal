@@ -591,6 +591,41 @@ export async function getIntegrations(): Promise<IntegrationStatus[]> {
     });
   }
 
+  // Accounting integrations (Phase 9): framework only — no live
+  // connections exist yet. Status follows the house convention for
+  // setup-gated integrations (cf. microsoft_sharepoint / azure_docint
+  // above): 'ok' only when every provider env var is present (config
+  // present still does NOT mean a company is connected — per-company
+  // connection state lives in portmgmt.acct_connections), otherwise
+  // 'unknown' with the setup summary in the detail.
+  try {
+    const { PROVIDERS, missingConfig } = await import(
+      "../portmgmt/accounting"
+    );
+    for (const provider of Object.values(PROVIDERS)) {
+      const missing = missingConfig(provider.key);
+      out.push({
+        key: `accounting:${provider.key}`,
+        name: `Accounting · ${provider.name}`,
+        status: missing.length ? "unknown" : "ok",
+        lastSuccessAt: null,
+        lastError: null,
+        detail: missing.length
+          ? `Setup required: missing env vars ${missing.join(", ")}. ${provider.setupSteps[0]}`
+          : `Configured (${provider.envVars.join(", ")} present) — per-company connections are managed from each company's Accounting tab; no live sync has run yet.`,
+      });
+    }
+  } catch (err) {
+    out.push({
+      key: "accounting",
+      name: "Accounting Integrations",
+      status: "error",
+      lastSuccessAt: null,
+      lastError: err instanceof Error ? err.message : String(err),
+      detail: "Could not read accounting provider catalog",
+    });
+  }
+
   // Passkeys (WebAuthn credentials count).
   try {
     const rows = await db`

@@ -167,6 +167,74 @@ export function ensureMonitoring(): Promise<void> {
         CREATE INDEX IF NOT EXISTS mon_budgets_company_idx
         ON monitoring.budgets (company_id)`;
 
+      // Phase 9 — budget versioning. Budgets stop being a single
+      // mutable truth: every budget line belongs to a version, and
+      // only a version's APPROVED lines feed variance. The migration
+      // below is idempotent: the versions table + version_id column
+      // are created IF NOT EXISTS, the backfill only touches groups
+      // that still have version-less live rows and have no v1 yet,
+      // and the live unique index is swapped to include version_id.
+      await db`
+        CREATE TABLE IF NOT EXISTS monitoring.budget_versions (
+          id TEXT PRIMARY KEY,
+          company_id TEXT NOT NULL,
+          fiscal_year INT NOT NULL,
+          version_no INT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'annual',
+          status TEXT NOT NULL DEFAULT 'draft',
+          created_by TEXT NOT NULL DEFAULT '',
+          approved_by TEXT NOT NULL DEFAULT '',
+          approved_at TIMESTAMPTZ,
+          notes TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          deleted_at TIMESTAMPTZ
+        )`;
+      await db`
+        CREATE INDEX IF NOT EXISTS mon_budget_versions_company_idx
+        ON monitoring.budget_versions (company_id, fiscal_year)`;
+      await db`
+        CREATE UNIQUE INDEX IF NOT EXISTS mon_budget_versions_live_uidx
+        ON monitoring.budget_versions (company_id, fiscal_year, version_no)
+        WHERE deleted_at IS NULL`;
+      await db`
+        ALTER TABLE monitoring.budgets
+        ADD COLUMN IF NOT EXISTS version_id TEXT`;
+      // Backfill: one approved v1 per (company, fiscal_year) that has
+      // live budget rows with version_id NULL and no version yet.
+      await db`
+        INSERT INTO monitoring.budget_versions
+          (id, company_id, fiscal_year, version_no, kind, status,
+           created_by, approved_by, approved_at, notes)
+        SELECT 'monbudv_' || substr(md5(b.company_id || ':' || b.fiscal_year::text), 1, 24),
+               b.company_id, b.fiscal_year, 1, 'annual', 'approved',
+               'migration', 'migration', now(),
+               'Legacy budget lines migrated to version 1 (Phase 9).'
+        FROM (SELECT DISTINCT company_id, fiscal_year
+              FROM monitoring.budgets
+              WHERE version_id IS NULL AND deleted_at IS NULL) b
+        WHERE NOT EXISTS (
+          SELECT 1 FROM monitoring.budget_versions v
+          WHERE v.company_id = b.company_id
+            AND v.fiscal_year = b.fiscal_year
+            AND v.deleted_at IS NULL)
+        ON CONFLICT (id) DO NOTHING`;
+      await db`
+        UPDATE monitoring.budgets b
+        SET version_id = v.id
+        FROM monitoring.budget_versions v
+        WHERE b.version_id IS NULL
+          AND v.company_id = b.company_id
+          AND v.fiscal_year = b.fiscal_year
+          AND v.version_no = 1
+          AND v.deleted_at IS NULL`;
+      // Swap the live unique index to the versioned key.
+      await db`DROP INDEX IF EXISTS monitoring.mon_budgets_live_uidx`;
+      await db`
+        CREATE UNIQUE INDEX IF NOT EXISTS mon_budgets_live_uidx
+        ON monitoring.budgets (company_id, version_id, line_key)
+        WHERE deleted_at IS NULL`;
+
       await db`
         CREATE TABLE IF NOT EXISTS monitoring.variance_notes (
           id TEXT PRIMARY KEY,

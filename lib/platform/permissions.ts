@@ -1,4 +1,5 @@
 import { sql, str } from "./db";
+import type { AuthUser } from "../auth";
 
 /**
  * Role-based access (PROJECT_RULES.md security). Roles: admin (full),
@@ -63,6 +64,56 @@ export async function getUserScope(
   return {};
 }
 
+/* ------------------ company-scoped access (Phase 9) ------------------ */
+
+/**
+ * Resolved access for a session user. companyIds === null means
+ * UNRESTRICTED (admin/internal); an array means the user may only
+ * reach those core company ids (portfolio-company management logins
+ * carry role 'guest' + a company scope).
+ */
+export interface AccessContext {
+  role: Role;
+  companyIds: string[] | null;
+}
+
+/**
+ * Resolve the access context for a session user. Token claims win
+ * first (a guest session stamped with companyIds at login — see
+ * lib/portmgmt/users.ts getLoginClaims); otherwise the DB role/scope
+ * decides. admin/internal are unrestricted; a guest without a stored
+ * company scope is scoped to NO companies (empty array).
+ */
+export async function getAccessContext(
+  user: AuthUser
+): Promise<AccessContext> {
+  if (user.role === "guest" && Array.isArray(user.companyIds)) {
+    return {
+      role: "guest",
+      companyIds: Array.from(new Set(user.companyIds.map((x) => String(x)))),
+    };
+  }
+  const role = await getUserRole(user.email);
+  if (role === "admin" || role === "internal") {
+    return { role, companyIds: null };
+  }
+  const scope = await getUserScope(user.email);
+  const companyIds = Array.isArray(scope.companyIds)
+    ? Array.from(
+        new Set(scope.companyIds.map((x) => String(x)).filter(Boolean))
+      )
+    : [];
+  return { role, companyIds };
+}
+
+/** True when the context may reach the given company. */
+export function canAccessCompany(
+  ctx: AccessContext,
+  companyId: string
+): boolean {
+  return ctx.companyIds === null || ctx.companyIds.includes(companyId);
+}
+
 /**
  * Access check. Admin + internal can access platform records. Guests
  * (Phase 3) are limited to SPECIFIC data rooms: their stored scope
@@ -80,6 +131,22 @@ export function canAccess(
 ): boolean {
   if (role === "admin" || role === "internal") return true;
   if (role !== "guest") return false;
+  // Phase 9: company-scoped management logins — a guest whose stored
+  // scope carries companyIds may access company / portfolio_company /
+  // monitoring scopes naming one of those companies.
+  const scopedCompanies = Array.isArray(userScope.companyIds)
+    ? userScope.companyIds.map((x) => String(x))
+    : [];
+  if (
+    scopedCompanies.length &&
+    (scope.kind === "company" ||
+      scope.kind === "portfolio_company" ||
+      scope.kind === "monitoring") &&
+    scope.id !== undefined &&
+    scopedCompanies.includes(scope.id)
+  ) {
+    return true;
+  }
   const granted = Array.isArray(userScope.dataRoomIds)
     ? userScope.dataRoomIds.map((x) => String(x))
     : [];

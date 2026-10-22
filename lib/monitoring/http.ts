@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 import { getSessionUser, type AuthUser } from "@/lib/auth";
 import { ensurePlatform } from "@/lib/platform/service";
+import {
+  canAccessCompany,
+  getAccessContext,
+  type AccessContext,
+} from "@/lib/platform/permissions";
+
+export type { AccessContext };
 
 export const NO_STORE = { "Cache-Control": "private, no-store" };
 
-/** Session gate shared by every monitoring route. */
+/** Session gate shared by every monitoring route. Also resolves the
+ * caller's Phase 9 access context (ctx.companyIds === null means
+ * unrestricted; an array scopes the session to those companies). */
 export async function authed(): Promise<
-  { user: AuthUser } | { response: NextResponse }
+  { user: AuthUser; ctx: AccessContext } | { response: NextResponse }
 > {
   const user = getSessionUser();
   if (!user) {
@@ -18,7 +27,33 @@ export async function authed(): Promise<
     };
   }
   await ensurePlatform();
-  return { user };
+  const ctx = await getAccessContext(user);
+  return { user, ctx };
+}
+
+/** Company-scope gate: returns a 403 response when the caller's
+ * context may not reach companyId, or null when access is allowed.
+ * Usage: const forbidden = companyGate(gate.ctx, params.companyId);
+ *        if (forbidden) return forbidden; */
+export function companyGate(
+  ctx: AccessContext,
+  companyId: string
+): NextResponse | null {
+  if (canAccessCompany(ctx, companyId)) return null;
+  return NextResponse.json(
+    { error: "company_forbidden" },
+    { status: 403, headers: NO_STORE }
+  );
+}
+
+/** Internal-only gate: any company-scoped (non-unrestricted) context
+ * is rejected — for portfolio-wide / firm-only monitoring surfaces. */
+export function internalGate(ctx: AccessContext): NextResponse | null {
+  if (ctx.companyIds === null) return null;
+  return NextResponse.json(
+    { error: "internal_only" },
+    { status: 403, headers: NO_STORE }
+  );
 }
 
 export function ok<T>(data: T, status = 200): NextResponse {
