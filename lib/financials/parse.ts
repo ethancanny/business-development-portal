@@ -519,13 +519,19 @@ function parseGrids(grids: Grid[], documentId?: string): RawPeriod[] {
 
     // Period columns from header rows (first 20 rows). A row counts as
     // a header row when it carries a strong period phrase (month name /
-    // FY / Q / TTM / "ended") or at least two bare-year cells.
+    // FY#### / Q / TTM / "ended"), at least two bare-year cells, or a
+    // single period cell with no other numeric data in the row (a
+    // one-period workbook). NOTE: "FY2024" must be matched as fy\s*\d —
+    // /\bfy\b/ does NOT match it (no word boundary before the digit),
+    // which is how FY-headed workbooks once collapsed into a single
+    // period-less set (Phase 5 Item 0 fix, Oct 22, 2026).
     const periodCols = new Map<number, PeriodInfo>();
     const headerRows = new Set<number>();
     let gridDefault: PeriodInfo | null = null;
     grid.rows.slice(0, 20).forEach((row) => {
       let strong = 0;
       let bareYears = 0;
+      let otherNumeric = 0;
       const found: { col: number; info: PeriodInfo }[] = [];
       for (const cell of row) {
         if (!cell.text) continue;
@@ -533,9 +539,16 @@ function parseGrids(grids: Grid[], documentId?: string): RawPeriod[] {
         const hasStrong =
           /[a-z]/i.test(cell.text) &&
           (MONTH_NAME_LIST.some((mn) => cellLower.includes(mn)) ||
-            /\bfy\b|\bq[1-4]\b|ttm|quarter|ended/i.test(cell.text));
+            /\bfy\b|fy\s*\d{2,4}|\bq[1-4]\b|ttm|quarter|ended|fiscal/i.test(
+              cell.text
+            ));
         const mentions = findPeriodMentions(cell.text);
-        if (!mentions.length) continue;
+        if (!mentions.length) {
+          if (cell.col > labelCol && parseFinancialNumber(cell.text) !== null) {
+            otherNumeric++;
+          }
+          continue;
+        }
         if (hasStrong) strong++;
         else bareYears++;
         if (cell.col > labelCol) {
@@ -544,7 +557,11 @@ function parseGrids(grids: Grid[], documentId?: string): RawPeriod[] {
           gridDefault = mentions[0];
         }
       }
-      if (strong > 0 || bareYears >= 2) {
+      if (
+        strong > 0 ||
+        bareYears >= 2 ||
+        (found.length > 0 && otherNumeric === 0)
+      ) {
         if (row.length) headerRows.add(row[0].row);
         for (const f of found) {
           if (!periodCols.has(f.col)) periodCols.set(f.col, f.info);
@@ -629,7 +646,7 @@ function parseTextLines(text: string, documentId?: string): RawPeriod[] {
     const lineLower = trimmed.toLowerCase();
     const hasHeaderSignal =
       MONTH_NAME_LIST.some((mn) => lineLower.includes(mn)) ||
-      /ended|fiscal|quarter|ttm|\bfy\b/.test(lineLower);
+      /ended|fiscal|quarter|ttm|\bfy\b|fy\s*\d{2,4}/.test(lineLower);
     if (
       parseFinancialNumber(last) !== null &&
       tokens.length > 3 &&
