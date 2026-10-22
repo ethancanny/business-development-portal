@@ -260,16 +260,25 @@ export function findPeriodMentions(text: string): PeriodInfo[] {
           : /\bfiscal|year ended|years ended|annual/.test(lower)
             ? "annual"
             : null;
+  // NOTE (Phase 5 Item 0 root cause): the \b-bearing alternatives are
+  // taken from regex literals via .source, NOT string literals. In the
+  // production (minified) build, a "\b" sequence carried through a
+  // string degrades to a backspace character, which silently killed
+  // the FY / fiscal-year / bare-year / quarter alternatives while the
+  // month and date alternatives (no \b) kept working. Regex literals
+  // pass through the build verbatim. Capture-group numbering is
+  // unchanged: 1-3 Month DD YYYY · 4-5 Month YYYY · 6-8 ISO date ·
+  // 9-11 MM/DD/YYYY · 12-13 Qn YYYY · 14 FYyyyy · 15 fiscal · 16 year.
   const re = new RegExp(
     [
       `(${MONTH_NAMES})\\s+(\\d{1,2}),?\\s+(20\\d{2})`,
       `(${MONTH_NAMES})\\s+(20\\d{2})`,
       `(20\\d{2})-(\\d{2})-(\\d{2})`,
       `(\\d{1,2})\\/(\\d{1,2})\\/(20\\d{2})`,
-      `\\bq([1-4])\\s*(?:fy\\s*)?(20\\d{2})`,
-      `\\bfy\\s*(20\\d{2})`,
-      `\\bfiscal year\\s+(20\\d{2})`,
-      `\\b(20\\d{2})\\b`,
+      /\bq([1-4])\s*(?:fy\s*)?(20\d{2})/.source,
+      /\bfy\s*(20\d{2})/.source,
+      /\bfiscal year\s+(20\d{2})/.source,
+      /\b(20\d{2})\b/.source,
     ].join("|"),
     "gi"
   );
@@ -805,18 +814,6 @@ function assemble(
         `and were kept as 'unmapped' for review.`
     );
   }
-  // P5-DIAG2 (temporary, Phase 5 Item 0): when the whole document
-  // collapses into a single period-less bucket, expose what the parser
-  // saw (raw bucket count, line count, head of the assembled doc text)
-  // in the notes so the deployed behavior is observable from the
-  // extract response.
-  if (periods.length === 1 && !periods[0].periodEnd) {
-    notes.push(
-      `P5-DIAG2: rawBuckets=${rawPeriods.length} ` +
-        `lines=${rawPeriods[0]?.lines.length ?? 0} ` +
-        `docHead=${JSON.stringify(docText.slice(0, 200))}`
-    );
-  }
   return { periods, notes };
 }
 
@@ -882,31 +879,6 @@ export function parseFinancialDocument(input: ParseInput): ParsedDoc {
       }
       const rawPeriods = parseGrids(grids, input.documentId);
       const { periods, notes } = assemble(rawPeriods, gridsText(grids));
-      // P5-DIAG3 (temporary, Phase 5 Item 0): expose the grid the parser
-      // actually received plus direct findPeriodMentions probes.
-      if (
-        periods.length === 1 &&
-        !periods[0].periodEnd &&
-        grids.length > 0
-      ) {
-        const g0 = grids[0];
-        const probe = (s: string) =>
-          findPeriodMentions(s)
-            .map((m) => `${m.periodType}:${m.periodEnd ?? ""}`)
-            .join(",");
-        notes.push(
-          `P5-DIAG3: grids=${grids.length} sheet=${JSON.stringify(g0.sheet)} ` +
-            `rows=${g0.rows.length} ` +
-            `firstRows=${JSON.stringify(
-              g0.rows.slice(0, 4).map((r) => r.map((c) => c.text))
-            )} ` +
-            `probeFY2023=[${probe("FY2023")}] probeDec2023=[${probe(
-              "Dec 2023"
-            )}] probe2023=[${probe("2023")}] probeFiscal=[${probe(
-              "Fiscal Year 2023"
-            )}]`
-        );
-      }
       return {
         status: periods.length ? "done" : "empty",
         extractor,
@@ -914,7 +886,7 @@ export function parseFinancialDocument(input: ParseInput): ParsedDoc {
           ? notes
           : [
               ...notes,
-              "No financial statement lines could be parsed from the workbook. [p5-canary-a]",
+              "No financial statement lines could be parsed from the workbook.",
             ],
         periods,
       };
