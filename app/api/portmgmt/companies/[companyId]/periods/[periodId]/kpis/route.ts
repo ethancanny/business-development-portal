@@ -22,6 +22,8 @@ export async function POST(
   const actor = gate.user.name || gate.user.email;
   try {
     const body = await readBody(req);
+    // Custom KPIs: array form [{key, value, periodEnd?}] (API
+    // contract) or object form {key: number} (portal KPI grid).
     const custom = Array.isArray(body.custom)
       ? body.custom.map((raw) => {
           const rec =
@@ -34,7 +36,15 @@ export async function POST(
             periodEnd: sStr(rec.periodEnd) ?? sStr(rec.period_end) ?? "",
           };
         })
-      : undefined;
+      : body.custom && typeof body.custom === "object"
+        ? Object.entries(body.custom as Record<string, unknown>).map(
+            ([key, v]) => ({
+              key,
+              value: typeof v === "number" ? v : NaN,
+              periodEnd: "",
+            })
+          )
+        : undefined;
     const result = await submitKpis(
       params.companyId,
       params.periodId,

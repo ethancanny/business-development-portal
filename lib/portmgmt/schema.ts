@@ -144,7 +144,7 @@ export function ensurePortmgmt(): Promise<void> {
           category TEXT NOT NULL DEFAULT 'operational',
           title TEXT NOT NULL DEFAULT '',
           description TEXT NOT NULL DEFAULT '',
-          severity INT NOT NULL DEFAULT 3,
+          severity TEXT NOT NULL DEFAULT 'medium',
           likelihood INT,
           owner_name TEXT NOT NULL DEFAULT '',
           mitigation TEXT NOT NULL DEFAULT '',
@@ -157,6 +157,16 @@ export function ensurePortmgmt(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS portmgmt_risks_company_idx
         ON portmgmt.risks (company_id)`;
+      // Severity is a string enum (low/medium/high/critical) in the
+      // service + UI. If an early ensure run created the column as INT,
+      // convert it in place; both statements are no-ops when the column
+      // is already TEXT with the right default.
+      await db`
+        ALTER TABLE portmgmt.risks
+        ALTER COLUMN severity TYPE TEXT USING severity::text`;
+      await db`
+        ALTER TABLE portmgmt.risks
+        ALTER COLUMN severity SET DEFAULT 'medium'`;
 
       // Singleton portfolio-wide risk summary (id 'global'), refreshed
       // by the risk service — a summary row, never recomputed on read.

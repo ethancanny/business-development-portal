@@ -83,9 +83,11 @@ export async function uploadFilePortmgmt(
   });
   if (!beginRes.ok) throw new Error(`Could not start upload (${beginRes.status})`);
   const begin = (await beginRes.json().catch(() => ({}))) as Rec;
-  const uploadId = str(pick(begin, "uploadId", "id"));
+  // The route wraps the session: { session: { id, chunkSize, ... } }.
+  const sess = (pick(begin, "session") as Rec | undefined) ?? begin;
+  const uploadId = str(pick(sess, "uploadId", "id"));
   if (!uploadId) throw new Error("Upload session was not created.");
-  const chunkSizeRaw = num(pick(begin, "chunkSize"));
+  const chunkSizeRaw = num(pick(sess, "chunkSize"));
   const chunkSize = chunkSizeRaw && chunkSizeRaw > 0 ? chunkSizeRaw : 2 * 1024 * 1024;
 
   let offset = 0;
