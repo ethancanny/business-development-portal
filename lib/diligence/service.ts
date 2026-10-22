@@ -83,6 +83,9 @@ export interface DealContext {
   dealName: string;
   companyName: string;
   stage: string;
+  /** Claimed-by partner name (legacy deals.owner; "" when unclaimed).
+   * Added for the Due Diligence hub cards (WS-C nav restructure). */
+  owner: string;
 }
 
 export async function getDealContext(
@@ -93,7 +96,8 @@ export async function getDealContext(
   const rows = await db`
     SELECT cd.id, cd.company_id, cd.stage,
       coalesce(ld.company_name, co.name, '') AS deal_name,
-      coalesce(co.name, '') AS company_name
+      coalesce(co.name, '') AS company_name,
+      coalesce(ld.owner, '') AS deal_owner
     FROM core.deals cd
     LEFT JOIN deals ld ON ld.id = cd.id
     LEFT JOIN core.companies co ON co.id = cd.company_id
@@ -106,6 +110,7 @@ export async function getDealContext(
     dealName: str(r.deal_name),
     companyName: str(r.company_name),
     stage: str(r.stage),
+    owner: str(r.deal_owner),
   };
 }
 
@@ -244,7 +249,8 @@ export async function listDealWorkspaces(): Promise<
   const dealRows = await db`
     SELECT cd.id, cd.company_id, cd.stage,
       coalesce(ld.company_name, co.name, '') AS deal_name,
-      coalesce(co.name, '') AS company_name
+      coalesce(co.name, '') AS company_name,
+      coalesce(ld.owner, '') AS deal_owner
     FROM core.deals cd
     LEFT JOIN deals ld ON ld.id = cd.id
     LEFT JOIN core.companies co ON co.id = cd.company_id
@@ -270,6 +276,7 @@ export async function listDealWorkspaces(): Promise<
       dealName: str(rec.deal_name),
       companyName: str(rec.company_name),
       stage: str(rec.stage),
+      owner: str(rec.deal_owner),
     };
     const ws = await getWorkspaceByDeal(deal.dealId);
     let checklistTotal = 0;
