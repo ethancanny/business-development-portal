@@ -178,6 +178,15 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
       );
       return;
     }
+    case "extract_financials": {
+      // Phase 4 (Financials): background financial-statement extraction
+      // for documents over the 5MB sync threshold.
+      const { runFinancialExtractionJob } = await import(
+        "../financials/service"
+      );
+      await runFinancialExtractionJob(job.payload);
+      return;
+    }
     case "extract_document_text": {
       // Phase 3 (Documents): background text extraction so document
       // contents become searchable. runExtraction never throws —
