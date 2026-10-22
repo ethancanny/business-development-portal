@@ -681,3 +681,92 @@ export async function getRoomIndex(roomId: string): Promise<RoomIndex | null> {
     openQaCount: qaRows.length ? num(qaRows[0].n) : 0,
   };
 }
+
+/* --------------------- Room resolution (nav restructure) --------------------
+ * WS-C addition, surgical: resolve the most recent live room for a
+ * company or a deal (rooms carry company_id / deal_id) so profile,
+ * diligence and value-creation headers can deep-link "Data Room"
+ * without scanning the paginated list. Same summary subqueries as
+ * listRooms(); roomId is null when the scope has no room.
+ */
+
+export interface RoomResolution {
+  roomId: string | null;
+  roomCount: number;
+  room: RoomSummary | null;
+}
+
+async function resolveLatestRoom(
+  where: "company_id" | "deal_id",
+  value: string
+): Promise<RoomResolution> {
+  await ensureDataRoom();
+  const db = sql();
+  const countRows =
+    where === "company_id"
+      ? await db`
+          SELECT count(*)::int AS n FROM dataroom.rooms
+          WHERE company_id = ${value} AND deleted_at IS NULL`
+      : await db`
+          SELECT count(*)::int AS n FROM dataroom.rooms
+          WHERE deal_id = ${value} AND deleted_at IS NULL`;
+  const roomCount = countRows.length ? num(countRows[0].n) : 0;
+  if (!roomCount) return { roomId: null, roomCount: 0, room: null };
+  const rows =
+    where === "company_id"
+      ? await db`
+          SELECT ${db.unsafe(ROOM_COLS)},
+            (SELECT count(*)::int FROM dataroom.room_documents rd
+              WHERE rd.room_id = r.id) AS doc_count,
+            (SELECT count(*)::int FROM dataroom.checklist_items ci
+              WHERE ci.room_id = r.id) AS cl_total,
+            (SELECT count(*)::int FROM dataroom.checklist_items ci
+              WHERE ci.room_id = r.id
+                AND ci.status IN ('received', 'waived', 'na')) AS cl_satisfied,
+            (SELECT count(*)::int FROM dataroom.qa_threads q
+              WHERE q.room_id = r.id AND q.status = 'open') AS qa_open
+          ${db.unsafe(ROOM_FROM)}
+          WHERE r.company_id = ${value} AND r.deleted_at IS NULL
+          ORDER BY r.updated_at DESC
+          LIMIT 1`
+      : await db`
+          SELECT ${db.unsafe(ROOM_COLS)},
+            (SELECT count(*)::int FROM dataroom.room_documents rd
+              WHERE rd.room_id = r.id) AS doc_count,
+            (SELECT count(*)::int FROM dataroom.checklist_items ci
+              WHERE ci.room_id = r.id) AS cl_total,
+            (SELECT count(*)::int FROM dataroom.checklist_items ci
+              WHERE ci.room_id = r.id
+                AND ci.status IN ('received', 'waived', 'na')) AS cl_satisfied,
+            (SELECT count(*)::int FROM dataroom.qa_threads q
+              WHERE q.room_id = r.id AND q.status = 'open') AS qa_open
+          ${db.unsafe(ROOM_FROM)}
+          WHERE r.deal_id = ${value} AND r.deleted_at IS NULL
+          ORDER BY r.updated_at DESC
+          LIMIT 1`;
+  if (!rows.length) return { roomId: null, roomCount, room: null };
+  const rec = rows[0] as Record<string, unknown>;
+  const clTotal = num(rec.cl_total);
+  const clSatisfied = num(rec.cl_satisfied);
+  const room: RoomSummary = {
+    ...rowToRoom(rec),
+    documentCount: num(rec.doc_count),
+    checklistTotal: clTotal,
+    checklistSatisfied: clSatisfied,
+    completenessPct: clTotal ? Math.round((100 * clSatisfied) / clTotal) : 0,
+    openQaCount: num(rec.qa_open),
+  };
+  return { roomId: room.id, roomCount, room };
+}
+
+export async function getRoomResolutionByCompany(
+  companyId: string
+): Promise<RoomResolution> {
+  return resolveLatestRoom("company_id", companyId);
+}
+
+export async function getRoomResolutionByDeal(
+  dealId: string
+): Promise<RoomResolution> {
+  return resolveLatestRoom("deal_id", dealId);
+}
