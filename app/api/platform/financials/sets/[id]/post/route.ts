@@ -3,6 +3,8 @@ import { getSessionUser } from "@/lib/auth";
 import { ensurePlatform } from "@/lib/platform/service";
 import { ensureFinancials } from "@/lib/financials/schema";
 import { postSet } from "@/lib/financials/service";
+import { getIntegrityLive } from "@/lib/finanalysis/service";
+import { ensureFinanalysis } from "@/lib/finanalysis/schema";
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" };
 
@@ -155,7 +157,22 @@ export async function POST(
     }
     const rec = result as unknown as Record<string, unknown>;
     const set = rec.set !== undefined ? rec.set : result;
-    return NextResponse.json({ set }, { headers: NO_STORE_HEADERS });
+    let integrity: unknown = null;
+    try {
+      await ensureFinanalysis();
+      const companyId =
+        set && typeof set === "object"
+          ? ((set as Record<string, unknown>).companyId as string) ?? ""
+          : "";
+      if (companyId) {
+        integrity = await getIntegrityLive(companyId, params.id);
+      }
+    } catch (integrityErr) {
+      console.error(
+        `[financials] post integrity failed for set ${params.id}: ${integrityErr instanceof Error ? integrityErr.message : "unknown error"}`
+      );
+    }
+    return NextResponse.json({ set, integrity }, { headers: NO_STORE_HEADERS });
   } catch (err) {
     return serviceErrorResponse(err, "postSet");
   }
