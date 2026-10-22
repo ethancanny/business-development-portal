@@ -719,6 +719,7 @@ async function extractSync(opts: {
         bytes,
         mime: doc.mime,
         filename: doc.name,
+        documentId: opts.documentId,
       } as Parameters<typeof parseFinancialDocument>[0]);
     } catch (err) {
       bytesError = err instanceof Error ? err.message : String(err);
@@ -738,6 +739,9 @@ async function extractSync(opts: {
         const viaText = await parseFinancialDocument({
           text: dt.text,
           extractor: dt.extractor,
+          mime: doc.mime,
+          filename: doc.name,
+          documentId: opts.documentId,
         } as Parameters<typeof parseFinancialDocument>[0]);
         if (!parsed || viaText.status === "done" || parsed.status !== "done") {
           if (viaText.status === "done" || !parsed) parsed = viaText;
@@ -769,7 +773,13 @@ async function extractSync(opts: {
     return { status: "failed", sets: [], note };
   }
   if (parsed.status === "empty") {
-    return { status: "empty", sets: [], note: note || OCR_GAP_NOTE };
+    return {
+      status: "empty",
+      sets: [],
+      note:
+        note ||
+        "No financial statement lines could be parsed from this document.",
+    };
   }
   const sets = await createSetsFromParsed(
     opts.companyId,
