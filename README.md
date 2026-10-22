@@ -50,3 +50,5 @@ Pushes to `main` auto-deploy via Vercel (project `business-development-portal`) 
 > Download them from those URLs if you ever need local copies.
 
 Company data: registry spines (USASpending, SAM.gov, NPPES, AZ ROC) are consolidated weekly into one row per company; fit is judged on consolidated numbers with revenue/employee evidence.
+
+<!-- deployment refresh 2026-10-22: pick up AZURE_DOCINT_* env vars -->
