@@ -1983,6 +1983,11 @@ export async function getWorkspaceBundle(
   workspaceId: string
 ): Promise<WorkspaceBundle> {
   const ws = await requireWorkspace(workspaceId);
+  // Spec §10: when a new analysis has landed, its anomalies APPEAR as
+  // candidate red flags — so opening the workspace syncs candidates
+  // first (best-effort; a sync failure never blocks the read, and the
+  // explicit sync endpoint remains for on-demand refresh + counts).
+  await syncRedFlagCandidates(workspaceId).catch(() => null);
   const [
     deal,
     room,
