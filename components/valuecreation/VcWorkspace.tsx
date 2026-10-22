@@ -44,6 +44,7 @@ import AddonsTab from "@/components/valuecreation/AddonsTab";
 import OrgTab from "@/components/valuecreation/OrgTab";
 import TargetsTab from "@/components/valuecreation/TargetsTab";
 import ExitTab from "@/components/valuecreation/ExitTab";
+import DataRoomButton from "@/components/hubs/DataRoomButton";
 
 const TABS = [
   { key: "initiatives", label: "Initiatives" },
@@ -250,6 +251,7 @@ export default function VcWorkspace({ companyId }: { companyId: string }) {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
+          <DataRoomButton companyId={plan.companyId} />
           <Link
             href={`/companies/${encodeURIComponent(plan.companyId)}`}
             className="btn btn-secondary btn-sm min-h-[44px]"

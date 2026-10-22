@@ -25,6 +25,7 @@ import {
 import { fmtDate, fmtRelTime } from "@/lib/format";
 import Comments from "@/components/Comments";
 import ActivityFeed from "@/components/ActivityFeed";
+import DataRoomButton from "@/components/hubs/DataRoomButton";
 import FinancialsSection from "@/components/FinancialsSection";
 import FinancialAnalysis from "@/components/FinancialAnalysis";
 
@@ -258,6 +259,9 @@ export default function CompanyProfilePage() {
                 ? ` · Last updated ${fmtRelTime(c.lastActivityAt)}`
                 : ""}
             </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <DataRoomButton companyId={c.id} />
           </div>
         </div>
       </div>

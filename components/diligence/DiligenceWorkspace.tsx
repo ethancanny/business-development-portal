@@ -32,6 +32,7 @@ import DocIntTab from "@/components/diligence/DocIntTab";
 import RecordsTab from "@/components/diligence/RecordsTab";
 import MemoTab from "@/components/diligence/MemoTab";
 import RiskTab from "@/components/diligence/RiskTab";
+import DataRoomButton from "@/components/hubs/DataRoomButton";
 
 const TABS = [
   { key: "checklist", label: "Checklist" },
@@ -179,14 +180,10 @@ export default function DiligenceWorkspace({ dealId }: { dealId: string }) {
             Workspace {workspace.status}
           </p>
         </div>
-        {bundle.room && (
-          <Link
-            href={`/data-rooms/${encodeURIComponent(bundle.room.id)}`}
-            className="btn btn-secondary btn-sm"
-          >
-            Data room: {bundle.room.name}
-          </Link>
-        )}
+        {/* Always present (Ethan's ask): resolves the deal's room via
+            the dataroom service; falls back to the rooms list when the
+            deal has no room yet — never a dead button. */}
+        <DataRoomButton dealId={dealId} />
       </div>
 
       {/* Progress tiles */}

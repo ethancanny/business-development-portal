@@ -4,16 +4,18 @@
  * Value Creation index (Phase 6) — every value creation plan as a
  * card (company, plan start, open initiatives, weighted impact,
  * exit readiness, last updated), plus the "Start a value creation
- * plan" flow: company picker (GET /api/platform/companies), plan
- * start date, create → navigate to the company workspace.
+ * plan" flow (components/valuecreation/StartPlanForm.tsx, extracted
+ * for the navigation restructure so the Due Diligence hub's New plan
+ * dialog shares it): company picker, plan start date, create →
+ * navigate to the company workspace.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
-import { Button, CardSkeleton, EmptyState, ErrorState } from "@/components/ui";
-import CompanyPicker from "@/components/valuecreation/CompanyPicker";
+import { CardSkeleton, EmptyState, ErrorState } from "@/components/ui";
+import StartPlanForm from "@/components/valuecreation/StartPlanForm";
 import {
   API,
   api,
@@ -22,11 +24,7 @@ import {
   fmtMoneyCompact,
   fmtMoneyN,
   fmtUpdated,
-  inputCls,
-  labelCls,
   listFrom,
-  todayIso,
-  type CompanyOption,
   type PlanListItem,
 } from "@/components/valuecreation/types";
 
@@ -35,12 +33,6 @@ export default function ValueCreationPage() {
   const [items, setItems] = useState<PlanListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-
-  const [company, setCompany] = useState<CompanyOption | null>(null);
-  const [startDate, setStartDate] = useState(todayIso());
-  const [planName, setPlanName] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,26 +51,6 @@ export default function ValueCreationPage() {
     void load();
   }, [load]);
 
-  const create = async () => {
-    if (!company || creating) return;
-    setCreating(true);
-    setCreateError("");
-    try {
-      await api(`${API}/plans`, {
-        method: "POST",
-        body: JSON.stringify({
-          companyId: company.id,
-          name: planName.trim() || undefined,
-          planStartDate: startDate || undefined,
-        }),
-      });
-      router.push(`/value-creation/${encodeURIComponent(company.id)}`);
-    } catch {
-      setCreateError("Could not start a plan for that company. It may already have one — open it from the list below.");
-      setCreating(false);
-    }
-  };
-
   return (
     <div>
       <PageHero
@@ -95,35 +67,11 @@ export default function ValueCreationPage() {
           <p className="mt-0.5 text-sm text-slate-500 dark:text-white/50">
             Pick the portfolio company and the day the plan clock starts (day 0 of the 100-day plan).
           </p>
-          {createError && (
-            <p role="alert" className="mt-3 rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
-              {createError}
-            </p>
-          )}
-          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_1fr_auto] md:items-end">
-            <CompanyPicker label="Company" value={company} onChange={setCompany} />
-            <div>
-              <label className={labelCls}>Plan start date</label>
-              <input
-                type="date"
-                className={`${inputCls} min-h-[44px]`}
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>Plan name (optional)</label>
-              <input
-                className={`${inputCls} min-h-[44px]`}
-                value={planName}
-                onChange={(e) => setPlanName(e.target.value)}
-                placeholder="Defaults to a standard plan name"
-              />
-            </div>
-            <Button onClick={() => void create()} loading={creating} disabled={!company}>
-              {creating ? "Starting…" : "Start plan"}
-            </Button>
-          </div>
+          <StartPlanForm
+            onCreated={(companyId) =>
+              router.push(`/value-creation/${encodeURIComponent(companyId)}`)
+            }
+          />
         </div>
 
         {/* Plan cards */}

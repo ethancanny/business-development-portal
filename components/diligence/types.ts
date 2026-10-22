@@ -12,6 +12,8 @@ export interface DealContext {
   dealName: string;
   companyName: string;
   stage: string;
+  /** Claimed-by partner (added server-side for the DD hub cards). */
+  owner?: string;
 }
 
 export interface WorkspaceRow {
