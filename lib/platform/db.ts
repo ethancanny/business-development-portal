@@ -288,6 +288,25 @@ export function ensurePlatformSchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS core_documents_company_idx
         ON core.documents (company_id)`;
 
+      // Phase 3 (Documents library): library fields on the canonical
+      // document record. Version bytes/keys live in
+      // dataroom.document_versions; extracted text in
+      // dataroom.document_text — this row stays metadata-only.
+      await db`
+        ALTER TABLE core.documents
+          ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]',
+          ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT '',
+          ADD COLUMN IF NOT EXISTS extraction_status TEXT NOT NULL DEFAULT 'pending',
+          ADD COLUMN IF NOT EXISTS current_version INT NOT NULL DEFAULT 1,
+          ADD COLUMN IF NOT EXISTS person_id TEXT`;
+      await db`
+        CREATE INDEX IF NOT EXISTS core_documents_hash_idx
+        ON core.documents (content_hash) WHERE content_hash <> ''`;
+      await db`
+        CREATE INDEX IF NOT EXISTS core_documents_deal_idx
+        ON core.documents (deal_id)`;
+
       await db`
         CREATE TABLE IF NOT EXISTS core.activity_log (
           id TEXT PRIMARY KEY,
