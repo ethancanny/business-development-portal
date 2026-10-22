@@ -111,12 +111,18 @@ export default function DirectoryDetail({
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailMsg, setEmailMsg] = useState("");
 
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState("");
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(false);
     setEditing(false);
     setSaveMsg("");
+    setConfirmingDelete(false);
+    setDeleteMsg("");
     (async () => {
       try {
         const r = await fetch(
@@ -282,6 +288,24 @@ export default function DirectoryDetail({
       setEmailMsg("Could not add the email link.");
     } finally {
       setEmailBusy(false);
+    }
+  };
+
+  const deleteThisRecord = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteMsg("");
+    try {
+      const r = await fetch(
+        `/api/platform/directory/record/${kind}/${encodeURIComponent(id)}`,
+        { method: "DELETE" }
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (onChanged) onChanged();
+      onClose();
+    } catch {
+      setDeleteMsg("Could not delete — please try again.");
+      setDeleting(false);
     }
   };
 
@@ -751,6 +775,45 @@ export default function DirectoryDetail({
               {/* Comments */}
               <div className="mt-6 border-t border-slate-100 pt-4 dark:border-white/10">
                 <Comments entityKind={kind} entityId={id} />
+              </div>
+
+              {/* Delete record (soft delete — Phase 8, Item 0) */}
+              <div className="mt-6 border-t border-slate-100 pt-4 dark:border-white/10">
+                <p className={labelCls}>Danger zone</p>
+                {!confirmingDelete ? (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(true)}
+                    className="btn btn-ghost btn-sm min-h-[44px] text-red-600 dark:text-red-300"
+                  >
+                    Delete record
+                  </button>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-slate-500 dark:text-white/55">
+                      Delete this record? It is soft-deleted and can be restored.
+                    </span>
+                    <button
+                      type="button"
+                      disabled={deleting}
+                      onClick={() => void deleteThisRecord()}
+                      className="btn btn-primary btn-sm min-h-[44px]"
+                    >
+                      {deleting ? "Deleting…" : "Confirm delete"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deleting}
+                      onClick={() => setConfirmingDelete(false)}
+                      className="btn btn-ghost btn-sm min-h-[44px]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+                {deleteMsg && (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-300">{deleteMsg}</p>
+                )}
               </div>
             </>
           )}

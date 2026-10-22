@@ -925,6 +925,46 @@ export async function deleteTemplate(id: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/**
+ * Soft-delete a Directory record (Phase 8, Item 0): stamps deleted_at
+ * on the core.people / core.organizations row, writes an audit entry
+ * the same way updateRecord does, and publishes contact_updated.
+ * Returns false when the record does not exist (or is already deleted).
+ */
+export async function deleteRecord(
+  kind: "person" | "organization",
+  id: string,
+  actor = ""
+): Promise<boolean> {
+  await ensureDirectory();
+  if (!id) return false;
+  const db = sql();
+  const rows =
+    kind === "person"
+      ? await db`
+          UPDATE core.people
+          SET deleted_at = now(), updated_at = now()
+          WHERE id = ${id} AND deleted_at IS NULL
+          RETURNING id`
+      : await db`
+          UPDATE core.organizations
+          SET deleted_at = now(), updated_at = now()
+          WHERE id = ${id} AND deleted_at IS NULL
+          RETURNING id`;
+  if (!rows.length) return false;
+  await db`
+    INSERT INTO core.audit_log (entity_kind, entity_id, actor, action, changes)
+    VALUES (${kind}, ${id}, ${actor}, 'delete',
+      ${JSON.stringify({ deleted_at: { from: null, to: "soft-deleted" } })}::jsonb)`;
+  await publishEvent("contact_updated", {
+    entityKind: kind,
+    entityId: id,
+    payload: { action: "delete" },
+    actor,
+  });
+  return true;
+}
+
 /* ---------------------------- email links ---------------------------- */
 
 export interface EmailLink {

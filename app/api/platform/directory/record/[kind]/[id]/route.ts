@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import { ensurePlatform } from "@/lib/platform/service";
 import { ensureDirectory } from "@/lib/directory/schema";
 import {
+  deleteRecord,
   getDirectoryDetail,
   normalizeEntityKind,
   updateRecord,
@@ -66,4 +67,28 @@ export async function PATCH(
       { status: 400 }
     );
   }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: { kind: string; id: string } }
+) {
+  const user = getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const kind = normalizeEntityKind(params.kind);
+  if (!kind) {
+    return NextResponse.json(
+      { error: "kind must be 'person' or 'organization'" },
+      { status: 400 }
+    );
+  }
+  await ensurePlatform();
+  await ensureDirectory();
+  const deleted = await deleteRecord(kind, params.id, user.name || user.email);
+  if (!deleted) {
+    return NextResponse.json({ error: "Record not found" }, { status: 404 });
+  }
+  return NextResponse.json({ deleted: true });
 }
