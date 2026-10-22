@@ -25,6 +25,7 @@ import {
 import { fmtDate, fmtRelTime } from "@/lib/format";
 import Comments from "@/components/Comments";
 import ActivityFeed from "@/components/ActivityFeed";
+import FinancialsSection from "@/components/FinancialsSection";
 
 interface CompanyDetail extends CompanyCard {
   source: string | null;
@@ -277,7 +278,9 @@ export default function CompanyProfilePage() {
               <FactRow label="Owner / seller">{c.ownerContext || "—"}</FactRow>
               <FactRow label="Next action">{c.nextAction || "—"}</FactRow>
               <FactRow label="Key financials">
-                <span className="text-caption">Available in Phase 4</span>
+                <a href="#financials" className="font-semibold text-gold-700 hover:underline dark:text-gold-400">
+                  See Financials below
+                </a>
               </FactRow>
             </div>
             {c.notes && (
@@ -286,6 +289,8 @@ export default function CompanyProfilePage() {
               </p>
             )}
           </section>
+
+          <FinancialsSection companyId={c.id} companyName={c.name} />
 
           {/* Photo gallery */}
           <section className="card-surface p-5" aria-label="Photos">
