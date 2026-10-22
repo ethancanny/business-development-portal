@@ -577,7 +577,7 @@ export async function getIntegrations(): Promise<IntegrationStatus[]> {
       lastSuccessAt: null,
       lastError: null,
       detail: st.azure.configured
-        ? `Configured — active provider: ${st.activeProvider}. ${AZURE_NO_TRAINING_DETAIL}`
+        ? `Configured — uploaded documents extract via Azure automatically for supported media types; types Azure rejects (plain text, CSV) fall back to local pattern extraction for that run. Azure is never called by automated data collection. ${AZURE_NO_TRAINING_DETAIL}`
         : `Setup required: ${st.azure.detail} Active provider meanwhile: ${st.activeProvider} (local pattern extraction over extracted document text). ${AZURE_NO_TRAINING_DETAIL}`,
     });
   } catch (err) {

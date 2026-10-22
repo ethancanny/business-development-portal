@@ -197,9 +197,10 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
     }
     case "extract_document_terms": {
       // Part 5B (Document intelligence): extract contract key terms
-      // into the diligence contract register pipeline. Provider-gated
-      // (Azure AI Document Intelligence when configured, else local
-      // pattern extraction over Phase 3 extracted text).
+      // into the diligence contract register pipeline. Provider is
+      // chosen per document (Phase 7 Item 0): Azure when configured
+      // and the media type is Azure-supported, else local pattern
+      // extraction over Phase 3 extracted text.
       const { runDocintJob } = await import("../docint/service");
       await runDocintJob(job.payload);
       return;
