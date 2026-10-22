@@ -385,6 +385,8 @@ export interface DocintProviderStatus {
 /** GET /api/platform/diligence/docint/status */
 export interface DocintStatus {
   activeProvider: string;
+  policy?: string;
+  azureUsageThisMonth?: { runs: number; pages: number };
   azure: DocintProviderStatus;
   local: DocintProviderStatus;
 }

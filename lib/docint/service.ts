@@ -10,7 +10,11 @@ import {
   type ContractRow,
 } from "../diligence/service";
 import { ensureDocint } from "./schema";
-import { FIELD_DEFS, getActiveProvider } from "./provider";
+import {
+  AZURE_PROVIDER_NAME,
+  FIELD_DEFS,
+  providerForDocument,
+} from "./provider";
 
 /**
  * Document intelligence service (Part 5B) — per-deal settings,
@@ -136,6 +140,27 @@ export async function listRuns(
   return rows.map((r) => rowToRun(r as Record<string, unknown>));
 }
 
+/**
+ * Cost visibility (Ethan, Oct 22, 2026): this month's Azure usage
+ * from the processing log (docint_runs). Every Azure call is a run
+ * row attributed to a document, so usage is auditable as
+ * uploads-only.
+ */
+export async function getAzureUsageThisMonth(): Promise<{
+  runs: number;
+  pages: number;
+}> {
+  await ensureDocint();
+  const db = sql();
+  const rows = await db`
+    SELECT count(*)::int AS runs, coalesce(sum(pages), 0)::int AS pages
+    FROM diligence.docint_runs
+    WHERE provider = ${AZURE_PROVIDER_NAME}
+      AND created_at >= date_trunc('month', now())`;
+  const r = (rows[0] ?? {}) as Record<string, unknown>;
+  return { runs: num(r.runs), pages: num(r.pages) };
+}
+
 /* ------------------------------- fields ------------------------------- */
 
 export interface DocintFieldRow {
@@ -248,8 +273,11 @@ export async function runExtraction(input: {
 
   const workspace = await getWorkspaceByDeal(dealId).catch(() => null);
   const workspaceId = workspace?.id ?? null;
-  const provider = getActiveProvider();
   const doc = await getDocument(documentId).catch(() => null);
+  // Per-document provider (Phase 7 Item 0): Azure for uploaded
+  // documents whose media type it supports; local-patterns for the
+  // types Azure rejects (text/plain, CSV, …) so they never 415.
+  const provider = providerForDocument(doc?.mime ?? "", doc?.name ?? "");
 
   const db = sql();
   const runId = `dcr_${newId()}`;

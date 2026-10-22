@@ -284,8 +284,9 @@ export default function DocIntTab({ workspaceId, bundle }: TabProps) {
   if (loadFailed) return <ErrorState onRetry={() => void load()} />;
 
   const activeProvider = status?.activeProvider ?? "local";
-  const activeDetail =
-    activeProvider === "azure" ? status?.azure.detail : status?.local.detail;
+  const activeDetail = activeProvider.startsWith("azure")
+    ? status?.azure.detail
+    : status?.local.detail;
   const azureConfigured = status?.azure.configured ?? false;
 
   return (
@@ -318,6 +319,18 @@ export default function DocIntTab({ workspaceId, bundle }: TabProps) {
             {activeDetail && (
               <p className="mt-1 max-w-2xl text-sm text-slate-600 dark:text-white/70">
                 {activeDetail}
+              </p>
+            )}
+            {status?.policy && (
+              <p className="mt-1 max-w-2xl text-sm text-slate-600 dark:text-white/70">
+                {status.policy}
+              </p>
+            )}
+            {status?.azureUsageThisMonth && (
+              <p className="mt-1 text-sm text-slate-500 dark:text-white/50">
+                Azure usage this month: {status.azureUsageThisMonth.runs}{" "}
+                run(s) · {status.azureUsageThisMonth.pages} page(s) — every
+                call is an uploaded document, logged per document.
               </p>
             )}
             {status && !azureConfigured && status.azure.detail && (

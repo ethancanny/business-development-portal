@@ -481,18 +481,98 @@ export const localProvider: DocintProvider = {
 
 /* ------------------------------ selection ----------------------------- */
 
+export const AZURE_PROVIDER_NAME = "azure-document-intelligence";
+export const LOCAL_PROVIDER_NAME = "local-patterns";
+
+/**
+ * Media types Azure AI Document Intelligence (prebuilt-layout)
+ * accepts. Everything else (text/plain, CSV, JSON, …) is REJECTED by
+ * Azure with HTTP 415 — those documents route to the local-patterns
+ * provider for that run instead of erroring (Phase 7 Item 0).
+ */
+const AZURE_SUPPORTED_MIMES: ReadonlySet<string> = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/bmp",
+  "image/tiff",
+  "image/heif",
+  "image/heic",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/html",
+]);
+
+const AZURE_SUPPORTED_EXTS: ReadonlySet<string> = new Set([
+  "pdf",
+  "jpg",
+  "jpeg",
+  "png",
+  "bmp",
+  "tif",
+  "tiff",
+  "heif",
+  "heic",
+  "docx",
+  "xlsx",
+  "pptx",
+  "html",
+  "htm",
+]);
+
+/** True when Azure Document Intelligence accepts this media type. */
+export function azureSupportsMedia(mime: string, fileName: string): boolean {
+  const m = (mime ?? "").toLowerCase().split(";")[0].trim();
+  if (m && m !== "application/octet-stream") {
+    return AZURE_SUPPORTED_MIMES.has(m);
+  }
+  const ext = (fileName ?? "").toLowerCase().split(".").pop() ?? "";
+  return AZURE_SUPPORTED_EXTS.has(ext);
+}
+
+/**
+ * Provider selection per document (Phase 7 Item 0; cost policy per
+ * Ethan, Oct 22, 2026):
+ * - Documents a USER uploaded extract via Azure automatically when it
+ *   is configured — but only for media types Azure supports.
+ * - Media types Azure rejects route to local-patterns for that run;
+ *   the run record stores the provider actually used.
+ * - The Azure provider is reachable ONLY from uploaded documents
+ *   (data-room uploads, diligence, company-profile/financials flows).
+ *   No ingest / scrape / automated-collection path may call it.
+ */
+export function providerForDocument(
+  mime: string,
+  fileName: string
+): DocintProvider {
+  if (!azureConfigured()) return localProvider;
+  return azureSupportsMedia(mime, fileName) ? azureProvider : localProvider;
+}
+
 export function getActiveProvider(): DocintProvider {
   return azureConfigured() ? azureProvider : localProvider;
 }
 
+const POLICY_DETAIL =
+  "Routing policy: documents a user uploads extract via Azure " +
+  "automatically when configured, for media types Azure supports " +
+  "(PDF, images, Office, HTML). Media types Azure rejects " +
+  "(plain text, CSV, …) run on local pattern extraction instead — " +
+  "the run record always names the provider actually used. Azure is " +
+  "only ever called for uploaded documents; automated data " +
+  "collection (ingests, spines, news, sweeps) never calls it.";
+
 export async function getDocintStatus(): Promise<{
   activeProvider: string;
+  policy: string;
   azure: { configured: boolean; detail: string };
   local: { configured: true; detail: string };
 }> {
   const configured = azureConfigured();
   return {
     activeProvider: configured ? azureProvider.name : localProvider.name,
+    policy: POLICY_DETAIL,
     azure: {
       configured,
       detail: configured ? AZURE_NO_TRAINING_DETAIL : AZURE_UNCONFIGURED_DETAIL,
