@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { ensureDataRoom } from "@/lib/dataroom/schema";
 import { getRoomIndex } from "@/lib/dataroom/service";
 import { logAccess, validateGuestToken } from "@/lib/dataroom/guests";
@@ -56,6 +57,12 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { token: string } }
 ) {
+  // Reading headers() forces per-request dynamic execution: in
+  // production the platform replayed this GET's first response per
+  // token (revoked links kept working) despite force-dynamic and
+  // no-store response headers. A dynamic-API read in the handler is
+  // the documented opt-out that every layer honors.
+  headers();
   await ensureDataRoom();
   const v = await validateGuestToken(params.token);
   if (!v.ok) return failure(v.reason);

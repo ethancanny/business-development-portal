@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { ensureDataRoom } from "@/lib/dataroom/schema";
 import { validateGuestToken } from "@/lib/dataroom/guests";
 import { createThread, listThreads } from "@/lib/dataroom/qa";
@@ -22,6 +23,8 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { token: string } }
 ) {
+  // Per-request dynamic execution (see ../route.ts).
+  headers();
   await ensureDataRoom();
   const v = await validateGuestToken(params.token);
   if (!v.ok) {

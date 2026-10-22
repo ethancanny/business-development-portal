@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { ensureDataRoom } from "@/lib/dataroom/schema";
 import { sql } from "@/lib/platform/db";
 import { getDocument, readDocumentBytes } from "@/lib/dataroom/documents";
@@ -28,6 +29,9 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { token: string; docId: string } }
 ) {
+  // Per-request dynamic execution (see ../../route.ts): token
+  // validation must run on every hit, never a replayed response.
+  headers();
   await ensureDataRoom();
   const v = await validateGuestToken(params.token);
   if (!v.ok) {
