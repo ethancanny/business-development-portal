@@ -892,7 +892,7 @@ export function parseFinancialDocument(input: ParseInput): ParsedDoc {
         const g0 = grids[0];
         const probe = (s: string) =>
           findPeriodMentions(s)
-            .map((m) => `${m.type}:${m.periodEnd ?? ""}`)
+            .map((m) => `${m.periodType}:${m.periodEnd ?? ""}`)
             .join(",");
         notes.push(
           `P5-DIAG3: grids=${grids.length} sheet=${JSON.stringify(g0.sheet)} ` +
