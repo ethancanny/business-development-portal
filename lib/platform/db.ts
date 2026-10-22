@@ -98,16 +98,27 @@ export function ensurePlatformSchema(): Promise<void> {
       await db`CREATE SCHEMA IF NOT EXISTS core`;
 
       // SQL twin of normalizeName() so backfills can normalize in-place.
+      // NOTE: no backslash escapes in these patterns — inside a JS
+      // template literal '\s' cooks to 's', which is how the original
+      // version of this function shipped with an 's+' whitespace
+      // collapse that corrupted stored normalized names (runs of the
+      // letter "s" became spaces). This version mirrors the TS
+      // normalizeName(): lowercase, & -> and, punctuation to spaces,
+      // collapse, then strip trailing legal-suffix words.
       await db`
         CREATE OR REPLACE FUNCTION core.normalize_name(p_name TEXT)
         RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
           SELECT trim(regexp_replace(
             regexp_replace(
               regexp_replace(
-                regexp_replace(lower(coalesce(p_name, '')), '&', ' and ', 'g'),
-                '\m(inc|llc|corp|corporation|co|company|ltd|lp|llp|pllc|pc)\M', '', 'g'),
-              '[^a-z0-9]+', ' ', 'g'),
-            '\s+', ' ', 'g'))
+                regexp_replace(
+                  regexp_replace(
+                    replace(lower(coalesce(p_name, '')), '&', ' and '),
+                    '[^a-z0-9]+', ' ', 'g'),
+                  ' +', ' ', 'g'),
+                ' (inc|llc|corp|corporation|co|company|ltd|lp|llp|pllc|pc)$', '', 'g'),
+              ' (inc|llc|corp|corporation|co|company|ltd|lp|llp|pllc|pc)$', '', 'g'),
+            ' (inc|llc|corp|corporation|co|company|ltd|lp|llp|pllc|pc)$', '', 'g'))
         $$`;
 
       await db`

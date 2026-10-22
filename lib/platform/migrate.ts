@@ -15,7 +15,7 @@ import { str, type Sql } from "./db";
 
 export const BACKFILL_KEY = "phase1-backfill-v1";
 export const TOPUP_KEY = "phase1-backfill-topup";
-export const NORMALIZED_REPAIR_KEY = "phase2-normalized-repair-v1";
+export const NORMALIZED_REPAIR_KEY = "phase2-normalized-repair-v2";
 
 export async function runBackfillOnce(
   db: Sql,
