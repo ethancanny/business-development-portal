@@ -158,12 +158,82 @@ async function generateMilestoneEvents(): Promise<GeneratedEventInput[]> {
   return out;
 }
 
+/**
+ * Phase 8 — portfolio reporting due dates (kind 'reporting'). Only
+ * pending/late periods generate events; the period's own status rides
+ * through so late items render as late.
+ */
+async function generateReportingEvents(): Promise<GeneratedEventInput[]> {
+  const { listReportingCalendarItems } = await import(
+    "@/lib/monitoring/service"
+  );
+  const items = await listReportingCalendarItems();
+  const out: GeneratedEventInput[] = [];
+  for (const item of items) {
+    if (!item.dueDate) continue;
+    const label = item.periodEnd
+      ? `${item.cadence} period ending ${item.periodEnd}`
+      : `${item.cadence} period`;
+    out.push({
+      sourceId: item.periodId,
+      title:
+        `Reporting due: ${item.companyName || item.companyId} ${label}`,
+      startsAt: `${item.dueDate}T09:00:00${TZ_OFFSET}`,
+      endsAt: null,
+      allDay: true,
+      dealId: null,
+      companyId: item.companyId,
+      href: `/portfolio-monitoring/${item.companyId}`,
+      status: item.status,
+      meta: {
+        cadence: item.cadence,
+        periodEnd: item.periodEnd,
+      },
+    });
+  }
+  return out;
+}
+
+/**
+ * Phase 8 — covenant test dates (kind 'covenant'). Active covenants
+ * with a next test date generate one event each.
+ */
+async function generateCovenantEvents(): Promise<GeneratedEventInput[]> {
+  const { listCovenantCalendarItems } = await import(
+    "@/lib/monitoring/service"
+  );
+  const items = await listCovenantCalendarItems();
+  const out: GeneratedEventInput[] = [];
+  for (const item of items) {
+    if (!item.nextTestDate) continue;
+    out.push({
+      sourceId: item.covenantId,
+      title:
+        `Covenant test: ${item.label || item.covenantKey}` +
+        (item.companyName ? ` — ${item.companyName}` : ""),
+      startsAt: `${item.nextTestDate}T09:00:00${TZ_OFFSET}`,
+      endsAt: null,
+      allDay: true,
+      dealId: null,
+      companyId: item.companyId,
+      href: `/portfolio-monitoring/${item.companyId}`,
+      status: "",
+      meta: {
+        covenantKey: item.covenantKey,
+      },
+    });
+  }
+  return out;
+}
+
 export const GENERATED_EVENT_GENERATORS: Partial<
   Record<GeneratedEventKind, GeneratedEventGenerator>
 > = {
   task: generateTaskEvents,
   closing: generateClosingEvents,
   milestone: generateMilestoneEvents,
+  reporting: generateReportingEvents,
+  covenant: generateCovenantEvents,
 };
 
 /* ------------------------------ regeneration ---------------------------- */

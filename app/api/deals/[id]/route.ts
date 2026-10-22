@@ -200,6 +200,23 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   const user = getSessionUser();
   const actor = user?.name ?? "Someone";
+  if (newStage === "Closed Won" && prev.stage !== "Closed Won") {
+    // Phase 8: publish deal_closed (Portfolio Monitoring handoff) and
+    // enqueue the durable handoff job — ids only, no figures.
+    try {
+      const { publishEvent } = await import("@/lib/platform/events");
+      await publishEvent("deal_closed", {
+        entityKind: "deal",
+        entityId: updated.id,
+        payload: { dealId: updated.id },
+        actor,
+      });
+      const { enqueueJob } = await import("@/lib/platform/jobs");
+      await enqueueJob("monitoring_handoff", { dealId: updated.id });
+    } catch {
+      /* handoff wiring is best-effort — the stage change stands */
+    }
+  }
   if (newStage !== prev.stage) {
     await logActivity({
       type: "deal.stage",

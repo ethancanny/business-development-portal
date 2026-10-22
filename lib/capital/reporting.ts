@@ -24,9 +24,11 @@ import { refreshDealSummary } from "./service";
  *
  * Template rendering substitutes via split/join (never a RegExp
  * built from a string — see the Phase 5 regex-literal rule). Unknown
- * placeholders are left as-is. {{monitoring_section}} renders the
- * Phase 8 pending marker verbatim — an honest empty state, never a
- * fabricated KPI.
+ * placeholders are left as-is. {{monitoring_section}} renders real
+ * Portfolio Monitoring KPI lines when the deal's company has a live
+ * monitoring summary (Phase 8 — see monitoringSectionText below),
+ * and the Phase 7 pending marker verbatim otherwise — an honest
+ * empty state, never a fabricated KPI.
  */
 
 function dateOrNull(v: unknown): string | null {
@@ -368,6 +370,86 @@ export async function getReportTemplate(
     : null;
 }
 
+/* --------------------- monitoring section (Phase 8) ------------------ */
+
+/** Shape of lib/monitoring/service.ts getMonitoringSummaryForCompany's
+ * return (contract, Phase 8) — re-declared loosely so this module
+ * never statically imports the monitoring module. */
+interface MonitoringSummaryLike {
+  latestPeriodEnd?: string | null;
+  kpis?: {
+    revenue?: number | null;
+    ebitda?: number | null;
+    grossMarginPct?: number | null;
+    cash?: number | null;
+  } | null;
+  reportingStatus?: string | null;
+  covenantStatus?: string | null;
+  openAlerts?: number | null;
+}
+
+function moneyOrDash(v: number | null | undefined): string {
+  return v === null || v === undefined || !Number.isFinite(v)
+    ? "—"
+    : fmtMoney0(v);
+}
+
+function pctFractionOrDash(v: number | null | undefined): string {
+  // The monitoring summary's kpis.grossMarginPct is the stored
+  // FRACTION (getMonitoringSummaryForCompany passes the kpi_values
+  // row through: 0.30 = 30%) — multiply by 100 for display. (The
+  // rollup's weightedGrossMarginPct and VC targets are percent
+  // points instead; this summary field is not.)
+  return v === null || v === undefined || !Number.isFinite(v)
+    ? "—"
+    : `${Math.round(v * 1000) / 10}%`;
+}
+
+/**
+ * The {{monitoring_section}} body for a deal: the deal's company is
+ * resolved through getDealContext (the deal→company resolution this
+ * module already uses — ctx.companyId), then Portfolio Monitoring is
+ * read through its service via a DYNAMIC import (capital must not
+ * statically import monitoring; the module stays separable).
+ *
+ * Honesty rules: no live monitoring summary → the Phase 7 marker text
+ * EXACTLY (MONITORING_PENDING_MARKER); a monitoring read failure falls
+ * back to the marker and never throws the render; figures are the
+ * summary's own values, formatted — nothing is computed here.
+ */
+async function monitoringSectionText(
+  companyId: string | null
+): Promise<string> {
+  if (!companyId) return MONITORING_PENDING_MARKER;
+  try {
+    const mod = (await import("@/lib/monitoring/service")) as {
+      getMonitoringSummaryForCompany?: (
+        id: string
+      ) => Promise<MonitoringSummaryLike | null>;
+    };
+    if (typeof mod.getMonitoringSummaryForCompany !== "function") {
+      return MONITORING_PENDING_MARKER;
+    }
+    const s = await mod.getMonitoringSummaryForCompany(companyId);
+    if (!s) return MONITORING_PENDING_MARKER;
+    const kpis = s.kpis ?? {};
+    const period = s.latestPeriodEnd
+      ? String(s.latestPeriodEnd).slice(0, 10)
+      : "—";
+    const alerts =
+      s.openAlerts === null || s.openAlerts === undefined
+        ? "—"
+        : String(s.openAlerts);
+    return [
+      `Portfolio monitoring — latest period ending ${period}:`,
+      `Revenue ${moneyOrDash(kpis.revenue)} · EBITDA ${moneyOrDash(kpis.ebitda)} · Gross margin ${pctFractionOrDash(kpis.grossMarginPct)} · Cash ${moneyOrDash(kpis.cash)}`,
+      `Reporting status: ${s.reportingStatus || "—"} · Covenant status: ${s.covenantStatus || "—"} · Open alerts: ${alerts}`,
+    ].join("\n");
+  } catch {
+    return MONITORING_PENDING_MARKER;
+  }
+}
+
 /* ------------------------------ rendering ---------------------------- */
 
 export interface RenderReportInput {
@@ -456,6 +538,11 @@ export async function renderReport(
     }
   }
 
+  // Phase 8: real KPI lines when the deal's company has a live
+  // monitoring summary; the honest Phase 7 marker otherwise. The
+  // helper never throws — a monitoring failure renders the marker.
+  const monitoringSection = await monitoringSectionText(ctx.companyId);
+
   const values: Record<string, string | number | null> = {
     investor_name: investorNameVal,
     deal_name: ctx.dealName,
@@ -465,7 +552,7 @@ export async function renderReport(
     capital_called: capitalCalled,
     distributions,
     nav,
-    monitoring_section: MONITORING_PENDING_MARKER,
+    monitoring_section: monitoringSection,
   };
 
   const textValues: Record<string, string> = {
@@ -477,7 +564,7 @@ export async function renderReport(
     capital_called: fmtMoney0(capitalCalled),
     distributions: fmtMoney0(distributions),
     nav: nav === null ? "—" : fmtMoney0(nav),
-    monitoring_section: MONITORING_PENDING_MARKER,
+    monitoring_section: monitoringSection,
   };
 
   // Placeholder substitution via split/join — never a RegExp built

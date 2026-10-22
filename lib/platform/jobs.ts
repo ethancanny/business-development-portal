@@ -227,6 +227,23 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
       await runRecordRefreshJob(job.payload);
       return;
     }
+    case "monitoring_handoff": {
+      // Phase 8 (Portfolio Monitoring): the durable deal_closed
+      // handoff path — copies the closing baseline into
+      // monitoring.portfolio_companies. Payload carries ids only.
+      const { handoffDealClosed } = await import("../monitoring/service");
+      const dealId = str(job.payload.dealId);
+      if (dealId) await handoffDealClosed(dealId, str(job.payload.actor));
+      return;
+    }
+    case "monitoring_period_due": {
+      // Phase 8 (Portfolio Monitoring): due check for one reporting
+      // period — flips it to 'late' + raises the alert when overdue.
+      const { evaluatePeriodDue } = await import("../monitoring/service");
+      const periodId = str(job.payload.periodId);
+      if (periodId) await evaluatePeriodDue(periodId);
+      return;
+    }
     case "extract_document_text": {
       // Phase 3 (Documents): background text extraction so document
       // contents become searchable. runExtraction never throws —
