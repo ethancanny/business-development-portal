@@ -195,6 +195,37 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
       await runAnalysisJob(job.payload);
       return;
     }
+    case "extract_document_terms": {
+      // Part 5B (Document intelligence): extract contract key terms
+      // into the diligence contract register pipeline. Provider-gated
+      // (Azure AI Document Intelligence when configured, else local
+      // pattern extraction over Phase 3 extracted text).
+      const { runDocintJob } = await import("../docint/service");
+      await runDocintJob(job.payload);
+      return;
+    }
+    case "generate_memo": {
+      // Part 5B (IC memo): regenerate the deal's diligence summary /
+      // IC memo draft from current source records.
+      const { runMemoJob } = await import("../diligence/memo");
+      await runMemoJob(job.payload);
+      return;
+    }
+    case "compute_risk_score": {
+      // Part 5B (Risk score): recompute the deal risk score and append
+      // a history row.
+      const { runRiskJob } = await import("../diligence/risk");
+      await runRiskJob(job.payload);
+      return;
+    }
+    case "refresh_record_checks": {
+      // Part 5B (Public record checks): monthly refresh — re-runs the
+      // automatable checks for tracked companies and self-perpetuates
+      // via ensureRecordChecksJob inside the handler.
+      const { runRecordRefreshJob } = await import("../diligence/records");
+      await runRecordRefreshJob(job.payload);
+      return;
+    }
     case "extract_document_text": {
       // Phase 3 (Documents): background text extraction so document
       // contents become searchable. runExtraction never throws —
@@ -273,6 +304,14 @@ export async function runDueJobs(limit = 3): Promise<number> {
  * lib/platform/config.ts). Idempotent per 24h window.
  */
 export async function ensureBuiltinJobs(): Promise<void> {
+  // Part 5B: keep the monthly public-record-checks refresh queued
+  // (self-perpetuating once running; this is the bootstrap).
+  try {
+    const { ensureRecordChecksJob } = await import("../diligence/records");
+    await ensureRecordChecksJob();
+  } catch {
+    /* records module not ready yet — retried on the next platform call */
+  }
   const db = sql();
   const recent = await db`
     SELECT id FROM core.jobs

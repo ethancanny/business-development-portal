@@ -560,6 +560,37 @@ export async function getIntegrations(): Promise<IntegrationStatus[]> {
     });
   }
 
+  // Document intelligence (Part 5B): Azure AI Document Intelligence
+  // is the contract-extraction provider when its env vars are set —
+  // Microsoft does not train models on customer documents. Until
+  // then, extraction runs on the built-in local pattern provider and
+  // this entry reports the Azure state honestly as setup-required.
+  try {
+    const { getDocintStatus, AZURE_NO_TRAINING_DETAIL } = await import(
+      "../docint/provider"
+    );
+    const st = await getDocintStatus();
+    out.push({
+      key: "azure_docint",
+      name: "Document Intelligence (Azure AI)",
+      status: st.azure.configured ? "ok" : "unknown",
+      lastSuccessAt: null,
+      lastError: null,
+      detail: st.azure.configured
+        ? `Configured — active provider: ${st.activeProvider}. ${AZURE_NO_TRAINING_DETAIL}`
+        : `Setup required: ${st.azure.detail} Active provider meanwhile: ${st.activeProvider} (local pattern extraction over extracted document text). ${AZURE_NO_TRAINING_DETAIL}`,
+    });
+  } catch (err) {
+    out.push({
+      key: "azure_docint",
+      name: "Document Intelligence (Azure AI)",
+      status: "error",
+      lastSuccessAt: null,
+      lastError: err instanceof Error ? err.message : String(err),
+      detail: "Could not read document-intelligence provider status",
+    });
+  }
+
   // Passkeys (WebAuthn credentials count).
   try {
     const rows = await db`

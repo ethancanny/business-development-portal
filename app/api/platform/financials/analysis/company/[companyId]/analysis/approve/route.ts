@@ -135,6 +135,21 @@ export async function POST(
       analysisId,
       user.name || user.email
     );
+    // Part 5B: an approved analysis refreshes the deal's risk score
+    // and IC memo draft (background jobs, best-effort — approval
+    // success stands regardless).
+    try {
+      const cid =
+        (analysis as { companyId?: string }).companyId || params.companyId;
+      if (cid) {
+        const { enqueueRiskAndMemoForCompany } = await import(
+          "@/lib/diligence/risk"
+        );
+        await enqueueRiskAndMemoForCompany(cid, user.name || user.email);
+      }
+    } catch {
+      /* automation is additive */
+    }
     return NextResponse.json({ analysis }, { headers: NO_STORE_HEADERS });
   } catch (err) {
     return serviceErrorResponse(err, "approveAnalysis");

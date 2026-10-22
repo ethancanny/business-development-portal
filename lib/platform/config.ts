@@ -14,6 +14,8 @@ export const SYNC_INTERVALS = {
   accFitSourcing: "nightly 02:00",
   maricopaPermits: "weekly Sun 03:00",
   watchlistAndMarketEvents: "daily 05:00",
+  recordChecks:
+    "monthly via the refresh_record_checks job (self-perpetuating, bootstrapped by ensureRecordChecksJob); automatable routes re-run and diff against the prior snapshot, manual snapshots flag refresh-due after 30 days",
   fitEnrichment: "once per new record",
   dataRoomAccessLogs: "on demand, cached 15m",
   remindersPush:

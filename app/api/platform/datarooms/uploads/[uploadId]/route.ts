@@ -73,6 +73,17 @@ export async function POST(
       params.uploadId,
       actorOf(user)
     );
+    // Part 5B: if document intelligence is enabled for the deal this
+    // document's room belongs to, queue a key-terms extraction.
+    // Best-effort — never blocks or fails the upload.
+    try {
+      const { maybeEnqueueForDocument } = await import(
+        "@/lib/docint/service"
+      );
+      await maybeEnqueueForDocument(document.id, actorOf(user));
+    } catch {
+      /* doc intelligence is additive; upload success stands */
+    }
     // Drain the extraction job inline (serverless background work).
     await runDueJobs(3).catch(() => 0);
     return NextResponse.json(
