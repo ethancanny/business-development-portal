@@ -227,7 +227,7 @@ export default function MobileNav() {
     pushedRef.current = false;
   }, [pathname]);
 
-  if (pathname === "/login" || pathname === "/offline") return null;
+  if (pathname === "/login" || pathname === "/offline" || pathname.startsWith("/room/")) return null;
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });

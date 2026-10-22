@@ -8,6 +8,7 @@ import IntegrationStatus from "@/components/IntegrationStatus";
 import EntraSetup from "@/components/EntraSetup";
 import JobQueuePanel from "@/components/JobQueuePanel";
 import DuplicatesPanel from "@/components/DuplicatesPanel";
+import DataRoomSettings from "@/components/DataRoomSettings";
 
 /**
  * Settings (CRM Phase 2, Oct 2026): notifications (PushSettings) and
@@ -130,6 +131,18 @@ export default function SettingsPage() {
             and how the webhook subscription renews itself.
           </p>
           <EntraSetup />
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Data rooms &amp; document storage
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            Document storage connection status and the default data room
+            template that seeds every new room — its folders and checklist
+            items.
+          </p>
+          <DataRoomSettings />
         </section>
       </div>
     </div>

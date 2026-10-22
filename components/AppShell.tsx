@@ -82,7 +82,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // Login / offline have their own branding — no shell chrome there
   // (matches SiteHeader / MobileNav behavior).
-  if (pathname === "/login" || pathname === "/offline") {
+  if (pathname === "/login" || pathname === "/offline" || pathname.startsWith("/room/")) {
     return <>{children}</>;
   }
 

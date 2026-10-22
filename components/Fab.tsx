@@ -48,6 +48,7 @@ export default function Fab() {
   const routeHidden =
     pathname === "/login" ||
     pathname === "/offline" ||
+    pathname.startsWith("/room/") ||
     HIDDEN_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
 
   useEffect(() => {
