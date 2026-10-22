@@ -805,6 +805,20 @@ function assemble(
         `and were kept as 'unmapped' for review.`
     );
   }
+  // P5-DIAG (temporary, Phase 5 Item 0): if the whole document collapsed
+  // into a single period-less bucket while the text visibly carries
+  // FY#### / bare-year headers, say so in the notes so the deployed
+  // parser's behavior is observable from the extract response.
+  if (
+    periods.length === 1 &&
+    !periods[0].periodEnd &&
+    /\bfy\s*\d{4}\b|\b(19|20)\d{2}\b/.test(docText.slice(0, 2000))
+  ) {
+    notes.push(
+      "P5-DIAG: single period-less bucket produced from a document whose " +
+        "text carries FY/year headers."
+    );
+  }
   return { periods, notes };
 }
 
@@ -877,7 +891,7 @@ export function parseFinancialDocument(input: ParseInput): ParsedDoc {
           ? notes
           : [
               ...notes,
-              "No financial statement lines could be parsed from the workbook.",
+              "No financial statement lines could be parsed from the workbook. [p5-canary-a]",
             ],
         periods,
       };
