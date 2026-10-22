@@ -18,11 +18,14 @@ import {
  * HONEST LIMIT: on the current Vercel serverless deployment the only
  * writable directory is the OS temp dir, which is per-instance and
  * ephemeral — uploaded bytes do not survive instance recycling or
- * redeploys, and a chunked upload whose requests land on different
- * instances can fail. This provider makes the whole data-room feature
- * usable end-to-end TODAY so it can be evaluated; production file
- * bytes await Ethan's SharePoint decision (the sharepoint provider
- * swaps in behind this same interface).
+ * redeploys. Chunk appends self-heal across instances where possible
+ * (a first chunk starts the file on whichever instance receives it; a
+ * later chunk on a fresh instance reports offset 0 so the client
+ * restarts the file there), but this is a stopgap, not shared storage.
+ * This provider makes the whole data-room feature usable end-to-end
+ * TODAY so it can be evaluated; production file bytes await Ethan's
+ * SharePoint decision (the sharepoint provider swaps in behind this
+ * same interface).
  *
  * Root: env DATAROOM_STORAGE_DIR, else <tmpdir>/canny-dataroom-store.
  */
@@ -97,7 +100,17 @@ export const localProvider: StorageProvider = {
     try {
       current = (await fs.stat(full)).size;
     } catch {
-      throw new StorageNotFoundError(tempKey);
+      // Temp object absent on THIS instance. Serverless instances each
+      // have their own temp dir, so a chunk can land on an instance that
+      // never saw beginUpload. At offset 0 the upload can safely start
+      // here — create the target and proceed. At any later offset the
+      // earlier bytes are genuinely elsewhere: report offset 0 so the
+      // client restarts the file on this instance (uploads.ts surfaces
+      // this as expectedOffset via uploadSize(), which is also 0 here).
+      if (offset !== 0) throw new StorageOffsetError(0);
+      await fs.mkdir(path.dirname(full), { recursive: true });
+      await fs.writeFile(full, Buffer.alloc(0));
+      current = 0;
     }
     if (current !== offset) throw new StorageOffsetError(current);
     await fs.appendFile(full, data);
