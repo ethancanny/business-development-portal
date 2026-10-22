@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   authed,
+  companyGate,
+  internalGate,
   ok,
   readBody,
   serviceError,
@@ -19,6 +21,8 @@ export async function GET(
 ): Promise<NextResponse> {
   const gate = await authed();
   if ("response" in gate) return gate.response;
+  const forbidden = companyGate(gate.ctx, params.companyId);
+  if (forbidden) return forbidden;
   try {
     return ok(await getAlertRules(params.companyId));
   } catch (err) {
@@ -35,10 +39,18 @@ export async function PUT(
 ): Promise<NextResponse> {
   const gate = await authed();
   if ("response" in gate) return gate.response;
+  const forbidden = companyGate(gate.ctx, params.companyId);
+  if (forbidden) return forbidden;
   try {
     const body = await readBody(req);
     const isGlobal =
       sStr(body.scope) === "global" || body.companyId === null;
+    // A company-scoped session may never write the GLOBAL rule row,
+    // even through a company path it is allowed to reach.
+    if (isGlobal) {
+      const internalOnly = internalGate(gate.ctx);
+      if (internalOnly) return internalOnly;
+    }
     const paramsObj =
       body.params && typeof body.params === "object"
         ? (body.params as Record<string, unknown>)

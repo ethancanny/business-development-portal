@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
+import { getAccessContext } from "@/lib/platform/permissions";
 import { ensurePlatform } from "@/lib/platform/service";
 import { ensureDirectory } from "@/lib/directory/schema";
 import {
@@ -9,8 +10,15 @@ import {
 } from "@/lib/directory/service";
 
 export async function GET(req: NextRequest) {
-  if (!getSessionUser()) {
+  const user = getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // Phase 9: the Directory is internal-only — company-scoped
+  // management sessions never see it.
+  const ctx = await getAccessContext(user);
+  if (ctx.companyIds !== null) {
+    return NextResponse.json({ error: "internal_only" }, { status: 403 });
   }
   await ensurePlatform();
   await ensureDirectory();

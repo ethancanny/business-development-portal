@@ -72,6 +72,53 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
+  // Phase 9: company-scoped guest sessions (portfolio-company
+  // management logins) are confined to their own surfaces.
+  // DECODE-ONLY: the JWT payload is read WITHOUT signature
+  // verification and claims are used ONLY to restrict access here —
+  // never to grant it. All granting authorization remains route-level
+  // via verified sessions (lib/auth.ts) + DB scope
+  // (lib/platform/permissions.ts). Tokens without guest claims pass
+  // through exactly as before; any decode error falls through to the
+  // existing behavior.
+  try {
+    const parts = token.split(".");
+    if (parts.length === 3) {
+      const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+      const json = decodeURIComponent(
+        atob(padded)
+          .split("")
+          .map(
+            (c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)
+          )
+          .join("")
+      );
+      const payload = JSON.parse(json) as {
+        role?: unknown;
+        companyIds?: unknown;
+      };
+      if (payload.role === "guest" && Array.isArray(payload.companyIds)) {
+        const allowed =
+          pathname.startsWith("/my-company") ||
+          pathname.startsWith("/api/portmgmt") ||
+          pathname.startsWith("/api/platform/monitoring") ||
+          pathname.startsWith("/api/auth");
+        if (!allowed) {
+          if (pathname.startsWith("/api/")) {
+            return NextResponse.json(
+              { error: "scoped_access" },
+              { status: 403 }
+            );
+          }
+          return NextResponse.redirect(new URL("/my-company", req.url));
+        }
+      }
+    }
+  } catch {
+    /* decode failure: fall through to the default behavior */
+  }
+
   return NextResponse.next();
 }
 

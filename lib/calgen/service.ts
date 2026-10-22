@@ -226,6 +226,38 @@ async function generateCovenantEvents(): Promise<GeneratedEventInput[]> {
   return out;
 }
 
+/**
+ * Phase 9 — board meetings (kind 'meeting'). Scheduled/held board
+ * meetings with a start instant generate one event each, following
+ * generateReportingEvents exactly; the portmgmt service is imported
+ * dynamically (module-boundary pattern).
+ */
+async function generateMeetingEvents(): Promise<GeneratedEventInput[]> {
+  const { listBoardMeetingCalendarItems } = await import(
+    "@/lib/portmgmt/service"
+  );
+  const items = await listBoardMeetingCalendarItems();
+  const out: GeneratedEventInput[] = [];
+  for (const item of items) {
+    if (!item.startsAt) continue;
+    out.push({
+      sourceId: item.meetingId,
+      title:
+        `Board meeting: ${item.title}` +
+        (item.companyName ? ` — ${item.companyName}` : ""),
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
+      allDay: false,
+      dealId: null,
+      companyId: item.companyId,
+      href: `/portfolio-monitoring/${item.companyId}`,
+      status: item.status,
+      meta: {},
+    });
+  }
+  return out;
+}
+
 export const GENERATED_EVENT_GENERATORS: Partial<
   Record<GeneratedEventKind, GeneratedEventGenerator>
 > = {
@@ -234,6 +266,7 @@ export const GENERATED_EVENT_GENERATORS: Partial<
   milestone: generateMilestoneEvents,
   reporting: generateReportingEvents,
   covenant: generateCovenantEvents,
+  meeting: generateMeetingEvents,
 };
 
 /* ------------------------------ regeneration ---------------------------- */

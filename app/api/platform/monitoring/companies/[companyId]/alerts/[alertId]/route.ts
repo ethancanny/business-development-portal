@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   authed,
+  companyGate,
   ok,
   readBody,
   serviceError,
@@ -19,6 +20,8 @@ export async function PATCH(
 ): Promise<NextResponse> {
   const gate = await authed();
   if ("response" in gate) return gate.response;
+  const forbidden = companyGate(gate.ctx, params.companyId);
+  if (forbidden) return forbidden;
   try {
     const body = await readBody(req);
     const status = sStr(body.status) ?? sStr(body.action) ?? "";

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authed, ok, serviceError } from "@/lib/monitoring/http";
+import { authed, companyGate, ok, serviceError } from "@/lib/monitoring/http";
 import {
   deletePortfolioCompany,
   getMonitoringSummaryForCompany,
@@ -15,6 +15,8 @@ export async function GET(
 ): Promise<NextResponse> {
   const gate = await authed();
   if ("response" in gate) return gate.response;
+  const forbidden = companyGate(gate.ctx, params.companyId);
+  if (forbidden) return forbidden;
   try {
     const company = await getPortfolioCompany(params.companyId);
     if (!company) throw new MonitoringError("portfolio_company_not_found");
@@ -33,6 +35,8 @@ export async function DELETE(
 ): Promise<NextResponse> {
   const gate = await authed();
   if ("response" in gate) return gate.response;
+  const forbidden = companyGate(gate.ctx, params.companyId);
+  if (forbidden) return forbidden;
   try {
     const removed = await deletePortfolioCompany(
       params.companyId,

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { ensurePlatform } from "@/lib/platform/service";
 import { buildBoardPack } from "@/lib/monitoring/exports";
+import { companyGate } from "@/lib/monitoring/http";
+import { getAccessContext } from "@/lib/platform/permissions";
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" };
 
@@ -16,7 +18,8 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { companyId: string } }
 ) {
-  if (!getSessionUser()) {
+  const sessionUser = getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json(
       { error: "Unauthorized" },
       { status: 401, headers: NO_STORE_HEADERS }
@@ -24,6 +27,11 @@ export async function GET(
   }
   try {
     await ensurePlatform();
+    const forbidden = companyGate(
+      await getAccessContext(sessionUser),
+      params.companyId
+    );
+    if (forbidden) return forbidden;
     const formatRaw = (req.nextUrl.searchParams.get("format") ?? "pdf").toLowerCase();
     if (formatRaw !== "pdf" && formatRaw !== "xlsx") {
       return NextResponse.json(

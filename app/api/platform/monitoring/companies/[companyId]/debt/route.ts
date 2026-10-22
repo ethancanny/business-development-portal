@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   authed,
+  companyGate,
   ok,
   readBody,
   serviceError,
@@ -35,6 +36,8 @@ export async function GET(
 ): Promise<NextResponse> {
   const gate = await authed();
   if ("response" in gate) return gate.response;
+  const forbidden = companyGate(gate.ctx, params.companyId);
+  if (forbidden) return forbidden;
   try {
     return ok(await listDebtTranches(params.companyId));
   } catch (err) {
@@ -49,6 +52,8 @@ export async function POST(
 ): Promise<NextResponse> {
   const gate = await authed();
   if ("response" in gate) return gate.response;
+  const forbidden = companyGate(gate.ctx, params.companyId);
+  if (forbidden) return forbidden;
   try {
     const body = await readBody(req);
     const tranche = await createDebtTranche(

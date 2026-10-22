@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   authed,
+  companyGate,
   ok,
   readBody,
   serviceError,
@@ -27,6 +28,8 @@ export async function POST(
   try {
     const period = await getPeriod(params.periodId);
     if (!period) throw new MonitoringError("period_not_found");
+    const forbidden = companyGate(gate.ctx, period.companyId);
+    if (forbidden) return forbidden;
     const body = await readBody(req);
     const result = await receiveReport(
       period.companyId,

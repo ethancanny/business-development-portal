@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   authed,
+  companyGate,
   ok,
   readBody,
   serviceError,
@@ -25,6 +26,8 @@ export async function PATCH(
   try {
     const existing = await getPeriod(params.periodId);
     if (!existing) throw new MonitoringError("period_not_found");
+    const forbidden = companyGate(gate.ctx, existing.companyId);
+    if (forbidden) return forbidden;
     const body = await readBody(req);
     const period = await updatePeriod(
       params.periodId,
@@ -52,6 +55,11 @@ export async function DELETE(
   const gate = await authed();
   if ("response" in gate) return gate.response;
   try {
+    const existing = await getPeriod(params.periodId);
+    if (existing) {
+      const forbidden = companyGate(gate.ctx, existing.companyId);
+      if (forbidden) return forbidden;
+    }
     const deleted = await deletePeriod(
       params.periodId,
       gate.user.name || gate.user.email

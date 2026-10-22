@@ -14,6 +14,7 @@ import {
   listInvestors,
   type InvestorProfileInput,
 } from "@/lib/capital/service";
+import { getAccessContext } from "@/lib/platform/permissions";
 
 function profileInputFrom(
   body: Record<string, unknown>
@@ -38,6 +39,14 @@ function profileInputFrom(
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const gate = await authed();
   if ("response" in gate) return gate.response;
+  // Phase 9: investor data is internal-only.
+  const ctx = await getAccessContext(gate.user);
+  if (ctx.companyIds !== null) {
+    return NextResponse.json(
+      { error: "internal_only" },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } }
+    );
+  }
   try {
     const sp = req.nextUrl.searchParams;
     const limitRaw = Number(sp.get("limit") ?? 25);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authed, ok, serviceError } from "@/lib/monitoring/http";
+import { authed, companyGate, ok, serviceError } from "@/lib/monitoring/http";
 import { getVcTracking } from "@/lib/monitoring/analytics";
 
 /** GET value-creation tracking: plan + initiatives (raw planned
@@ -10,6 +10,8 @@ export async function GET(
 ): Promise<NextResponse> {
   const gate = await authed();
   if ("response" in gate) return gate.response;
+  const forbidden = companyGate(gate.ctx, params.companyId);
+  if (forbidden) return forbidden;
   try {
     return ok(await getVcTracking(params.companyId));
   } catch (err) {

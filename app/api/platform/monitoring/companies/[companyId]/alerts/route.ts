@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authed, ok, serviceError } from "@/lib/monitoring/http";
+import { authed, companyGate, ok, serviceError } from "@/lib/monitoring/http";
 import { listCompanyAlerts } from "@/lib/monitoring/analytics";
 
 /** GET the company's monitoring alerts (WS-A's listAlerts;
@@ -10,6 +10,8 @@ export async function GET(
 ): Promise<NextResponse> {
   const gate = await authed();
   if ("response" in gate) return gate.response;
+  const forbidden = companyGate(gate.ctx, params.companyId);
+  if (forbidden) return forbidden;
   try {
     const sp = req.nextUrl.searchParams;
     const limitRaw = Number(sp.get("limit") ?? 50);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDeals, saveDeals, newId, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
+import { getAccessContext } from "@/lib/platform/permissions";
 import { geocodeCity } from "@/lib/geo";
 import { DEAL_STAGES, type Deal, type DealDrivers, type DealLink, type DealMetrics, type DealStructureInput } from "@/lib/types";
 
@@ -94,8 +95,15 @@ function parseLinks(body: unknown): DealLink[] {
 }
 
 export async function GET() {
-  if (!getSessionUser()) {
+  const user = getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // Phase 9: the deal pipeline is internal-only — company-scoped
+  // management sessions never see it.
+  const ctx = await getAccessContext(user);
+  if (ctx.companyIds !== null) {
+    return NextResponse.json({ error: "internal_only" }, { status: 403 });
   }
   return NextResponse.json(await getDeals());
 }

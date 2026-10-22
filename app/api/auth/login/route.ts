@@ -12,6 +12,7 @@ import {
   getSecurity,
   registerDevice,
 } from "@/lib/webauthn-db";
+import { getLoginClaims } from "@/lib/portmgmt/users";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
@@ -39,8 +40,22 @@ export async function POST(req: NextRequest) {
     epoch = 0;
   }
 
-  const token = signToken(user, epoch);
-  const res = NextResponse.json({ ok: true, user });
+  // Phase 9: company-scoped management logins carry role/companyIds
+  // claims in the token (partners get none). Best-effort like the
+  // epoch lookup: a claims hiccup must never block a valid sign-in —
+  // route-level authz re-resolves scope from the DB regardless.
+  let claims: Awaited<ReturnType<typeof getLoginClaims>> = null;
+  try {
+    claims = await getLoginClaims(user.email);
+  } catch {
+    claims = null;
+  }
+
+  const token = signToken(user, epoch, claims ?? undefined);
+  const res = NextResponse.json({
+    ok: true,
+    user: claims ? { ...user, role: claims.role, companyIds: claims.companyIds } : user,
+  });
   res.cookies.set(AUTH_COOKIE, token, authCookieOptions());
 
   const existingDevice = req.cookies.get(DEVICE_COOKIE)?.value;
