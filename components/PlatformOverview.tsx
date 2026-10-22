@@ -68,9 +68,19 @@ export interface PlatformSummary {
   updatedAt: string | null;
 }
 
+export interface EarlyWarningItem {
+  companyId: string;
+  companyName: string;
+  score: number;
+  band: string;
+  components: unknown;
+  computedAt: string | null;
+}
+
 interface OverviewPayload {
   summary: PlatformSummary;
   cards: CompanyCard[];
+  earlyWarning?: EarlyWarningItem[];
 }
 
 /* ---------------- Widget layout (localStorage-persisted) ---------------- */
@@ -548,6 +558,129 @@ function RagWidget({
   );
 }
 
+/* ---------------- Early warning (Phase 9) ----------------
+ * Rendered exactly as served by GET /api/platform/overview's
+ * earlyWarning array — no recompute, no client scoring. */
+
+function ewBandChip(band: string): { label: string; className: string; style?: React.CSSProperties } {
+  switch (band.toLowerCase()) {
+    case "low":
+      return { label: "Low", className: "badge-neutral" };
+    case "watch":
+      return { label: "Watch", className: "badge-warn" };
+    case "elevated":
+      return {
+        label: "Elevated",
+        className: "",
+        style: { backgroundColor: "#ffedd5", color: "#9a3412" },
+      };
+    case "critical":
+      return { label: "Critical", className: "badge-danger" };
+    default:
+      return { label: band || "—", className: "badge-neutral" };
+  }
+}
+
+interface EwDriver {
+  label: string;
+  detail: string;
+}
+
+/** Top drivers from the components payload, whatever shape the
+ * backend serves (array of {label/name/key, score/value/contribution}
+ * or a record of key → number). Sorted by |contribution| when the
+ * values are numeric; first two win. */
+function ewDrivers(components: unknown): EwDriver[] {
+  const rows: Array<EwDriver & { weight: number }> = [];
+  const push = (label: string, raw: unknown) => {
+    const n = typeof raw === "number" ? raw : Number(raw);
+    rows.push({
+      label,
+      detail: Number.isFinite(n) ? String(Math.round(n * 10) / 10) : String(raw ?? ""),
+      weight: Number.isFinite(n) ? Math.abs(n) : 0,
+    });
+  };
+  if (Array.isArray(components)) {
+    for (const c of components) {
+      if (c && typeof c === "object") {
+        const r = c as Record<string, unknown>;
+        const label = String(r.label ?? r.name ?? r.key ?? "");
+        if (!label) continue;
+        push(label, r.contribution ?? r.score ?? r.value ?? "");
+      }
+    }
+  } else if (components && typeof components === "object") {
+    for (const [k, v] of Object.entries(components as Record<string, unknown>)) {
+      if (v && typeof v === "object") {
+        const r = v as Record<string, unknown>;
+        push(k, r.contribution ?? r.score ?? r.value ?? "");
+      } else {
+        push(k, v);
+      }
+    }
+  }
+  return rows
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 2)
+    .map(({ label, detail }) => ({ label, detail }));
+}
+
+function EarlyWarningBlock({ items }: { items: EarlyWarningItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="card-surface mb-4 p-5 sm:p-6" aria-label="Early warning">
+      <div className="mb-3 flex items-baseline justify-between gap-2">
+        <h3 className="font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
+          Early warning
+        </h3>
+        <span className="caption">Portfolio-company risk scores, as computed</span>
+      </div>
+      <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {items.map((it) => {
+          const chip = ewBandChip(it.band ?? "");
+          const drivers = ewDrivers(it.components);
+          return (
+            <li
+              key={it.companyId}
+              className="rounded-xl border border-slate-100 p-4 dark:border-white/10"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <Link
+                  href={`/portfolio-monitoring/${encodeURIComponent(it.companyId)}`}
+                  className="min-w-0 truncate text-sm font-semibold text-slate-800 hover:text-gold-700 dark:text-white/90 dark:hover:text-gold-400"
+                >
+                  {it.companyName}
+                </Link>
+                <span
+                  className={`badge shrink-0 ${chip.className}`}
+                  style={chip.style}
+                >
+                  {chip.label}
+                </span>
+              </div>
+              <p className="tnum mt-1 font-display text-4xl font-semibold text-navy-900 dark:text-white">
+                {typeof it.score === "number" ? Math.round(it.score) : "—"}
+              </p>
+              {drivers.length > 0 && (
+                <p className="mt-1 text-xs text-caption">
+                  {drivers
+                    .map((d) => (d.detail ? `${d.label} ${d.detail}` : d.label))
+                    .join(" · ")}
+                </p>
+              )}
+              {it.computedAt && (
+                <p className="mt-0.5 text-[11px] text-slate-400 dark:text-white/35">
+                  Computed {fmtRelTime(it.computedAt)}
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 /* ---------------- Main section ---------------- */
 
 const selectClass =
@@ -577,6 +710,7 @@ export default function PlatformOverview() {
       setPayload({
         summary: data.summary,
         cards: Array.isArray(data.cards) ? data.cards : [],
+        earlyWarning: Array.isArray(data.earlyWarning) ? data.earlyWarning : [],
       });
       setLoadFailed(false);
     } catch {
@@ -777,6 +911,8 @@ export default function PlatformOverview() {
               caption={`${summary.ragCounts.green} on track · ${summary.ragCounts.amber} watch · ${summary.ragCounts.red} at risk`}
             />
           </div>
+
+          <EarlyWarningBlock items={payload?.earlyWarning ?? []} />
 
           {customize && layout.hidden.length > 0 && (
             <div className="mb-4 flex flex-wrap items-center gap-2">

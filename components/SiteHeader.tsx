@@ -90,7 +90,7 @@ export default function SiteHeader() {
   };
 
   // The login page has its own branding; keep the chrome out of the way there.
-  if (pathname === "/login" || pathname.startsWith("/room/")) return null;
+  if (pathname === "/login" || pathname.startsWith("/room/") || pathname === "/my-company" || pathname.startsWith("/my-company/")) return null;
 
   return (
     <header className="bg-[#0d1f3c] pt-safe">

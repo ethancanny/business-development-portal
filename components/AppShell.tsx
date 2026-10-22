@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Sidebar, { NavList, SidebarBrand } from "@/components/Sidebar";
 import GlobalSearch from "@/components/GlobalSearch";
 import NotificationCenter from "@/components/NotificationCenter";
@@ -42,8 +42,37 @@ function IconMenu({ className }: { className?: string }) {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "";
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Guest (management) users live in the scoped /my-company portal
+  // (Phase 9). UX guard only — middleware + API gates enforce scope;
+  // this just keeps a guest from ever seeing internal chrome/pages.
+  // Inert for every non-guest role (partners' experience unchanged).
+  useEffect(() => {
+    if (
+      pathname === "/login" ||
+      pathname === "/offline" ||
+      pathname.startsWith("/room/") ||
+      pathname === "/my-company" ||
+      pathname.startsWith("/my-company/")
+    ) {
+      return;
+    }
+    let live = true;
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!live || !d) return;
+        const role = (d as { role?: string }).role ?? (d as { user?: { role?: string } }).user?.role;
+        if (role === "guest") router.replace("/my-company");
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [pathname, router]);
 
   useEffect(() => {
     try {
@@ -80,9 +109,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     });
   };
 
-  // Login / offline have their own branding — no shell chrome there
-  // (matches SiteHeader / MobileNav behavior).
-  if (pathname === "/login" || pathname === "/offline" || pathname.startsWith("/room/")) {
+  // Login / offline / the scoped company portal have their own
+  // branding — no shell chrome there (matches SiteHeader / MobileNav
+  // behavior; /my-company mirrors the /room/* handling).
+  if (
+    pathname === "/login" ||
+    pathname === "/offline" ||
+    pathname.startsWith("/room/") ||
+    pathname === "/my-company" ||
+    pathname.startsWith("/my-company/")
+  ) {
     return <>{children}</>;
   }
 

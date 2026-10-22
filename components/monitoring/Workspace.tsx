@@ -4,8 +4,9 @@
  * Portfolio Monitoring company workspace shell (Phase 8) — one
  * portfolio company's monitoring record: header (company + status
  * chips from GET /companies/[companyId]), Board pack / Investor
- * update export buttons, and the eight tabs (Overview, Reporting,
- * KPIs, Variance, VC Plan, Cash & Debt, Covenants, Alerts). Each tab
+ * update export buttons, and the tabs (Overview, Reporting,
+ * KPIs, Variance, VC Plan, Cash & Debt, Covenants, Alerts, plus the
+ * Phase 9 Board, Lender, Valuations, Risks, Cap Table, Exit). Each tab
  * fetches its own slice on open — no polling anywhere. Tab selection
  * persists per company in sessionStorage (capital workspace pattern).
  */
@@ -36,6 +37,12 @@ import VcTab from "@/components/monitoring/VcTab";
 import CashDebtTab from "@/components/monitoring/CashDebtTab";
 import CovenantsTab from "@/components/monitoring/CovenantsTab";
 import AlertsTab from "@/components/monitoring/AlertsTab";
+import BoardTab from "@/components/portmgmt/BoardTab";
+import LenderTab from "@/components/portmgmt/LenderTab";
+import ValuationsTab from "@/components/portmgmt/ValuationsTab";
+import RisksTab from "@/components/portmgmt/RisksTab";
+import CapTableTab from "@/components/portmgmt/CapTableTab";
+import ExitTab from "@/components/portmgmt/ExitTab";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -46,6 +53,12 @@ const TABS = [
   { key: "cash", label: "Cash & Debt" },
   { key: "covenants", label: "Covenants" },
   { key: "alerts", label: "Alerts" },
+  { key: "board", label: "Board" },
+  { key: "lender", label: "Lender" },
+  { key: "valuations", label: "Valuations" },
+  { key: "risks", label: "Risks" },
+  { key: "captable", label: "Cap Table" },
+  { key: "exit", label: "Exit" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -269,6 +282,12 @@ export default function MonitoringWorkspace({ companyId }: { companyId: string }
         {tab === "cash" && <CashDebtTab {...tabProps} />}
         {tab === "covenants" && <CovenantsTab {...tabProps} />}
         {tab === "alerts" && <AlertsTab {...tabProps} />}
+        {tab === "board" && <BoardTab {...tabProps} />}
+        {tab === "lender" && <LenderTab {...tabProps} />}
+        {tab === "valuations" && <ValuationsTab {...tabProps} />}
+        {tab === "risks" && <RisksTab {...tabProps} />}
+        {tab === "captable" && <CapTableTab {...tabProps} />}
+        {tab === "exit" && <ExitTab {...tabProps} />}
       </div>
     </div>
   );

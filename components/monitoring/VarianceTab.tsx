@@ -44,6 +44,42 @@ export default function VarianceTab({ companyId }: MonitoringTabProps) {
   const [budget, setBudget] = useState({ revenue: "", grossProfit: "", ebitda: "" });
   const [savingBudget, setSavingBudget] = useState(false);
 
+  // Budget versions (Phase 9): the budgets payload carries versions[]
+  // + approvedVersionId / draftVersionId. Line editing binds to the
+  // selected DRAFT version; approved versions are read-only.
+  const [budgetFy, setBudgetFy] = useState<number | null>(null);
+  const [versions, setVersions] = useState<Rec[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState("");
+  const [versionBusy, setVersionBusy] = useState("");
+  const selectedVersion = versions.find((v) => str(pick(v, "id")) === selectedVersionId) ?? null;
+  const selectedStatus = selectedVersion
+    ? str(pick(selectedVersion, "status")).toLowerCase()
+    : "";
+  const budgetLocked = versions.length > 0 && selectedStatus !== "draft";
+
+  const applyBudgetPayload = useCallback((b: Rec, preferVersionId?: string) => {
+    const vs = listFrom(b, "versions");
+    setVersions(vs);
+    const draftId = str(pick(b, "draftVersionId"));
+    const approvedId = str(pick(b, "approvedVersionId"));
+    const chosen =
+      (preferVersionId && vs.some((v) => str(pick(v, "id")) === preferVersionId)
+        ? preferVersionId
+        : "") ||
+      (vs.some((v) => str(pick(v, "id")) === draftId) ? draftId : "") ||
+      (vs.some((v) => str(pick(v, "id")) === approvedId) ? approvedId : "") ||
+      (vs[0] ? str(pick(vs[0], "id")) : "");
+    setSelectedVersionId(chosen);
+    const lines = listFrom(b, "lines", "budgets");
+    const amt = (key: string) =>
+      num(pick(lines.find((l) => str(pick(l, "lineKey")) === key) ?? {}, "amount"));
+    setBudget({
+      revenue: String(amt("revenue") ?? ""),
+      grossProfit: String(amt("gross_profit") ?? ""),
+      ebitda: String(amt("ebitda") ?? ""),
+    });
+  }, []);
+
   const periodOf = useCallback(
     (r: Rec) => str(pick(r, "id", "periodId")) || dateOnly(pick(r, "periodEnd")),
     []
@@ -67,26 +103,21 @@ export default function VarianceTab({ companyId }: MonitoringTabProps) {
       }
       setNotes(n);
       // Budget editor for the period's fiscal year: budgets are
-      // fiscal-year line items ({ lines: [{ lineKey, amount }] }).
+      // fiscal-year line items ({ lines: [{ lineKey, amount }] })
+      // grouped into versions (Phase 9 payload adds versions[]).
       try {
         const fy = periodEnd ? Number(periodEnd.slice(0, 4)) : NaN;
         if (Number.isFinite(fy)) {
+          setBudgetFy(fy);
           const b = await api<Rec>(`${base}/budgets?fiscalYear=${fy}`);
-          const lines = listFrom(b, "lines", "budgets");
-          const amt = (key: string) =>
-            num(pick(lines.find((l) => str(pick(l, "lineKey")) === key) ?? {}, "amount"));
-          setBudget({
-            revenue: String(amt("revenue") ?? ""),
-            grossProfit: String(amt("gross_profit") ?? ""),
-            ebitda: String(amt("ebitda") ?? ""),
-          });
+          applyBudgetPayload(b);
         }
       } catch {
         /* budgets are an editor convenience — variance still renders */
       }
       return periodEnd;
     },
-    [base]
+    [base, applyBudgetPayload]
   );
 
   const load = useCallback(async () => {
@@ -153,7 +184,7 @@ export default function VarianceTab({ companyId }: MonitoringTabProps) {
   const saveBudget = async () => {
     const rec = periods.find((p) => periodOf(p) === periodKey);
     const periodEnd = dateOnly(pick(rec ?? {}, "periodEnd"));
-    if (!periodEnd || savingBudget) return;
+    if (!periodEnd || savingBudget || budgetLocked) return;
     const fiscalYear = Number(periodEnd.slice(0, 4));
     if (!Number.isFinite(fiscalYear)) return;
     setSavingBudget(true);
@@ -163,6 +194,7 @@ export default function VarianceTab({ companyId }: MonitoringTabProps) {
         method: "PUT",
         body: JSON.stringify({
           fiscalYear,
+          versionId: selectedVersionId || undefined,
           lines: [
             { lineKey: "revenue", amount: parseNum(budget.revenue) },
             { lineKey: "gross_profit", amount: parseNum(budget.grossProfit) },
@@ -175,6 +207,60 @@ export default function VarianceTab({ companyId }: MonitoringTabProps) {
       setError("Could not save that budget.");
     } finally {
       setSavingBudget(false);
+    }
+  };
+
+  const selectVersion = async (versionId: string) => {
+    setSelectedVersionId(versionId);
+    if (budgetFy === null) return;
+    setError("");
+    try {
+      const b = await api<Rec>(
+        `${base}/budgets?fiscalYear=${budgetFy}&versionId=${encodeURIComponent(versionId)}`
+      );
+      applyBudgetPayload(b, versionId);
+    } catch {
+      setError("Could not load that budget version.");
+    }
+  };
+
+  const createVersion = async (kind: "annual" | "reforecast") => {
+    if (budgetFy === null || versionBusy) return;
+    setVersionBusy(`create-${kind}`);
+    setError("");
+    try {
+      const d = await api<Rec>(`${base}/budgets/versions`, {
+        method: "POST",
+        body: JSON.stringify({ fiscalYear: budgetFy, kind }),
+      });
+      const created = (pick(d, "version") ?? d) as Rec;
+      const rec = periods.find((p) => periodOf(p) === periodKey);
+      await loadVariance(periodKey, rec);
+      const newId = str(pick(created, "id"));
+      if (newId) await selectVersion(newId);
+    } catch {
+      setError("Could not create that budget version.");
+    } finally {
+      setVersionBusy("");
+    }
+  };
+
+  const setVersionStatus = async (status: string) => {
+    if (!selectedVersionId || versionBusy) return;
+    setVersionBusy(`status-${status}`);
+    setError("");
+    try {
+      await api(`${base}/budgets/versions/${encodeURIComponent(selectedVersionId)}`, {
+        method: "POST",
+        body: JSON.stringify({ status }),
+      });
+      const rec = periods.find((p) => periodOf(p) === periodKey);
+      await loadVariance(periodKey, rec);
+      await selectVersion(selectedVersionId);
+    } catch {
+      setError("Could not change that version's status.");
+    } finally {
+      setVersionBusy("");
     }
   };
 
@@ -264,23 +350,124 @@ export default function VarianceTab({ companyId }: MonitoringTabProps) {
           <h4 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">
             Budget for this period&apos;s fiscal year
           </h4>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
-            <div>
-              <label className={labelCls}>Revenue budget ($)</label>
-              <input inputMode="numeric" className={`${inputCls} min-h-[44px]`} value={budget.revenue} onChange={(e) => setBudget((b) => ({ ...b, revenue: e.target.value }))} />
-            </div>
-            <div>
-              <label className={labelCls}>Gross profit budget ($)</label>
-              <input inputMode="numeric" className={`${inputCls} min-h-[44px]`} value={budget.grossProfit} onChange={(e) => setBudget((b) => ({ ...b, grossProfit: e.target.value }))} />
-            </div>
-            <div>
-              <label className={labelCls}>EBITDA budget ($)</label>
-              <input inputMode="numeric" className={`${inputCls} min-h-[44px]`} value={budget.ebitda} onChange={(e) => setBudget((b) => ({ ...b, ebitda: e.target.value }))} />
-            </div>
-            <Button onClick={() => void saveBudget()} loading={savingBudget} className="min-h-[44px]">
-              Save budget
+
+          {/* Version bar (Phase 9) */}
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            {versions.length === 0 ? (
+              <span className="text-xs text-slate-400 dark:text-white/40">
+                No versions yet — lines save to the working budget; create a version to start the approve flow.
+              </span>
+            ) : (
+              versions.map((v) => {
+                const id = str(pick(v, "id"));
+                const st = str(pick(v, "status")).toLowerCase();
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => void selectVersion(id)}
+                    aria-pressed={id === selectedVersionId}
+                    className={`chip min-h-[44px] ${id === selectedVersionId ? "chip-active" : ""}`}
+                  >
+                    v{str(pick(v, "versionNo")) || "?"} · {str(pick(v, "kind")) || "annual"} ·{" "}
+                    <span
+                      className={`badge ${
+                        st === "approved"
+                          ? "badge-fit"
+                          : st === "draft"
+                            ? "badge-warn"
+                            : "badge-neutral"
+                      }`}
+                    >
+                      {st || "—"}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+            <span className="mx-1 hidden h-6 w-px bg-slate-200 dark:bg-white/10 sm:block" />
+            <Button
+              size="sm"
+              variant="secondary"
+              className="min-h-[44px]"
+              loading={versionBusy === "create-annual"}
+              disabled={budgetFy === null}
+              onClick={() => void createVersion("annual")}
+            >
+              New annual version
             </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="min-h-[44px]"
+              loading={versionBusy === "create-reforecast"}
+              disabled={budgetFy === null}
+              onClick={() => void createVersion("reforecast")}
+            >
+              New reforecast
+            </Button>
+            {selectedVersion && selectedStatus === "draft" && (
+              <Button
+                size="sm"
+                className="min-h-[44px]"
+                loading={versionBusy === "status-submitted"}
+                onClick={() => void setVersionStatus("submitted")}
+              >
+                Submit for approval
+              </Button>
+            )}
+            {selectedVersion && selectedStatus === "submitted" && (
+              <>
+                <Button
+                  size="sm"
+                  className="min-h-[44px]"
+                  loading={versionBusy === "status-approved"}
+                  onClick={() => void setVersionStatus("approved")}
+                >
+                  Approve
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="min-h-[44px]"
+                  loading={versionBusy === "status-draft"}
+                  onClick={() => void setVersionStatus("draft")}
+                >
+                  Return to draft
+                </Button>
+              </>
+            )}
           </div>
+          {selectedVersion && (
+            <p className="mt-2 text-xs text-slate-400 dark:text-white/40">
+              {budgetLocked
+                ? `🔒 Version ${str(pick(selectedVersion, "versionNo"))} is ${selectedStatus || "locked"} — read-only. Create a reforecast to change figures.`
+                : `Editing draft version ${str(pick(selectedVersion, "versionNo"))} (${str(pick(selectedVersion, "kind"))}).`}
+              {str(pick(selectedVersion, "approvedBy"))
+                ? ` Approved by ${str(pick(selectedVersion, "approvedBy"))}.`
+                : ""}
+            </p>
+          )}
+
+          <fieldset disabled={budgetLocked} className="mt-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
+              <div>
+                <label className={labelCls}>Revenue budget ($)</label>
+                <input inputMode="numeric" className={`${inputCls} min-h-[44px]`} value={budget.revenue} onChange={(e) => setBudget((b) => ({ ...b, revenue: e.target.value }))} />
+              </div>
+              <div>
+                <label className={labelCls}>Gross profit budget ($)</label>
+                <input inputMode="numeric" className={`${inputCls} min-h-[44px]`} value={budget.grossProfit} onChange={(e) => setBudget((b) => ({ ...b, grossProfit: e.target.value }))} />
+              </div>
+              <div>
+                <label className={labelCls}>EBITDA budget ($)</label>
+                <input inputMode="numeric" className={`${inputCls} min-h-[44px]`} value={budget.ebitda} onChange={(e) => setBudget((b) => ({ ...b, ebitda: e.target.value }))} />
+              </div>
+              <Button onClick={() => void saveBudget()} loading={savingBudget} className="min-h-[44px]">
+                Save budget
+              </Button>
+            </div>
+          </fieldset>
         </div>
       </Section>
     </div>
