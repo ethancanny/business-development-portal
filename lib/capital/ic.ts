@@ -133,23 +133,17 @@ export async function saveScorecard(
   const notes = { ...current.notes, ...notesPatch };
 
   const db = sql();
-  const existing = await db`
-    SELECT id FROM capital.ic_scorecards
-    WHERE deal_id = ${dealId} AND deleted_at IS NULL LIMIT 1`;
-  if (existing.length) {
-    await db`
-      UPDATE capital.ic_scorecards
-      SET scores = ${JSON.stringify(scores)}::jsonb,
-          notes = ${JSON.stringify(notes)}::jsonb,
-          updated_by = ${actor}, updated_at = now()
-      WHERE deal_id = ${dealId} AND deleted_at IS NULL`;
-  } else {
-    await db`
-      INSERT INTO capital.ic_scorecards (id, deal_id, scores, notes, updated_by)
-      VALUES (${`ics_${newId()}`}, ${dealId},
-        ${JSON.stringify(scores)}::jsonb},
-        ${JSON.stringify(notes)}::jsonb, ${actor})`;
-  }
+  const id = `ics_${newId()}`;
+  await db`
+    INSERT INTO capital.ic_scorecards (id, deal_id, scores, notes, updated_by)
+    VALUES (${id}, ${dealId},
+      ${JSON.stringify(scores)}::jsonb,
+      ${JSON.stringify(notes)}::jsonb, ${actor})
+    ON CONFLICT (deal_id) WHERE deleted_at IS NULL DO UPDATE SET
+      scores = EXCLUDED.scores,
+      notes = EXCLUDED.notes,
+      updated_by = EXCLUDED.updated_by,
+      updated_at = now()`;
   return getScorecard(dealId);
 }
 
