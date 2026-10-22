@@ -16,7 +16,12 @@ export const SYNC_INTERVALS = {
   watchlistAndMarketEvents: "daily 05:00",
   fitEnrichment: "once per new record",
   dataRoomAccessLogs: "on demand, cached 15m",
-  remindersPush: "scheduled at due time, no scanning loops",
+  remindersPush:
+    "event-driven: core.jobs scheduled at the exact due time when a record is created/edited (push_reminder / push_meeting60), drained opportunistically by platform API activity, the calendar webhook + watchdog ensure endpoint, market ingest and deal-flow writes; no scanning loop",
+  pushDigest:
+    "daily 08:00 America/Phoenix via the push_morning_digest job (morning digest + stalled deals + quiet contacts + feed silence + queued-digest flush); the job self-perpetuates and is bootstrapped by ensureMorningDigestJob",
+  dataChangePush:
+    "evaluated inline at the write that creates the state: deal-flow POST -> newListing; market ingest completion -> fitSignals / competingBuyer / feedDown; candidate create/update/rescore -> candidateHighScore. POST /api/push/check is a manual/diagnostic trigger only",
   frontend:
     "fetch on open + pull-to-refresh, stale 5-10m, no focus/reconnect refetch, no interval polling",
 } as const;

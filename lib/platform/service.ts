@@ -99,6 +99,19 @@ export async function ensurePlatform(): Promise<void> {
   } catch (err) {
     console.error("[platform] normalized-name repair failed", err);
   }
+  // Event-driven push (Oct 21, 2026): keep the daily digest job
+  // scheduled and drain due push jobs opportunistically on platform
+  // activity — this is one of the queue's drain triggers (no polling
+  // loop). Never breaks reads.
+  try {
+    const { ensureMorningDigestJob, drainPushJobs } = await import(
+      "../push-schedule"
+    );
+    await ensureMorningDigestJob();
+    await drainPushJobs(3);
+  } catch (err) {
+    console.error("[platform] push schedule/drain failed", err);
+  }
 }
 
 /* ------------------------------ Overview ------------------------------ */

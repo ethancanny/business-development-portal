@@ -38,6 +38,23 @@ export async function enqueueJob(
   return id;
 }
 
+/** Enqueue a job that becomes due at an exact instant (run_after) —
+ * the scheduling primitive for event-driven push notifications and
+ * the daily digest (lib/push-schedule.ts). */
+export async function enqueueJobAt(
+  kind: string,
+  payload: Record<string, unknown> = {},
+  runAfter: Date
+): Promise<string> {
+  const db = sql();
+  const id = newId();
+  await db`
+    INSERT INTO core.jobs (id, kind, payload, status, run_after)
+    VALUES (${id}, ${kind}, ${JSON.stringify(payload)}::jsonb, 'queued',
+      ${runAfter.toISOString()})`;
+  return id;
+}
+
 /**
  * Enqueue only if no queued/running job of this kind exists — the
  * dedupe primitive event handlers use so a burst of events produces a
@@ -110,6 +127,55 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
       // writes, no notifications.
       const { regenerateGeneratedEvents } = await import("../calgen/service");
       await regenerateGeneratedEvents();
+      return;
+    }
+    case "push_reminder": {
+      // Event-driven push (Oct 21, 2026): fire the follow-up/event
+      // reminder for exactly one record, re-derived from live state.
+      // If the moment moved into the future, re-enqueue at the new
+      // instant instead of firing stale.
+      const { fireReminderForItem } = await import("../push-evals");
+      const itemKind = job.payload.itemKind === "event" ? "event" : "task";
+      const itemId = str(job.payload.itemId);
+      if (itemId) {
+        const r = await fireReminderForItem(itemKind, itemId, new Date());
+        if (r.rescheduleAt) {
+          await enqueueJobAt(
+            "push_reminder",
+            job.payload,
+            new Date(r.rescheduleAt)
+          );
+        }
+      }
+      return;
+    }
+    case "push_meeting60": {
+      const { fireMeetingForEvent } = await import("../push-evals");
+      const itemId = str(job.payload.itemId);
+      if (itemId) {
+        const r = await fireMeetingForEvent(itemId, new Date());
+        if (r.rescheduleAt) {
+          await enqueueJobAt(
+            "push_meeting60",
+            job.payload,
+            new Date(r.rescheduleAt)
+          );
+        }
+      }
+      return;
+    }
+    case "push_morning_digest": {
+      // Daily 8:00 AM Phoenix bundle (morning digest + stalled +
+      // quiet contacts + feed silence + digest flush), then
+      // self-perpetuate: enqueue tomorrow's job.
+      const { runMorningDigestBundle } = await import("../push-evals");
+      await runMorningDigestBundle(new Date());
+      const { nextDigestRunAfter } = await import("../push-schedule");
+      await enqueueJobAt(
+        "push_morning_digest",
+        { reason: "daily" },
+        nextDigestRunAfter(new Date())
+      );
       return;
     }
     case "dedupe_scan": {
