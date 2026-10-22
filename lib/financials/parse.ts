@@ -882,6 +882,31 @@ export function parseFinancialDocument(input: ParseInput): ParsedDoc {
       }
       const rawPeriods = parseGrids(grids, input.documentId);
       const { periods, notes } = assemble(rawPeriods, gridsText(grids));
+      // P5-DIAG3 (temporary, Phase 5 Item 0): expose the grid the parser
+      // actually received plus direct findPeriodMentions probes.
+      if (
+        periods.length === 1 &&
+        !periods[0].periodEnd &&
+        grids.length > 0
+      ) {
+        const g0 = grids[0];
+        const probe = (s: string) =>
+          findPeriodMentions(s)
+            .map((m) => `${m.type}:${m.periodEnd ?? ""}`)
+            .join(",");
+        notes.push(
+          `P5-DIAG3: grids=${grids.length} sheet=${JSON.stringify(g0.sheet)} ` +
+            `rows=${g0.rows.length} ` +
+            `firstRows=${JSON.stringify(
+              g0.rows.slice(0, 4).map((r) => r.map((c) => c.text))
+            )} ` +
+            `probeFY2023=[${probe("FY2023")}] probeDec2023=[${probe(
+              "Dec 2023"
+            )}] probe2023=[${probe("2023")}] probeFiscal=[${probe(
+              "Fiscal Year 2023"
+            )}]`
+        );
+      }
       return {
         status: periods.length ? "done" : "empty",
         extractor,
