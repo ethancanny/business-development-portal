@@ -151,8 +151,24 @@ export interface BudgetRow {
   id: string;
   companyId: string;
   fiscalYear: number;
+  versionId: string | null;
   lineKey: string;
   amount: number | null;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BudgetVersionRow {
+  id: string;
+  companyId: string;
+  fiscalYear: number;
+  versionNo: number;
+  kind: string;
+  status: string;
+  createdBy: string;
+  approvedBy: string;
+  approvedAt: string | null;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -298,8 +314,26 @@ function rowToBudget(r: Record<string, unknown>): BudgetRow {
     id: str(r.id),
     companyId: str(r.company_id),
     fiscalYear: num(r.fiscal_year),
+    versionId: r.version_id ? str(r.version_id) : null,
     lineKey: str(r.line_key),
     amount: numOrNull(r.amount),
+    notes: str(r.notes),
+    createdAt: isoOrNull(r.created_at) ?? "",
+    updatedAt: isoOrNull(r.updated_at) ?? "",
+  };
+}
+
+function rowToBudgetVersion(r: Record<string, unknown>): BudgetVersionRow {
+  return {
+    id: str(r.id),
+    companyId: str(r.company_id),
+    fiscalYear: num(r.fiscal_year),
+    versionNo: num(r.version_no),
+    kind: str(r.kind) || "annual",
+    status: str(r.status) || "draft",
+    createdBy: str(r.created_by),
+    approvedBy: str(r.approved_by),
+    approvedAt: isoOrNull(r.approved_at),
     notes: str(r.notes),
     createdAt: isoOrNull(r.created_at) ?? "",
     updatedAt: isoOrNull(r.updated_at) ?? "",
@@ -807,14 +841,27 @@ export const BUDGET_LINE_KEYS = [
 export interface BudgetsResult {
   companyId: string;
   fiscalYear: number | null;
+  /** Lines of the current APPROVED version (Phase 9 versioning);
+   * Phase 8 semantics preserved — budgets are approved truth. */
   lines: BudgetRow[];
   years: number[];
+  versions: BudgetVersionRow[];
+  approvedVersionId: string | null;
+  draftVersionId: string | null;
 }
 
-export async function getBudgets(
+export const BUDGET_VERSION_KINDS = ["annual", "reforecast"] as const;
+export const BUDGET_VERSION_STATUSES = [
+  "draft",
+  "submitted",
+  "approved",
+  "superseded",
+] as const;
+
+export async function listBudgetVersions(
   companyId: string,
   fiscalYear?: number
-): Promise<BudgetsResult> {
+): Promise<BudgetVersionRow[]> {
   await ensureMonitoring();
   const db = sql();
   const yearFilter =
@@ -822,21 +869,88 @@ export async function getBudgets(
       ? Math.trunc(fiscalYear)
       : null;
   const rows = await db`
+    SELECT * FROM monitoring.budget_versions
+    WHERE company_id = ${companyId} AND deleted_at IS NULL
+      AND (${yearFilter}::int IS NULL OR fiscal_year = ${yearFilter})
+    ORDER BY fiscal_year DESC, version_no DESC`;
+  return rows.map((r) => rowToBudgetVersion(r as Record<string, unknown>));
+}
+
+async function getBudgetVersionById(
+  versionId: string
+): Promise<BudgetVersionRow | null> {
+  const db = sql();
+  const rows = await db`
+    SELECT * FROM monitoring.budget_versions
+    WHERE id = ${versionId} AND deleted_at IS NULL LIMIT 1`;
+  return rows.length
+    ? rowToBudgetVersion(rows[0] as Record<string, unknown>)
+    : null;
+}
+
+export async function getBudgets(
+  companyId: string,
+  fiscalYear?: number,
+  versionId?: string
+): Promise<BudgetsResult> {
+  await ensureMonitoring();
+  const db = sql();
+  const yearFilter =
+    typeof fiscalYear === "number" && isFinite(fiscalYear)
+      ? Math.trunc(fiscalYear)
+      : null;
+  const allVersions = await listBudgetVersions(companyId);
+  const versions = yearFilter
+    ? allVersions.filter((v) => v.fiscalYear === yearFilter)
+    : allVersions;
+  const approvedByYear = new Map<number, string>();
+  for (const v of allVersions) {
+    if (v.status === "approved" && !approvedByYear.has(v.fiscalYear)) {
+      approvedByYear.set(v.fiscalYear, v.id);
+    }
+  }
+  const rows = await db`
     SELECT * FROM monitoring.budgets
     WHERE company_id = ${companyId} AND deleted_at IS NULL
       AND (${yearFilter}::int IS NULL OR fiscal_year = ${yearFilter})
     ORDER BY fiscal_year DESC, line_key ASC`;
+  const allLines = rows.map((r) => rowToBudget(r as Record<string, unknown>));
+  // Default lines = the current APPROVED version's lines per year.
+  // A year with no versions at all (pre-migration safety) keeps its
+  // version-less rows visible rather than silently emptying.
+  const approvedLines = allLines.filter((l) => {
+    const approvedId = approvedByYear.get(l.fiscalYear);
+    if (approvedId) return l.versionId === approvedId;
+    return l.versionId === null;
+  });
+  // Explicit version selection (budget version bar in the UI): serve
+  // that version's lines instead of the approved default. Unknown or
+  // foreign version ids fall back to the approved lines.
+  const lines =
+    versionId && allVersions.some((v) => v.id === versionId)
+      ? allLines.filter((l) => l.versionId === versionId)
+      : approvedLines;
   const yearRows = await db`
     SELECT DISTINCT fiscal_year FROM monitoring.budgets
     WHERE company_id = ${companyId} AND deleted_at IS NULL
     ORDER BY fiscal_year DESC`;
+  const years = yearRows.map((r) =>
+    num((r as Record<string, unknown>).fiscal_year)
+  );
+  const focusYear = yearFilter ?? years[0] ?? null;
+  const focusVersions = focusYear
+    ? allVersions.filter((v) => v.fiscalYear === focusYear)
+    : [];
   return {
     companyId,
     fiscalYear: yearFilter,
-    lines: rows.map((r) => rowToBudget(r as Record<string, unknown>)),
-    years: yearRows.map((r) =>
-      num((r as Record<string, unknown>).fiscal_year)
-    ),
+    lines,
+    years,
+    versions,
+    approvedVersionId:
+      focusVersions.find((v) => v.status === "approved")?.id ?? null,
+    draftVersionId:
+      focusVersions.find((v) => v.status === "draft")?.id ?? null,
   };
 }
 
@@ -846,12 +960,124 @@ export interface BudgetLineInput {
   notes?: string;
 }
 
-/** Bulk budget upsert for one fiscal year (validated line keys). */
+export async function createBudgetVersion(
+  companyId: string,
+  fiscalYear: number,
+  input: { kind?: string; notes?: string } = {},
+  actor = ""
+): Promise<BudgetVersionRow> {
+  await ensureMonitoring();
+  if (
+    typeof fiscalYear !== "number" ||
+    !isFinite(fiscalYear) ||
+    Math.trunc(fiscalYear) < 2000 ||
+    Math.trunc(fiscalYear) > 2200
+  ) {
+    throw new MonitoringError("invalid_fiscal_year");
+  }
+  const year = Math.trunc(fiscalYear);
+  const kind = (input.kind ?? "annual").trim() || "annual";
+  if (!(BUDGET_VERSION_KINDS as readonly string[]).includes(kind)) {
+    throw new MonitoringError("invalid_budget_version_kind");
+  }
+  const db = sql();
+  const maxRows = await db`
+    SELECT coalesce(max(version_no), 0) AS max_no
+    FROM monitoring.budget_versions
+    WHERE company_id = ${companyId} AND fiscal_year = ${year}
+      AND deleted_at IS NULL`;
+  const nextNo =
+    num((maxRows[0] as Record<string, unknown>).max_no) + 1;
+  const id = `monbudv_${newId()}`;
+  await db`
+    INSERT INTO monitoring.budget_versions
+      (id, company_id, fiscal_year, version_no, kind, status,
+       created_by, notes)
+    VALUES (${id}, ${companyId}, ${year}, ${nextNo}, ${kind}, 'draft',
+      ${actor}, ${(input.notes ?? "").trim()})`;
+  const created = await getBudgetVersionById(id);
+  if (!created) throw new MonitoringError("budget_version_not_found");
+  return created;
+}
+
+/**
+ * Transition a budget version's status. Approving supersedes the
+ * previously approved version for the same (company, fiscal year) in
+ * the same flow, and stamps approved_by / approved_at.
+ */
+export async function setBudgetVersionStatus(
+  versionId: string,
+  status: string,
+  actor: string
+): Promise<BudgetVersionRow> {
+  await ensureMonitoring();
+  const next = (status ?? "").trim();
+  if (!(BUDGET_VERSION_STATUSES as readonly string[]).includes(next)) {
+    throw new MonitoringError("invalid_budget_version_status");
+  }
+  const version = await getBudgetVersionById(versionId);
+  if (!version) throw new MonitoringError("budget_version_not_found");
+  if (version.status === "superseded" && next !== "superseded") {
+    throw new MonitoringError("budget_version_locked");
+  }
+  const db = sql();
+  if (next === "approved") {
+    await db`
+      UPDATE monitoring.budget_versions
+      SET status = 'superseded', updated_at = now()
+      WHERE company_id = ${version.companyId}
+        AND fiscal_year = ${version.fiscalYear}
+        AND status = 'approved' AND deleted_at IS NULL
+        AND id <> ${versionId}`;
+    await db`
+      UPDATE monitoring.budget_versions
+      SET status = 'approved', approved_by = ${actor},
+          approved_at = now(), updated_at = now()
+      WHERE id = ${versionId}`;
+  } else {
+    await db`
+      UPDATE monitoring.budget_versions
+      SET status = ${next}, updated_at = now()
+      WHERE id = ${versionId}`;
+  }
+  const updated = await getBudgetVersionById(versionId);
+  if (!updated) throw new MonitoringError("budget_version_not_found");
+  return updated;
+}
+
+/** Resolve the writable (draft) version for an upsert: an explicit
+ * versionId must belong to this company+year and be a draft; without
+ * one, the latest draft for the year is used; no draft → error. */
+async function resolveDraftVersion(
+  companyId: string,
+  fiscalYear: number,
+  versionId?: string
+): Promise<BudgetVersionRow> {
+  if (versionId) {
+    const v = await getBudgetVersionById(versionId);
+    if (!v || v.companyId !== companyId || v.fiscalYear !== fiscalYear) {
+      throw new MonitoringError("budget_version_not_found");
+    }
+    if (v.status !== "draft") {
+      throw new MonitoringError("budget_version_locked");
+    }
+    return v;
+  }
+  const versions = await listBudgetVersions(companyId, fiscalYear);
+  const draft = versions.find((v) => v.status === "draft");
+  if (!draft) throw new MonitoringError("budget_version_required");
+  return draft;
+}
+
+/** Bulk budget upsert for one fiscal year (validated line keys).
+ * Phase 9: writes ONLY into a draft version (explicit versionId or
+ * the year's latest draft) — approved/superseded versions are locked. */
 export async function upsertBudgets(
   companyId: string,
   fiscalYear: number,
   lines: BudgetLineInput[],
-  actor: string
+  actor: string,
+  versionId?: string
 ): Promise<BudgetsResult> {
   void actor;
   await ensureMonitoring();
@@ -879,24 +1105,25 @@ export async function upsertBudgets(
       throw new MonitoringError("invalid_amount");
     }
   }
+  const version = await resolveDraftVersion(companyId, year, versionId);
   const db = sql();
   for (const line of lines) {
     const existing = await db`
       SELECT id FROM monitoring.budgets
-      WHERE company_id = ${companyId} AND fiscal_year = ${year}
+      WHERE company_id = ${companyId} AND version_id = ${version.id}
         AND line_key = ${line.lineKey} AND deleted_at IS NULL LIMIT 1`;
     if (existing.length) {
       await db`
         UPDATE monitoring.budgets
         SET amount = ${line.amount}, notes = ${line.notes ?? ""},
-            updated_at = now()
+            fiscal_year = ${year}, updated_at = now()
         WHERE id = ${str((existing[0] as Record<string, unknown>).id)}`;
     } else {
       await db`
         INSERT INTO monitoring.budgets
-          (id, company_id, fiscal_year, line_key, amount, notes)
+          (id, company_id, fiscal_year, version_id, line_key, amount, notes)
         VALUES (${`monbud_${newId()}`}, ${companyId}, ${year},
-          ${line.lineKey}, ${line.amount}, ${line.notes ?? ""})`;
+          ${version.id}, ${line.lineKey}, ${line.amount}, ${line.notes ?? ""})`;
     }
   }
   return getBudgets(companyId, year);
@@ -1046,10 +1273,23 @@ export async function getVariance(
     actuals.set(row.kpiKey, row.value);
   }
 
-  const budgetRows = await db`
-    SELECT * FROM monitoring.budgets
+  // Phase 9: variance reads budget lines from the current APPROVED
+  // version only (drafts never move variance). A year with no
+  // approved version contributes no budget column.
+  const approvedRows = await db`
+    SELECT id FROM monitoring.budget_versions
     WHERE company_id = ${companyId} AND fiscal_year = ${fiscalYear}
-      AND deleted_at IS NULL`;
+      AND status = 'approved' AND deleted_at IS NULL
+    ORDER BY version_no DESC LIMIT 1`;
+  const approvedVersionId = approvedRows.length
+    ? str((approvedRows[0] as Record<string, unknown>).id)
+    : null;
+  const budgetRows = approvedVersionId
+    ? await db`
+        SELECT * FROM monitoring.budgets
+        WHERE company_id = ${companyId} AND fiscal_year = ${fiscalYear}
+          AND version_id = ${approvedVersionId} AND deleted_at IS NULL`
+    : [];
   const budgets = new Map<string, number | null>();
   for (const r of budgetRows) {
     const row = rowToBudget(r as Record<string, unknown>);
