@@ -805,18 +805,16 @@ function assemble(
         `and were kept as 'unmapped' for review.`
     );
   }
-  // P5-DIAG (temporary, Phase 5 Item 0): if the whole document collapsed
-  // into a single period-less bucket while the text visibly carries
-  // FY#### / bare-year headers, say so in the notes so the deployed
-  // parser's behavior is observable from the extract response.
-  if (
-    periods.length === 1 &&
-    !periods[0].periodEnd &&
-    /\bfy\s*\d{4}\b|\b(19|20)\d{2}\b/.test(docText.slice(0, 2000))
-  ) {
+  // P5-DIAG2 (temporary, Phase 5 Item 0): when the whole document
+  // collapses into a single period-less bucket, expose what the parser
+  // saw (raw bucket count, line count, head of the assembled doc text)
+  // in the notes so the deployed behavior is observable from the
+  // extract response.
+  if (periods.length === 1 && !periods[0].periodEnd) {
     notes.push(
-      "P5-DIAG: single period-less bucket produced from a document whose " +
-        "text carries FY/year headers."
+      `P5-DIAG2: rawBuckets=${rawPeriods.length} ` +
+        `lines=${rawPeriods[0]?.lines.length ?? 0} ` +
+        `docHead=${JSON.stringify(docText.slice(0, 200))}`
     );
   }
   return { periods, notes };
