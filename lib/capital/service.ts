@@ -441,7 +441,16 @@ export async function updateInvestorProfile(
 
 /* ----------------------------- investor list ------------------------- */
 
-export interface InvestorListItem extends DirectoryListItem {
+/** List row in the Phase 7 API contract shape (personId/firm) —
+ * mapped from the Directory list item, never the raw core shape. */
+export interface InvestorListItem {
+  personId: string;
+  name: string;
+  firm: string;
+  title: string;
+  email: string;
+  phone: string;
+  types: string[];
   profile: InvestorProfile;
 }
 
@@ -489,14 +498,20 @@ export async function listInvestors(filters: {
   }
 
   let merged: InvestorListItem[] = people.map((person) => ({
-    ...person,
+    personId: person.id,
+    name: person.name,
+    firm: person.organizationName,
+    title: person.title,
+    email: person.email,
+    phone: person.phone,
+    types: person.types,
     profile: profiles.get(person.id) ?? defaultProfile(person.id),
   }));
 
   const q = (filters.q ?? "").trim().toLowerCase();
   if (q) {
     merged = merged.filter((item) =>
-      [item.name, item.organizationName, item.email, item.title]
+      [item.name, item.firm, item.email, item.title]
         .join(" ")
         .toLowerCase()
         .includes(q)
