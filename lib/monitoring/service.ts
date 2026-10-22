@@ -787,11 +787,13 @@ export async function receiveReport(
   });
 
   // KPI refresh + KPI-miss evaluation live in lib/monitoring/
-  // analytics.ts (WS-B). Dynamic import with a computed specifier so
-  // this module neither depends on nor blocks that workstream.
+  // analytics.ts (WS-B). Literal dynamic import (the house pattern —
+  // calgen/jobs dispatch): a computed specifier is not statically
+  // analyzable and silently failed to resolve in the production
+  // bundle, which the old catch then swallowed. Failures are now
+  // logged (ids only) instead of silent.
   try {
-    const analyticsSpecifier = "./analytics";
-    const analytics = (await import(analyticsSpecifier)) as {
+    const analytics = (await import("./analytics")) as {
       refreshKpisFromFinancials?: (cid: string) => Promise<unknown>;
       evaluateKpiAlerts?: (cid: string) => Promise<unknown>;
     };
@@ -801,8 +803,12 @@ export async function receiveReport(
     if (typeof analytics.evaluateKpiAlerts === "function") {
       await analytics.evaluateKpiAlerts(companyId);
     }
-  } catch {
-    /* analytics module not present yet — KPI refresh is its job */
+  } catch (err) {
+    console.error(
+      "[monitoring] analytics refresh after receive failed",
+      companyId,
+      err instanceof Error ? err.message : String(err)
+    );
   }
 
   await refreshRollups();
