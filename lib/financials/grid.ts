@@ -7,6 +7,11 @@ import * as XLSX from "xlsx";
  * the sheet is '' and the address is column letter + row number).
  * Also owns the financial number-token parser shared with the
  * text-line parser in parse.ts.
+ *
+ * Build marker: Phase 5 Item 0 clean redeploy, Oct 22, 2026 — forces a
+ * fresh production build of current head (the Oct 21 push storm left
+ * the deployed parser behaving like an older build on FY-headed and
+ * bare-year-headed workbooks; see the Part 4B checkpoint).
  */
 
 export interface GridCell {
