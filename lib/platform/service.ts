@@ -524,6 +524,42 @@ export async function getIntegrations(): Promise<IntegrationStatus[]> {
     });
   }
 
+  // Document storage (Phase 3): the interim provider status, plus the
+  // SharePoint state — setup_required until Ethan consents to the
+  // Graph Files/Sites scopes (a REAL DECISION; never self-service).
+  try {
+    const { getStorageStatus, sharepointProvider } = await import(
+      "../storage"
+    );
+    const active = await getStorageStatus();
+    out.push({
+      key: "document_storage",
+      name: "Document Storage",
+      status: active.configured ? "ok" : "error",
+      lastSuccessAt: null,
+      lastError: active.configured ? null : active.detail,
+      detail: `Provider: ${active.provider} — ${active.detail}`,
+    });
+    const sp = await sharepointProvider.status();
+    out.push({
+      key: "microsoft_sharepoint",
+      name: "Microsoft SharePoint (Data Rooms)",
+      status: sp.setupRequired ? "unknown" : "ok",
+      lastSuccessAt: null,
+      lastError: null,
+      detail: sp.detail,
+    });
+  } catch (err) {
+    out.push({
+      key: "document_storage",
+      name: "Document Storage",
+      status: "error",
+      lastSuccessAt: null,
+      lastError: err instanceof Error ? err.message : String(err),
+      detail: "Could not read storage provider status",
+    });
+  }
+
   // Passkeys (WebAuthn credentials count).
   try {
     const rows = await db`

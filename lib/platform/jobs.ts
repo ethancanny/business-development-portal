@@ -178,6 +178,15 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
       );
       return;
     }
+    case "extract_document_text": {
+      // Phase 3 (Documents): background text extraction so document
+      // contents become searchable. runExtraction never throws —
+      // failures land in core.documents.extraction_status.
+      const { runExtraction } = await import("../dataroom/extract");
+      const documentId = str(job.payload.documentId);
+      if (documentId) await runExtraction(documentId);
+      return;
+    }
     case "dedupe_scan": {
       // Pairs are computed on demand by dedupe.findDuplicates(); the scan
       // job just exercises both kinds so failures surface in the job log.

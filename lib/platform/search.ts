@@ -106,12 +106,20 @@ export async function searchAll(
   }
 
   if (want("document")) {
+    // Phase 3: the search_vector now includes extracted document text
+    // (folded in by the extraction job), so content matches land here.
+    // Results open the Documents library focused on the document.
     const rows = await db`
-      SELECT id, name, mime, company_id, updated_at
-      FROM core.documents
-      WHERE search_vector @@ plainto_tsquery('english', ${query})
-        OR name ILIKE ${like}
-      ORDER BY updated_at DESC
+      SELECT d.id, d.name, d.mime, d.company_id, d.updated_at,
+        coalesce(co.name, '') AS company_name,
+        coalesce(ld.company_name, '') AS deal_name
+      FROM core.documents d
+      LEFT JOIN core.companies co ON co.id = d.company_id
+      LEFT JOIN deals ld ON ld.id = d.deal_id
+      WHERE d.deleted_at IS NULL
+        AND (d.search_vector @@ plainto_tsquery('english', ${query})
+          OR d.name ILIKE ${like})
+      ORDER BY d.updated_at DESC
       LIMIT ${lim}`;
     for (const r of rows) {
       const rec = r as Record<string, unknown>;
@@ -119,8 +127,13 @@ export async function searchAll(
         kind: "document",
         id: str(rec.id),
         title: str(rec.name),
-        subtitle: str(rec.mime),
-        href: rec.company_id ? `/companies/${str(rec.company_id)}` : "/directory",
+        subtitle: [
+          str(rec.mime),
+          str(rec.deal_name) || str(rec.company_name),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        href: `/documents?doc=${str(rec.id)}`,
         updatedAt: isoOrNull(rec.updated_at),
       });
     }

@@ -21,6 +21,11 @@ export function middleware(req: NextRequest) {
     "/api/market/news/pending",
     "/api/market/news/summary",
     "/api/market/news/reclassify",
+    // Data room guest links (Phase 3): no session cookie exists for an
+    // external guest; the /api/guest routes authenticate the one-time
+    // room token themselves (hash lookup + expiry + revocation +
+    // allowlist) on every call.
+    "/api/guest",
   ];
   // PWA assets: browsers fetch the manifest, icons, splash images and the
   // service worker outside the page's auth context (notably iOS), and the
@@ -47,6 +52,9 @@ export function middleware(req: NextRequest) {
   ];
   if (
     pathname === "/login" ||
+    // Guest data-room page: the token in the path IS the credential;
+    // the page loads its data through the token-checked /api/guest API.
+    pathname.startsWith("/room/") ||
     PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p)) ||
     PUBLIC_ASSETS.includes(pathname) ||
     PUBLIC_PWA.includes(pathname) ||

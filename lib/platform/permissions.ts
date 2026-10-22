@@ -37,15 +37,53 @@ export async function getUserRole(email: string): Promise<Role> {
   return "guest";
 }
 
+/** Read a user's stored access scope (core.user_roles.scope JSONB). */
+export async function getUserScope(
+  email: string
+): Promise<Record<string, unknown>> {
+  const e = (email ?? "").trim().toLowerCase();
+  if (!e) return {};
+  try {
+    const db = sql();
+    const rows = await db`
+      SELECT scope FROM core.user_roles WHERE email = ${e} LIMIT 1`;
+    if (rows.length) {
+      const raw = (rows[0] as Record<string, unknown>).scope;
+      if (raw && typeof raw === "object") return raw as Record<string, unknown>;
+      if (typeof raw === "string" && raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (parsed && typeof parsed === "object") {
+          return parsed as Record<string, unknown>;
+        }
+      }
+    }
+  } catch {
+    /* fall through to empty scope */
+  }
+  return {};
+}
+
 /**
- * Phase 1 stub: admin + internal can access platform records; guests are
- * denied everything until Phase 3 wires per-data-room grants
- * (core.user_roles.scope will carry { dataRoomIds: [...] } and this
- * helper will check scope.dataRoomId against the requested room).
+ * Access check. Admin + internal can access platform records. Guests
+ * (Phase 3) are limited to SPECIFIC data rooms: their stored scope
+ * carries { dataRoomIds: [...] } and access is granted only when the
+ * requested scope names one of those rooms — either directly
+ * (dataRoomId) or as a data_room/document scope inside the room.
+ * Note the primary guest mechanism is the token link flow
+ * (lib/dataroom/guests.ts), which enforces expiry/revocation/allowlist
+ * itself; this helper covers session users carrying the guest role.
  */
-export function canAccess(role: Role, scope: AccessScope): boolean {
+export function canAccess(
+  role: Role,
+  scope: AccessScope,
+  userScope: Record<string, unknown> = {}
+): boolean {
   if (role === "admin" || role === "internal") return true;
-  // guest: no access yet — data-room-scoped grants land in Phase 3.
-  void scope;
-  return false;
+  if (role !== "guest") return false;
+  const granted = Array.isArray(userScope.dataRoomIds)
+    ? userScope.dataRoomIds.map((x) => String(x))
+    : [];
+  if (!granted.length) return false;
+  const roomId = scope.dataRoomId ?? (scope.kind === "data_room" ? scope.id : undefined);
+  return roomId !== undefined && granted.includes(roomId);
 }
