@@ -607,6 +607,11 @@ export function computeMetrics(
 export const ONE_TIME_RE =
   /gain on sale|ppp|loan forgiveness|forgiveness|nonrecurring|non-recurring|one-time|one time|insurance proceeds|erc\b|employee retention credit|related.party/i;
 
+/** The income subset of ONE_TIME_RE: items that inflate EBITDA and
+ * must be SUBTRACTED when normalized, wherever the parser mapped them. */
+export const INCOME_ONE_TIME_RE =
+  /gain on sale|ppp|loan forgiveness|forgiveness|insurance proceeds|erc\b|employee retention credit/i;
+
 function marginOf(lines: StatementLine[], kind: "gross" | "ebitda"): number | null {
   const rev = val(lines, "revenue");
   if (rev === null || rev === 0) return null;
@@ -989,6 +994,25 @@ export function suggestAdjustments(
             (hasDoc ? "" : " No source document on the originating line; market input required."),
           source,
           requiresInput: "market_owner_comp",
+          reportedSetId: p.set.id,
+        });
+        continue;
+      }
+
+      // Income-type one-time items that did NOT map to other_income
+      // (the production parser can leave e.g. a PPP forgiveness row
+      // 'unmapped'): they are income, so normalizing SUBTRACTS them —
+      // never route them into the expense add-back branch below.
+      if (l.value !== 0 && INCOME_ONE_TIME_RE.test(label)) {
+        if (!hasDoc) continue; // sourceless amount seeds are not allowed
+        push({
+          kind: "nonrecurring",
+          label,
+          amount: Math.abs(l.value),
+          direction: "subtract",
+          rationale: `One-time income "${label}" (${fmtMoney(l.value)}) in period ending ${periodLabel} inflates reported EBITDA — subtract as non-recurring`,
+          source,
+          requiresInput: null,
           reportedSetId: p.set.id,
         });
         continue;
