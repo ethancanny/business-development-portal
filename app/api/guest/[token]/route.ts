@@ -4,6 +4,12 @@ import { getRoomIndex } from "@/lib/dataroom/service";
 import { logAccess, validateGuestToken } from "@/lib/dataroom/guests";
 import { listThreads } from "@/lib/dataroom/qa";
 
+// NEVER cache: this handler reads no request/session API, so Next.js
+// would otherwise treat the GET as static and serve the first response
+// forever — which kept revoked/expired guest links working. Every call
+// must re-validate the token against the database.
+export const dynamic = "force-dynamic";
+
 /**
  * Guest data-room view. NO session auth — the room token in the path
  * is the credential (middleware lists /api/guest as public for this

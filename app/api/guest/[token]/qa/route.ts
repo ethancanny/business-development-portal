@@ -3,6 +3,10 @@ import { ensureDataRoom } from "@/lib/dataroom/schema";
 import { validateGuestToken } from "@/lib/dataroom/guests";
 import { createThread, listThreads } from "@/lib/dataroom/qa";
 
+// NEVER cache guest responses (see ../route.ts): token validity is
+// re-checked against the database on every call.
+export const dynamic = "force-dynamic";
+
 /** Guest Q&A: list the room's threads, or ask a new question. */
 export async function GET(
   _req: NextRequest,
