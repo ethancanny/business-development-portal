@@ -17,13 +17,21 @@ export const INDUSTRY_KEYWORDS: { industry: string; words: string[] }[] = [
   { industry: "Consumer & Retail", words: ["retail", "grocery", "e-commerce", "consumer brands", "franchise*"] },
 ];
 
+/** Word-boundary token sourced from a regex literal via .source — NEVER
+ * from a string literal. In the production (minified) build, a
+ * string-carried "\b" degrades to a backspace character and silently
+ * kills the boundary (proven root cause of the Phase 5 Item 0 parser
+ * bug, fixed in 9abefcf9); regex literals pass through the build
+ * verbatim, so .source always yields the true two-character sequence. */
+const WB = /\b/.source;
+
 /** Whole-word / prefix-stem keyword test: "hospital" must NOT match inside
  * "hospitality"; words ending in * match word prefixes (fabricat*). */
 export function kwMatch(text: string, word: string): boolean {
   const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return word.endsWith("*")
-    ? new RegExp(`\\b${esc.slice(0, -2)}`, "i").test(text)
-    : new RegExp(`\\b${esc}\\b`, "i").test(text);
+    ? new RegExp(`${WB}${esc.slice(0, -2)}`, "i").test(text)
+    : new RegExp(`${WB}${esc}${WB}`, "i").test(text);
 }
 
 export function classifyIndustry(text: string): string {

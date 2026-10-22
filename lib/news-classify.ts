@@ -36,14 +36,20 @@ export type NewsSector = (typeof NEWS_SECTORS)[number];
 
 /* ---------------- text helpers ---------------- */
 
+/** Word-boundary token sourced from a regex literal via .source — NEVER
+ * from a string literal (production minification degrades a
+ * string-carried "\b" to a backspace; see industry-classify.ts / the
+ * Phase 5 Item 0 fix 9abefcf9). */
+const WB = /\b/.source;
+
 /** Whole-word / prefix-stem presence (mirrors kwMatch semantics in
  * industry-classify: a trailing * matches a word prefix, so "hospital"
  * can never match inside "hospitality"). */
 function termHit(text: string, term: string): boolean {
   const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return term.endsWith("*")
-    ? new RegExp(`\\b${esc.slice(0, -2)}`, "i").test(text)
-    : new RegExp(`\\b${esc}\\b`, "i").test(text);
+    ? new RegExp(`${WB}${esc.slice(0, -2)}`, "i").test(text)
+    : new RegExp(`${WB}${esc}${WB}`, "i").test(text);
 }
 
 /** Strip a wire-style dateline ("SEOUL, South Korea — ", "PHOENIX
