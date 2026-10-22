@@ -311,7 +311,13 @@ export async function submitKpis(
   for (const c of input.custom ?? []) {
     await upsertManualKpi(
       companyId,
-      { periodEnd: c.periodEnd, kpiKey: c.key, value: c.value },
+      {
+        // Custom entries may omit the period end (the portal KPI grid
+        // sends bare key/value pairs) — default to the period's end.
+        periodEnd: c.periodEnd || period.periodEnd,
+        kpiKey: c.key,
+        value: c.value,
+      },
       actor
     );
     written.push(c.key);
