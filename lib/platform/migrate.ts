@@ -15,7 +15,7 @@ import { str, type Sql } from "./db";
 
 export const BACKFILL_KEY = "phase1-backfill-v1";
 export const TOPUP_KEY = "phase1-backfill-topup";
-export const NORMALIZED_REPAIR_KEY = "phase2-normalized-repair-v3";
+export const NORMALIZED_REPAIR_KEY = "phase2-normalized-repair-v4";
 
 export async function runBackfillOnce(
   db: Sql,
@@ -384,7 +384,8 @@ export async function repairNormalizedNames(
       }
       await db`
         UPDATE core.organizations
-        SET deleted_at = now(), updated_at = now()
+        SET deleted_at = now(), updated_at = now(),
+            normalized_name = 'deleted:' || id
         WHERE id = ${loser.id}`;
       await db`
         INSERT INTO core.audit_log (entity_kind, entity_id, actor, action, changes)
