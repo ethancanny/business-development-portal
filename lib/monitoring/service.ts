@@ -312,6 +312,26 @@ export async function getPortfolioCompany(
   return getPortfolioCompanyRow(companyId);
 }
 
+/** Soft-delete a portfolio company (platform rule: soft delete with
+ * restore — the row and its monitoring children remain as history).
+ * Rollups refresh so the company leaves portfolio totals at once. */
+export async function deletePortfolioCompany(
+  companyId: string,
+  actor = ""
+): Promise<boolean> {
+  await ensureMonitoring();
+  const db = sql();
+  const rows = await db`
+    UPDATE monitoring.portfolio_companies
+    SET deleted_at = now(), updated_at = now()
+    WHERE company_id = ${companyId} AND deleted_at IS NULL
+    RETURNING id`;
+  if (!rows.length) return false;
+  void actor;
+  await refreshRollups();
+  return true;
+}
+
 /* ------------------------- deal_closed handoff ----------------------- */
 
 /**
