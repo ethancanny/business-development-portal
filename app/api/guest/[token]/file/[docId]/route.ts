@@ -1,0 +1,85 @@
+import { NextRequest, NextResponse } from "next/server";
+import { ensureDataRoom } from "@/lib/dataroom/schema";
+import { sql } from "@/lib/platform/db";
+import { getDocument, readDocumentBytes } from "@/lib/dataroom/documents";
+import { logAccess, validateGuestToken } from "@/lib/dataroom/guests";
+import { documentFileResponse } from "@/lib/dataroom/files";
+import { StorageNotFoundError } from "@/lib/storage/types";
+
+export const maxDuration = 60;
+
+/**
+ * Guest document access. View-only grants are enforced HERE, at our
+ * layer: ?dl=1 (download) is refused with 403 for "view" guests, and
+ * bytes are only ever served inline for them. "download" guests may
+ * download. The document must be placed in the guest's room.
+ */
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { token: string; docId: string } }
+) {
+  await ensureDataRoom();
+  const v = await validateGuestToken(params.token);
+  if (!v.ok) {
+    const status =
+      v.reason === "expired" ? 410 : v.reason === "not_found" ? 404 : 403;
+    return NextResponse.json({ error: v.reason }, { status });
+  }
+  const sp = req.nextUrl.searchParams;
+  const wantsDownload = sp.get("dl") === "1";
+  if (wantsDownload && v.guest.accessLevel !== "download") {
+    await logAccess({
+      roomId: v.room.id,
+      documentId: params.docId,
+      actor: v.guest.email,
+      actorKind: "guest",
+      action: "download_blocked",
+      detail: "view-only grant",
+    });
+    return NextResponse.json(
+      {
+        error: "view_only",
+        message: "This link is view-only; downloads are disabled.",
+      },
+      { status: 403 }
+    );
+  }
+  // The document must be placed in THIS room.
+  const db = sql();
+  const placed = await db`
+    SELECT id FROM dataroom.room_documents
+    WHERE room_id = ${v.room.id} AND document_id = ${params.docId} LIMIT 1`;
+  if (!placed.length) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  const doc = await getDocument(params.docId);
+  if (!doc) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  try {
+    const { bytes, mime } = await readDocumentBytes(doc);
+    await logAccess({
+      roomId: v.room.id,
+      documentId: doc.id,
+      actor: v.guest.email,
+      actorKind: "guest",
+      action: wantsDownload ? "download" : "view",
+    });
+    return documentFileResponse(bytes, {
+      filename: doc.name,
+      mime,
+      download: wantsDownload,
+    });
+  } catch (err) {
+    if (err instanceof StorageNotFoundError) {
+      return NextResponse.json(
+        { error: "bytes_unavailable" },
+        { status: 404 }
+      );
+    }
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 400 }
+    );
+  }
+}
