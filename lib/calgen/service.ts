@@ -87,10 +87,83 @@ async function generateTaskEvents(): Promise<GeneratedEventInput[]> {
 }
 
 /** kind → generator. Missing kind = no generator yet (registry-only). */
+/**
+ * Phase 5 — post-closing checklist items (kind 'closing'). Only
+ * category='post_closing' items with a due date generate events;
+ * waived items drop out, completed items stay briefly as 'done'.
+ */
+async function generateClosingEvents(): Promise<GeneratedEventInput[]> {
+  const { listClosingCalendarItems } = await import(
+    "@/lib/diligence/service"
+  );
+  const items = await listClosingCalendarItems();
+  const out: GeneratedEventInput[] = [];
+  for (const item of items) {
+    if (!item.dueDate) continue;
+    if (item.status === "waived") continue;
+    out.push({
+      sourceId: item.itemId,
+      title:
+        `Post-closing: ${item.title}` +
+        (item.dealName ? ` — ${item.dealName}` : ""),
+      startsAt: `${item.dueDate}T09:00:00${TZ_OFFSET}`,
+      endsAt: null,
+      allDay: true,
+      dealId: item.dealId || null,
+      companyId: item.companyId,
+      href: `/due-diligence/${item.dealId}`,
+      status: item.status === "done" ? "done" : "",
+      meta: {
+        category: item.category,
+        workspaceId: item.workspaceId,
+      },
+    });
+  }
+  return out;
+}
+
+/**
+ * Phase 5 — diligence checklist due dates (kind 'milestone').
+ * Satisfied items (received / reviewed / approved / waived / N/A) do
+ * not generate events.
+ */
+async function generateMilestoneEvents(): Promise<GeneratedEventInput[]> {
+  const { listMilestoneCalendarItems } = await import(
+    "@/lib/diligence/service"
+  );
+  const items = await listMilestoneCalendarItems();
+  const satisfied = ["received", "reviewed", "approved", "waived", "na"];
+  const out: GeneratedEventInput[] = [];
+  for (const item of items) {
+    if (!item.dueDate) continue;
+    if (satisfied.includes(item.status)) continue;
+    out.push({
+      sourceId: item.itemId,
+      title:
+        `Diligence (${item.workstream}): ${item.title}` +
+        (item.dealName ? ` — ${item.dealName}` : ""),
+      startsAt: `${item.dueDate}T09:00:00${TZ_OFFSET}`,
+      endsAt: null,
+      allDay: true,
+      dealId: item.dealId || null,
+      companyId: item.companyId,
+      href: `/due-diligence/${item.dealId}`,
+      status: "",
+      meta: {
+        workstream: item.workstream,
+        workspaceId: item.workspaceId,
+      },
+    });
+  }
+  return out;
+}
+
 export const GENERATED_EVENT_GENERATORS: Partial<
   Record<GeneratedEventKind, GeneratedEventGenerator>
 > = {
   task: generateTaskEvents,
+  closing: generateClosingEvents,
+  milestone: generateMilestoneEvents,
 };
 
 /* ------------------------------ regeneration ---------------------------- */
