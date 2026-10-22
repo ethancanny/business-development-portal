@@ -9,6 +9,7 @@ import EntraSetup from "@/components/EntraSetup";
 import JobQueuePanel from "@/components/JobQueuePanel";
 import DuplicatesPanel from "@/components/DuplicatesPanel";
 import DataRoomSettings from "@/components/DataRoomSettings";
+import ValuationParamsSettings from "@/components/ValuationParamsSettings";
 
 /**
  * Settings (CRM Phase 2, Oct 2026): notifications (PushSettings) and
@@ -131,6 +132,19 @@ export default function SettingsPage() {
             and how the webhook subscription renews itself.
           </p>
           <EntraSetup />
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Valuation parameters
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            The global defaults behind every deal&apos;s economics model
+            and deal screen in Investors &amp; Capital — entry, leverage
+            and exit ranges, the target IRR, fee and waterfall defaults.
+            A deal inherits these wherever its own inputs are blank.
+          </p>
+          <ValuationParamsSettings />
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
