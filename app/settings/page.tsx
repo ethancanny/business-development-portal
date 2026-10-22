@@ -4,19 +4,18 @@ import SecuritySettings from "@/components/SecuritySettings";
 import HospitalityFitSettings from "@/components/HospitalityFitSettings";
 import ChainFilterSettings from "@/components/ChainFilterSettings";
 import ManualSourcesSettings from "@/components/ManualSourcesSettings";
-import IntegrationStatus from "@/components/IntegrationStatus";
-import EntraSetup from "@/components/EntraSetup";
 import JobQueuePanel from "@/components/JobQueuePanel";
 import DuplicatesPanel from "@/components/DuplicatesPanel";
-import DataRoomSettings from "@/components/DataRoomSettings";
 import ValuationParamsSettings from "@/components/ValuationParamsSettings";
-import ManagementUsers from "@/components/portmgmt/ManagementUsers";
-import AccountingSettings from "@/components/portmgmt/AccountingSettings";
+import SettingsNav from "@/components/settings/SettingsNav";
 
 /**
- * Settings (CRM Phase 2, Oct 2026): notifications (PushSettings) and
+ * Settings — General (CRM Phase 2, Oct 2026; restructured with the
+ * Navigation Restructure): notifications (PushSettings) and
  * security — passkeys, auto-lock, devices (SecuritySettings) — in
- * stacked cards under the standard page hero.
+ * stacked cards under the standard page hero. Integrations moved to
+ * /settings/integrations and user/role management to
+ * /settings/users-roles (see SettingsNav).
  */
 export default function SettingsPage() {
   return (
@@ -26,6 +25,7 @@ export default function SettingsPage() {
         title="Settings"
         subtitle="Notifications, passkeys, devices, and security for your account"
       />
+      <SettingsNav />
       <div className="mx-auto flex max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-6">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
@@ -91,17 +91,6 @@ export default function SettingsPage() {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
-            Integrations
-          </h2>
-          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
-            Live status for the platform&apos;s connected services — last
-            success, last error, and what each connection feeds.
-          </p>
-          <IntegrationStatus />
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
-          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Background jobs
           </h2>
           <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
@@ -125,19 +114,6 @@ export default function SettingsPage() {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
-            Microsoft Entra ID — calendar connection
-          </h2>
-          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
-            How the Outlook calendar integration is registered and kept
-            alive: the existing app registration, its calendar-only
-            permissions, the exact redirect URI, where credentials live,
-            and how the webhook subscription renews itself.
-          </p>
-          <EntraSetup />
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
-          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Valuation parameters
           </h2>
           <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
@@ -147,42 +123,6 @@ export default function SettingsPage() {
             A deal inherits these wherever its own inputs are blank.
           </p>
           <ValuationParamsSettings />
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
-          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
-            Management users
-          </h2>
-          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
-            Portfolio-company management logins. Each user is scoped to the
-            companies selected here and lands on the /my-company portal —
-            they never see the internal platform.
-          </p>
-          <ManagementUsers />
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
-          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
-            Accounting integrations
-          </h2>
-          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
-            Per-company accounting providers — connection status, the env
-            vars each one still needs, its setup steps, and a dry-run sync
-            before anything goes live.
-          </p>
-          <AccountingSettings />
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
-          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
-            Data rooms &amp; document storage
-          </h2>
-          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
-            Document storage connection status and the default data room
-            template that seeds every new room — its folders and checklist
-            items.
-          </p>
-          <DataRoomSettings />
         </section>
       </div>
     </div>

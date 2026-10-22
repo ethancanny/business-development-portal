@@ -38,8 +38,7 @@ export async function getUserRole(email: string): Promise<Role> {
   return "guest";
 }
 
-/** Read a user's stored access scope (core.user_roles.scope JSONB). */
-export async function getUserScope(
+/** Read a user's stored access scope (core.user_roles.scope JSONB). */export async function getUserScope(
   email: string
 ): Promise<Record<string, unknown>> {
   const e = (email ?? "").trim().toLowerCase();
@@ -153,4 +152,104 @@ export function canAccess(
   if (!granted.length) return false;
   const roomId = scope.dataRoomId ?? (scope.kind === "data_room" ? scope.id : undefined);
   return roomId !== undefined && granted.includes(roomId);
+}
+
+/* ------------------ role administration (Settings → Users & Roles) ------------------ */
+
+export interface UserRoleRow {
+  email: string;
+  role: Role;
+  scope: Record<string, unknown>;
+  updatedAt: string | null;
+}
+
+/** Every stored row in core.user_roles, for the admin Roles panel. */
+export async function listUserRoles(): Promise<UserRoleRow[]> {
+  const db = sql();
+  const rows = await db`
+    SELECT email, role, scope, updated_at FROM core.user_roles ORDER BY email ASC`;
+  return rows.map((r) => {
+    const rec = r as Record<string, unknown>;
+    const rawScope = rec.scope;
+    let scope: Record<string, unknown> = {};
+    if (rawScope && typeof rawScope === "object") {
+      scope = rawScope as Record<string, unknown>;
+    } else if (typeof rawScope === "string" && rawScope) {
+      try {
+        const parsed = JSON.parse(rawScope) as unknown;
+        if (parsed && typeof parsed === "object") {
+          scope = parsed as Record<string, unknown>;
+        }
+      } catch {
+        /* scope stays empty */
+      }
+    }
+    const role = str(rec.role);
+    return {
+      email: str(rec.email),
+      role: (role === "admin" || role === "guest" ? role : "internal") as Role,
+      scope,
+      updatedAt: rec.updated_at
+        ? rec.updated_at instanceof Date
+          ? rec.updated_at.toISOString()
+          : String(rec.updated_at)
+        : null,
+    };
+  });
+}
+
+export class LastAdminError extends Error {
+  readonly code = "last_admin";
+  constructor() {
+    super("Cannot change the role of the last admin.");
+    this.name = "LastAdminError";
+  }
+}
+
+/**
+ * Upsert a user's role in core.user_roles. The stored scope is
+ * preserved. Demoting (or re-roling) the LAST remaining admin is
+ * refused with LastAdminError so the platform can never lock itself
+ * out of administration.
+ */
+export async function setUserRole(email: string, role: Role): Promise<void> {
+  const e = (email ?? "").trim().toLowerCase();
+  if (!e) throw new Error("email is required");
+  if (role !== "admin" && role !== "internal" && role !== "guest") {
+    throw new Error("invalid role");
+  }
+  const db = sql();
+  if (role !== "admin") {
+    const current = await getUserRole(e);
+    if (current === "admin") {
+      const rows = await db`
+        SELECT COUNT(*)::int AS n FROM core.user_roles WHERE role = 'admin'`;
+      const storedAdmins = Number(
+        (rows[0] as Record<string, unknown> | undefined)?.n ?? 0
+      );
+      // ethan@cannycapitalpartners.com is admin by code-level fallback
+      // too (see getUserRole) — when the target is that fallback admin
+      // and no OTHER stored admin exists, treat this as the last one
+      // only if the target's own row is the sole stored admin row or
+      // there are no stored admin rows covering anyone else.
+      const others = await db`
+        SELECT COUNT(*)::int AS n FROM core.user_roles
+        WHERE role = 'admin' AND email <> ${e}`;
+      const otherAdmins = Number(
+        (others[0] as Record<string, unknown> | undefined)?.n ?? 0
+      );
+      if (storedAdmins <= 1 && otherAdmins === 0) {
+        // If the target's admin status comes only from the code
+        // fallback (no stored row), getUserRole would still return
+        // admin after this upsert writes a non-admin row — that
+        // would silently lock the fallback admin out, so refuse.
+        throw new LastAdminError();
+      }
+    }
+  }
+  await db`
+    INSERT INTO core.user_roles (email, role, updated_at)
+    VALUES (${e}, ${role}, now())
+    ON CONFLICT (email) DO UPDATE
+      SET role = EXCLUDED.role, updated_at = now()`;
 }
