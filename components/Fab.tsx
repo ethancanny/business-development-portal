@@ -49,6 +49,8 @@ export default function Fab() {
     pathname === "/login" ||
     pathname === "/offline" ||
     pathname.startsWith("/room/") ||
+    pathname === "/my-company" ||
+    pathname.startsWith("/my-company/") ||
     HIDDEN_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
 
   useEffect(() => {

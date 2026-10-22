@@ -10,6 +10,8 @@ import JobQueuePanel from "@/components/JobQueuePanel";
 import DuplicatesPanel from "@/components/DuplicatesPanel";
 import DataRoomSettings from "@/components/DataRoomSettings";
 import ValuationParamsSettings from "@/components/ValuationParamsSettings";
+import ManagementUsers from "@/components/portmgmt/ManagementUsers";
+import AccountingSettings from "@/components/portmgmt/AccountingSettings";
 
 /**
  * Settings (CRM Phase 2, Oct 2026): notifications (PushSettings) and
@@ -145,6 +147,30 @@ export default function SettingsPage() {
             A deal inherits these wherever its own inputs are blank.
           </p>
           <ValuationParamsSettings />
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Management users
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            Portfolio-company management logins. Each user is scoped to the
+            companies selected here and lands on the /my-company portal —
+            they never see the internal platform.
+          </p>
+          <ManagementUsers />
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Accounting integrations
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            Per-company accounting providers — connection status, the env
+            vars each one still needs, its setup steps, and a dry-run sync
+            before anything goes live.
+          </p>
+          <AccountingSettings />
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">

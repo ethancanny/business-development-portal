@@ -14,6 +14,32 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
 
+  // Post-login routing (Phase 9): management users (role 'guest')
+  // land on their scoped /my-company portal; everyone else keeps the
+  // existing /overview behavior. A failed /me read falls back to
+  // /overview — the AppShell guard + API gates still route guests.
+  const redirectAfterLogin = async () => {
+    try {
+      const meRes = await fetch("/api/auth/me");
+      if (meRes.ok) {
+        const me = (await meRes.json().catch(() => ({}))) as {
+          role?: string;
+          user?: { role?: string };
+        };
+        const role = me.role ?? me.user?.role;
+        if (role === "guest") {
+          router.replace("/my-company");
+          router.refresh();
+          return;
+        }
+      }
+    } catch {
+      /* fall through to the default landing */
+    }
+    router.replace("/overview");
+    router.refresh();
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -25,8 +51,7 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       if (res.ok) {
-        router.replace("/overview");
-        router.refresh();
+        await redirectAfterLogin();
       } else {
         const data = await res.json().catch(() => ({}));
         setError(data.error || "Login failed");
@@ -63,8 +88,7 @@ export default function LoginPage() {
         body: JSON.stringify({ email, response }),
       });
       if (verRes.ok) {
-        router.replace("/overview");
-        router.refresh();
+        await redirectAfterLogin();
       } else {
         const data = await verRes.json().catch(() => ({}));
         setError(data.error || "Passkey sign-in failed. Try your password.");
