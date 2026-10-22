@@ -6,6 +6,16 @@ import { logAccess, validateGuestToken } from "@/lib/dataroom/guests";
 import { documentFileResponse } from "@/lib/dataroom/files";
 import { StorageNotFoundError } from "@/lib/storage/types";
 
+/** Guest responses carry access decisions — they must never be stored
+ * by any cache layer. (A cached 200 kept revoked links working in
+ * production even with force-dynamic set; no-store ends that class.) */
+function jsonNoStore(body: unknown, init?: { status?: number }): NextResponse {
+  const res = NextResponse.json(body, init ?? {});
+  res.headers.set("Cache-Control", "private, no-store");
+  return res;
+}
+
+
 export const maxDuration = 60;
 
 /**
@@ -23,7 +33,7 @@ export async function GET(
   if (!v.ok) {
     const status =
       v.reason === "expired" ? 410 : v.reason === "not_found" ? 404 : 403;
-    return NextResponse.json({ error: v.reason }, { status });
+    return jsonNoStore({ error: v.reason }, { status });
   }
   const sp = req.nextUrl.searchParams;
   const wantsDownload = sp.get("dl") === "1";
@@ -36,7 +46,7 @@ export async function GET(
       action: "download_blocked",
       detail: "view-only grant",
     });
-    return NextResponse.json(
+    return jsonNoStore(
       {
         error: "view_only",
         message: "This link is view-only; downloads are disabled.",
@@ -50,11 +60,11 @@ export async function GET(
     SELECT id FROM dataroom.room_documents
     WHERE room_id = ${v.room.id} AND document_id = ${params.docId} LIMIT 1`;
   if (!placed.length) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return jsonNoStore({ error: "not_found" }, { status: 404 });
   }
   const doc = await getDocument(params.docId);
   if (!doc) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return jsonNoStore({ error: "not_found" }, { status: 404 });
   }
   try {
     const { bytes, mime } = await readDocumentBytes(doc);
@@ -72,12 +82,12 @@ export async function GET(
     });
   } catch (err) {
     if (err instanceof StorageNotFoundError) {
-      return NextResponse.json(
+      return jsonNoStore(
         { error: "bytes_unavailable" },
         { status: 404 }
       );
     }
-    return NextResponse.json(
+    return jsonNoStore(
       { error: err instanceof Error ? err.message : String(err) },
       { status: 400 }
     );

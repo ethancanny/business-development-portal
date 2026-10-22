@@ -4,6 +4,16 @@ import { getRoomIndex } from "@/lib/dataroom/service";
 import { logAccess, validateGuestToken } from "@/lib/dataroom/guests";
 import { listThreads } from "@/lib/dataroom/qa";
 
+/** Guest responses carry access decisions — they must never be stored
+ * by any cache layer. (A cached 200 kept revoked links working in
+ * production even with force-dynamic set; no-store ends that class.) */
+function jsonNoStore(body: unknown, init?: { status?: number }): NextResponse {
+  const res = NextResponse.json(body, init ?? {});
+  res.headers.set("Cache-Control", "private, no-store");
+  return res;
+}
+
+
 // NEVER cache: this handler reads no request/session API, so Next.js
 // would otherwise treat the GET as static and serve the first response
 // forever — which kept revoked/expired guest links working. Every call
@@ -20,22 +30,22 @@ export const dynamic = "force-dynamic";
 function failure(reason: string): NextResponse {
   switch (reason) {
     case "expired":
-      return NextResponse.json(
+      return jsonNoStore(
         { error: "expired", message: "This data room link has expired." },
         { status: 410 }
       );
     case "revoked":
-      return NextResponse.json(
+      return jsonNoStore(
         { error: "revoked", message: "This data room link has been revoked." },
         { status: 403 }
       );
     case "room_inactive":
-      return NextResponse.json(
+      return jsonNoStore(
         { error: "room_inactive", message: "This data room is not currently available." },
         { status: 403 }
       );
     default:
-      return NextResponse.json(
+      return jsonNoStore(
         { error: "not_found", message: "This data room link is not valid." },
         { status: 404 }
       );
@@ -58,7 +68,7 @@ export async function GET(
     actorKind: "guest",
     action: "view_room",
   });
-  return NextResponse.json({
+  return jsonNoStore({
     guest: {
       email: v.guest.email,
       name: v.guest.name,

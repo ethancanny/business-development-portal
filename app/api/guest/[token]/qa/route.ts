@@ -3,6 +3,16 @@ import { ensureDataRoom } from "@/lib/dataroom/schema";
 import { validateGuestToken } from "@/lib/dataroom/guests";
 import { createThread, listThreads } from "@/lib/dataroom/qa";
 
+/** Guest responses carry access decisions — they must never be stored
+ * by any cache layer. (A cached 200 kept revoked links working in
+ * production even with force-dynamic set; no-store ends that class.) */
+function jsonNoStore(body: unknown, init?: { status?: number }): NextResponse {
+  const res = NextResponse.json(body, init ?? {});
+  res.headers.set("Cache-Control", "private, no-store");
+  return res;
+}
+
+
 // NEVER cache guest responses (see ../route.ts): token validity is
 // re-checked against the database on every call.
 export const dynamic = "force-dynamic";
@@ -17,10 +27,10 @@ export async function GET(
   if (!v.ok) {
     const status =
       v.reason === "expired" ? 410 : v.reason === "not_found" ? 404 : 403;
-    return NextResponse.json({ error: v.reason }, { status });
+    return jsonNoStore({ error: v.reason }, { status });
   }
   const threads = await listThreads(v.room.id);
-  return NextResponse.json({ threads });
+  return jsonNoStore({ threads });
 }
 
 export async function POST(
@@ -32,7 +42,7 @@ export async function POST(
   if (!v.ok) {
     const status =
       v.reason === "expired" ? 410 : v.reason === "not_found" ? 404 : 403;
-    return NextResponse.json({ error: v.reason }, { status });
+    return jsonNoStore({ error: v.reason }, { status });
   }
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   try {
@@ -47,9 +57,9 @@ export async function POST(
       v.guest.name || v.guest.email,
       "guest"
     );
-    return NextResponse.json({ thread }, { status: 201 });
+    return jsonNoStore({ thread }, { status: 201 });
   } catch (err) {
-    return NextResponse.json(
+    return jsonNoStore(
       { error: err instanceof Error ? err.message : String(err) },
       { status: 400 }
     );
