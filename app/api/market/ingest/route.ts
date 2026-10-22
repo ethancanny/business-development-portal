@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runMarketIngest, type IngestSource } from "@/lib/market-ingest";
 import { getSessionUser } from "@/lib/auth";
+import {
+  evalCompetingBuyers,
+  evalFeeds,
+  evalFitSignals,
+} from "@/lib/push-evals";
+import { drainPushJobs } from "@/lib/push-schedule";
 
 /**
  * Market intel ingest endpoint. Triggered by Vercel Cron (see vercel.json).
@@ -46,6 +52,13 @@ async function handle(req: NextRequest) {
   const failTest = req.nextUrl.searchParams.get("failTest");
   if (failTest) tailwindOpts.failDataset = failTest;
   const result = await runMarketIngest(source, { tailwind: tailwindOpts });
+  const afterIngest = async () => {
+    await evalFitSignals(new Date()).catch(() => undefined);
+    await evalCompetingBuyers(new Date()).catch(() => undefined);
+    await evalFeeds(new Date()).catch(() => undefined);
+    await drainPushJobs().catch(() => undefined);
+  };
+  await afterIngest();
   return NextResponse.json({ ok: true, result });
 }
 

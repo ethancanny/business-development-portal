@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { setReminderSnooze } from "@/lib/push-db";
+import { scheduleSnoozePushJob } from "@/lib/push-schedule";
 
 /**
  * Notification-action snooze (Ethan, Oct 16, 2026): the service worker
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     await setReminderSnooze(kind, id, key, fireAt.toISOString());
+    await scheduleSnoozePushJob(kind, id, key, fireAt.toISOString()).catch(() => undefined);
     return NextResponse.json({ ok: true, fireAt: fireAt.toISOString() });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

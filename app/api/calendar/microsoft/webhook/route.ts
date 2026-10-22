@@ -30,5 +30,17 @@ export async function POST(req: NextRequest) {
   } catch {
     /* the watchdog's catch-up pull will self-heal */
   }
+  // Event-driven push (Oct 21, 2026): a change notification means
+  // calendar state just changed — (re)schedule push jobs for upcoming
+  // events and drain any due jobs while we're here. Best-effort.
+  try {
+    const { scheduleUpcomingEventPushJobs, drainPushJobs } = await import(
+      "@/lib/push-schedule"
+    );
+    await scheduleUpcomingEventPushJobs();
+    await drainPushJobs();
+  } catch {
+    /* best-effort */
+  }
   return NextResponse.json({ ok: true }, { status: 202 });
 }

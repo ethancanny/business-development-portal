@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTasks, saveTasks, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
+import { cancelPushJobs, scheduleTaskPushJobs } from "@/lib/push-schedule";
 import type { Task, TaskType } from "@/lib/types";
 
 type Params = { params: { id: string } };
@@ -129,6 +130,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   // Calendar follows the follow-up: reschedule/snooze moves the event,
   // completing removes it, reopening recreates it.
   await syncCalendar(updated, tasks);
+  await scheduleTaskPushJobs(params.id).catch(() => undefined);
   return NextResponse.json(updated);
 }
 
@@ -167,5 +169,6 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     dealName: null,
     execName: null,
   });
+  await cancelPushJobs("task", params.id).catch(() => undefined);
   return NextResponse.json({ ok: true });
 }

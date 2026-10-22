@@ -24,6 +24,7 @@ import {
   saveDeals,
   saveInteractions,
 } from "./db";
+import { cancelPushJobs, scheduleEventPushJobs } from "./push-schedule";
 import type { Deal, Executive, Interaction } from "./types";
 
 /**
@@ -430,6 +431,7 @@ export async function createGraphEvent(d: EventDraft): Promise<CalendarEvent | n
   if (ev) {
     const isNew = await upsertCalendarEvent(ev);
     if (isNew) await crossLogNewEvents([ev.eventId]);
+    await scheduleEventPushJobs(ev.eventId).catch(() => undefined);
   }
   return ev;
 }
@@ -473,11 +475,13 @@ export async function updateGraphEvent(
   const g = (await graph(`/me/events/${encodeURIComponent(eventId)}?$select=subject,start,end,location,attendees,webLink,isAllDay,isReminderOn,reminderMinutesBeforeStart`)) as GraphEvent;
   const ev = toCalendarEvent(g);
   if (ev) await upsertCalendarEvent(ev);
+  await scheduleEventPushJobs(eventId).catch(() => undefined);
 }
 
 export async function deleteGraphEvent(eventId: string): Promise<void> {
   await graph(`/me/events/${encodeURIComponent(eventId)}`, undefined, { method: "DELETE" });
   await deleteCalendarEvent(eventId);
+  await cancelPushJobs("event", eventId).catch(() => undefined);
 }
 
 /* ---------------- Follow-up ⇄ calendar sync ----------------

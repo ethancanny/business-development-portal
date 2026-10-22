@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { rescoreAllCandidates } from "@/lib/candidates-scoring";
+import { evalCandidateHighScores } from "@/lib/push-evals";
 
 /**
  * Operator candidate rescore (Build 2): recomputes every candidate's
@@ -23,6 +24,7 @@ export async function POST() {
   }
   try {
     const result = await rescoreAllCandidates(actor);
+    await evalCandidateHighScores().catch(() => undefined);
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     return NextResponse.json(

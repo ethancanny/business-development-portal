@@ -8,6 +8,7 @@ import {
   updateCandidate,
   type CandidateInput,
 } from "@/lib/candidates-db";
+import { evalCandidatesByIds } from "@/lib/push-evals";
 
 /**
  * Single operator candidate (Build 1). GET includes the record's audit
@@ -46,6 +47,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (!updated) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
+    await evalCandidatesByIds([params.id]).catch(() => undefined);
     return NextResponse.json(updated);
   } catch (err) {
     if (err instanceof CandidateCollisionError) {

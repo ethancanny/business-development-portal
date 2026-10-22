@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTasks, saveTasks, newId, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
+import { scheduleTaskPushJobs } from "@/lib/push-schedule";
 import type { Task, TaskType } from "@/lib/types";
 
 const TASK_TYPES: TaskType[] = ["Call", "Email", "Meeting", "Send docs", "Other"];
@@ -75,6 +76,7 @@ export async function POST(req: NextRequest) {
     const { requestGeneratedEventsRefresh } = await import("@/lib/calgen/service");
     await requestGeneratedEventsRefresh();
   } catch { /* generated layer refresh is best-effort */ }
+  await scheduleTaskPushJobs(task.id).catch(() => undefined);
   await logActivity({
     type: "task.created",
     actor: user.name,

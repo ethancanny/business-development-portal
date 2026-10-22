@@ -3,6 +3,8 @@ import { getDealFlow, saveDealFlow, newId, logActivity } from "@/lib/db";
 import { shouldAutoDismiss } from "@/lib/az-location";
 import { isHospitalityListing, screenHospitalityListing } from "@/lib/hospitality-screen";
 import { getSessionUser } from "@/lib/auth";
+import { evalNewListingItem } from "@/lib/push-evals";
+import { drainPushJobs } from "@/lib/push-schedule";
 import type { DealFlowItem, DealFlowKind } from "@/lib/types";
 
 const KINDS: DealFlowKind[] = [
@@ -98,5 +100,9 @@ export async function POST(req: NextRequest) {
     dealName: null,
     execName: null,
   });
+  if (item.kind === "business_for_sale") {
+    await evalNewListingItem(item, new Date()).catch(() => undefined);
+  }
+  await drainPushJobs().catch(() => undefined);
   return NextResponse.json(item, { status: 201 });
 }

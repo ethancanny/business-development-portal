@@ -10,6 +10,7 @@ import {
   type OperatorCandidate,
 } from "@/lib/candidates-db";
 import { candidateSector } from "@/lib/candidates-scoring";
+import { evalCandidatesByIds } from "@/lib/push-evals";
 
 /** Build 4: the Directory chip needs the display sector (focus sector
  * name, or "Other") — computed server-side from the Build 2 helper so
@@ -82,6 +83,7 @@ export async function POST(req: NextRequest) {
       { ...body, name, sourceType, sourceUrl },
       actor
     );
+    await evalCandidatesByIds([candidate.id]).catch(() => undefined);
     return NextResponse.json(
       { ...withSector(candidate), merged },
       { status: merged ? 200 : 201 }

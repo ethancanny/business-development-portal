@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { msConnected, updateGraphEvent, type EventDraft } from "@/lib/microsoft";
+import { scheduleEventPushJobs } from "@/lib/push-schedule";
 import {
   applyReminderChoice,
   parseReminderInput,
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
     await updateGraphEvent(eventId, draft, { addAttendees, removeAttendees });
     // Persist the choice portal-side for the push checker (best-effort).
     await applyReminderChoice(eventId, reminder).catch(() => undefined);
+    await scheduleEventPushJobs(eventId).catch(() => undefined);
     return NextResponse.json({ ok: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

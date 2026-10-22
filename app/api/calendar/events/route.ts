@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { createGraphEvent, msConnected, type EventDraft } from "@/lib/microsoft";
+import { scheduleEventPushJobs } from "@/lib/push-schedule";
 import {
   applyReminderChoice,
   parseReminderInput,
@@ -52,6 +53,7 @@ export async function POST(req: NextRequest) {
       // Portal-side store for the push checker (best-effort: the Graph
       // event already carries the reminder natively).
       await applyReminderChoice(ev.eventId, reminder).catch(() => undefined);
+      await scheduleEventPushJobs(ev.eventId).catch(() => undefined);
     }
     return NextResponse.json({ ok: true, event: ev });
   } catch (err) {

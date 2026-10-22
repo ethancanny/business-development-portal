@@ -52,6 +52,19 @@ export async function POST(req: NextRequest) {
     if (sub.active) {
       pull = await pullGraphWindow().catch((e: Error) => ({ error: e.message }));
     }
+    // Event-driven push (Oct 21, 2026): the watchdog's cadence makes
+    // this endpoint one of the job queue's drain triggers — after a
+    // pull, (re)schedule push jobs for upcoming events and drain any
+    // due jobs. Best-effort; never fails the watchdog.
+    try {
+      const { scheduleUpcomingEventPushJobs, drainPushJobs } = await import(
+        "@/lib/push-schedule"
+      );
+      await scheduleUpcomingEventPushJobs();
+      await drainPushJobs();
+    } catch {
+      /* best-effort */
+    }
     return NextResponse.json({ ok: true, subscription: sub, drained, pull });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
