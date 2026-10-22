@@ -64,7 +64,7 @@ export function ensurePortmgmt(): Promise<void> {
           status TEXT NOT NULL DEFAULT 'scheduled',
           pack_document_id TEXT,
           minutes TEXT NOT NULL DEFAULT '',
-          decisions JSONB NOT NULL DEFAULT '[]'::jsonb,
+          decisions TEXT NOT NULL DEFAULT '',
           attendees JSONB NOT NULL DEFAULT '[]'::jsonb,
           created_by TEXT NOT NULL DEFAULT '',
           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -74,6 +74,12 @@ export function ensurePortmgmt(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS portmgmt_board_company_idx
         ON portmgmt.board_meetings (company_id)`;
+      // decisions is free text in the service + UI. An early ensure
+      // run created it as JSONB, which rejects plain-text inserts
+      // (22P02) — convert in place; no-op when already TEXT.
+      await db`
+        ALTER TABLE portmgmt.board_meetings
+        ALTER COLUMN decisions TYPE TEXT USING decisions::text`;
 
       /* ------------------ lender / borrowing base ----------------- */
       await db`
