@@ -1221,6 +1221,9 @@ export async function postSet(
       err instanceof Error ? err.message : String(err)
     );
   }
+  try {
+    await enqueueJob('analyze_financials', {companyId: set.companyId, trigger: 'financials_posted'});
+  } catch {}
   await writeActivity(
     "company",
     set.companyId,

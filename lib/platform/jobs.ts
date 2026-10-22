@@ -187,6 +187,14 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
       await runFinancialExtractionJob(job.payload);
       return;
     }
+    case "analyze_financials": {
+      // Part 4B (Finanalysis): background financial analysis for a
+      // company, enqueued on financials_posted (and after adjustment
+      // decisions). Never runs synchronously in a post request.
+      const { runAnalysisJob } = await import("../finanalysis/service");
+      await runAnalysisJob(job.payload);
+      return;
+    }
     case "extract_document_text": {
       // Phase 3 (Documents): background text extraction so document
       // contents become searchable. runExtraction never throws —
