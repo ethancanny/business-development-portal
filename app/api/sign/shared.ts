@@ -3,6 +3,7 @@ import {
   getEnvelopeFull,
   resolveSignerToken,
 } from "@/lib/signing/service";
+import { getDocument } from "@/lib/dataroom/documents";
 
 /**
  * Shared helpers for the PUBLIC signer API (/api/sign/[token]/**).
@@ -14,6 +15,17 @@ import {
  * immediately), is force-dynamic, and answers Cache-Control
  * private, no-store. Only envelope data for THIS signer is ever
  * returned — no other portal data crosses this surface.
+ *
+ * Service contract (lib/signing/service, Workstream A):
+ * resolveSignerToken returns { ok:true, signer, envelope: signingRow,
+ * signing: signingRow, docgen: docgenRow, docgenStatus, status,
+ * documentName } or { ok:false, error, signer?, envelope?, signing?,
+ * docgen?, status? } for expired/voided/declined (those variants
+ * carry the full rows, minus documentName). The ENVELOPE STATUS is
+ * the docgen status (root `status`/`docgenStatus`); the signing row
+ * itself carries prepared/executed document ids, sender, order and
+ * expiry. The resolve payload has no signer LIST — position/total
+ * and sequential-waiting are derived from getEnvelopeFull's signers.
  */
 
 export const NO_STORE = { "Cache-Control": "private, no-store" };
@@ -93,18 +105,7 @@ export interface SignerView {
 
 export type ResolveOutcome =
   | { ok: true; view: SignerView }
-  | { ok: false; error: "not_found" | "expired" | "voided" | "declined" };
-
-function errorCodeOf(err: unknown): string {
-  if (err instanceof Error && /^[a-z][a-z0-9_]+$/.test(err.message)) {
-    return err.message;
-  }
-  const r = rec(err);
-  if (typeof r.error === "string") return r.error;
-  if (typeof r.code === "string") return r.code;
-  if (typeof r.reason === "string") return r.reason;
-  return "";
-}
+  | { ok: false; error: "not_found" };
 
 function isPast(iso: string | null): boolean {
   if (!iso) return false;
@@ -119,84 +120,88 @@ function signerStatusSigned(s: string): boolean {
 
 /**
  * Resolve a signer token through Workstream A's service and
- * normalize whatever row shape it returns into the public view.
- * Handles both result-object ({ ok, ... } / { error }) and
- * throw-coded-error service styles.
+ * normalize the result into the public view. Expired / voided /
+ * declined variants still carry the signer + envelope rows, so they
+ * resolve to a view with the matching terminal state (the GET route
+ * renders them informationally; expired answers 410). Only a truly
+ * unknown token resolves to not_found.
  */
 export async function resolveSigner(
   token: string
 ): Promise<ResolveOutcome> {
-  let raw: unknown;
-  try {
-    raw = await resolveSignerToken(token);
-  } catch (err) {
-    const code = errorCodeOf(err);
-    if (code === "expired") return { ok: false, error: "expired" };
-    if (code === "voided") return { ok: false, error: "voided" };
-    if (code === "declined") return { ok: false, error: "declined" };
-    if (code === "not_found") return { ok: false, error: "not_found" };
-    throw err;
-  }
+  const raw: unknown = await resolveSignerToken(token);
   if (!raw) return { ok: false, error: "not_found" };
   const root = rec(raw);
-  if (root.ok === false) {
-    const code =
-      str(pick(root, "error", "code", "reason")) || "not_found";
-    if (code === "expired") return { ok: false, error: "expired" };
-    if (code === "voided") return { ok: false, error: "voided" };
-    if (code === "declined") return { ok: false, error: "declined" };
+  const resolveError = root.ok === false ? str(pick(root, "error")) : "";
+  if (resolveError === "not_found") return { ok: false, error: "not_found" };
+  if (root.ok === false && !pick(root, "envelope") && !pick(root, "signer")) {
     return { ok: false, error: "not_found" };
   }
 
   const signer = rec(pick(root, "signer", "signerRow"));
-  const envelope = rec(pick(root, "envelope"));
-  const signing = rec(pick(root, "signing"));
-  const signersRaw = pick(root, "signers") ?? pick(envelope, "signers");
-  const signers: Rec[] = Array.isArray(signersRaw)
-    ? (signersRaw as Rec[])
-    : Array.isArray(signing.signers)
-      ? (signing.signers as Rec[])
-      : [];
-
-  const signerId = str(pick(signer, "id", "signerId"));
+  // Per the A contract, `envelope` IS the signing row; `docgen` is
+  // the provider-agnostic envelope row that carries the status.
+  const signing = rec(pick(root, "signing") ?? pick(root, "envelope"));
+  const docgen = rec(pick(root, "docgen"));
   const envelopeId = str(
-    pick(envelope, "id", "envelopeId") ?? pick(signer, "envelopeId")
+    pick(signing, "envelopeId", "envelope_id", "id") ??
+      pick(docgen, "id") ??
+      pick(signer, "envelopeId", "envelope_id")
   );
   const envelopeStatus = str(
-    pick(envelope, "status") ?? pick(signing, "status")
+    pick(root, "status", "docgenStatus") ??
+      pick(docgen, "status") ??
+      pick(signing, "status")
   ).toLowerCase();
+
+  const signerId = str(pick(signer, "id", "signerId"));
   const signerStatus = str(pick(signer, "status")).toLowerCase();
-  const expiresAt =
-    (pick(envelope, "expiresAt", "expires_at") as string | null) ??
+  const expiresRaw =
     (pick(signing, "expiresAt", "expires_at") as string | null) ??
+    (pick(docgen, "expiresAt", "expires_at") as string | null) ??
     null;
   const expiresIso =
-    typeof expiresAt === "string" && expiresAt ? expiresAt : null;
+    typeof expiresRaw === "string" && expiresRaw ? expiresRaw : null;
 
   const signingOrderRaw = str(
-    pick(envelope, "signingOrder", "signing_order") ??
-      pick(signing, "signingOrder", "signing_order")
+    pick(signing, "signingOrder", "signing_order") ??
+      pick(docgen, "signingOrder", "signing_order")
   ).toLowerCase();
   const signingOrder: "sequential" | "parallel" =
-    signingOrderRaw === "sequential" ? "sequential" : "parallel";
+    signingOrderRaw === "parallel" ? "parallel" : "sequential";
 
-  // Position: this signer's index within the ordered signer list
-  // (the service's orderIndex is 0-based; the public position is not).
-  let position =
-    numOrNull(pick(signer, "position", "order", "signingOrder")) ?? 0;
-  if (position <= 0) {
-    const oi = numOrNull(pick(signer, "orderIndex", "order_index"));
-    if (oi !== null && oi >= 0) position = oi + 1;
+  const documentId =
+    (pick(signing, "documentId", "document_id") as string | null) ??
+    (pick(docgen, "documentId", "document_id") as string | null) ??
+    null;
+
+  // Signer list: the resolve payload carries none, so derive
+  // position / total / sequential-waiting from the full read.
+  let signers: Rec[] = [];
+  const signersRaw = pick(root, "signers");
+  if (Array.isArray(signersRaw)) {
+    signers = signersRaw as Rec[];
+  } else if (envelopeId) {
+    try {
+      const full = rec(await getEnvelopeFull(envelopeId));
+      const fullSigners = pick(full, "signers");
+      if (Array.isArray(fullSigners)) signers = fullSigners as Rec[];
+    } catch {
+      /* position/total fall back to the signer's own orderIndex */
+    }
   }
-  if (signers.length > 0) {
+
+  // Position: 1-based. The service's orderIndex is 0-based.
+  let position = 0;
+  const oi = numOrNull(pick(signer, "orderIndex", "order_index"));
+  if (oi !== null && oi >= 0) position = oi + 1;
+  if (signers.length > 0 && signerId) {
     const idx = signers.findIndex(
-      (s) => str(pick(s, "id", "signerId")) === signerId && signerId !== ""
+      (s) => str(pick(s, "id", "signerId")) === signerId
     );
     if (idx >= 0) position = idx + 1;
-    else if (position <= 0) position = 1;
-  } else if (position <= 0) {
-    position = 1;
   }
+  if (position <= 0) position = 1;
   const totalSigners = signers.length > 0 ? signers.length : 1;
 
   const consented =
@@ -210,29 +215,32 @@ export async function resolveSigner(
   const preparedDocumentId =
     (pick(signing, "preparedDocumentId", "prepared_document_id") as
       | string
-      | null) ??
-    (pick(envelope, "preparedDocumentId", "prepared_document_id") as
-      | string
-      | null) ??
-    null;
+      | null) ?? null;
   const executedDocumentId =
     (pick(signing, "executedDocumentId", "executed_document_id") as
       | string
-      | null) ??
-    (pick(envelope, "executedDocumentId", "executed_document_id") as
-      | string
-      | null) ??
-    null;
-  const documentId =
-    (pick(envelope, "documentId", "document_id") as string | null) ??
-    (pick(signing, "documentId", "document_id") as string | null) ??
-    null;
+      | null) ?? null;
+
+  // Document name: present on the ok variant's root; the terminal
+  // variants omit it, so look it up from the document record.
+  let documentName =
+    str(pick(root, "documentName", "document_name")) ||
+    str(pick(signing, "documentName", "document_name"));
+  if (!documentName && documentId) {
+    try {
+      const doc = await getDocument(documentId);
+      documentName = doc?.name ?? "";
+    } catch {
+      documentName = "";
+    }
+  }
 
   // ---- state derivation ----
   let state: SignerView["state"];
-  if (envelopeStatus === "voided" || envelopeStatus === "void") {
+  if (resolveError === "voided" || envelopeStatus === "voided" || signing.voidedAt) {
     state = "voided";
   } else if (
+    resolveError === "declined" ||
     envelopeStatus === "declined" ||
     signerStatus === "declined"
   ) {
@@ -244,6 +252,7 @@ export async function resolveSigner(
   ) {
     state = "completed";
   } else if (
+    resolveError === "expired" ||
     envelopeStatus === "expired" ||
     (isPast(expiresIso) && !signerStatusSigned(signerStatus))
   ) {
@@ -257,18 +266,10 @@ export async function resolveSigner(
       .some((s) => !signerStatusSigned(str(pick(s, "status"))));
     state = earlierUnsigned ? "waiting" : "active";
   } else if (signingOrder === "sequential" && signerStatus === "pending") {
-    // No signer list in the resolve payload: the service marks a
-    // not-yet-active sequential signer "pending".
     state = "waiting";
   } else {
     state = "active";
   }
-  // An expired envelope reports the expired outcome at resolve level
-  // (410 with state) unless the envelope reached a terminal signed
-  // state. Voided / declined stay ok:true with their state set — the
-  // GET state route renders them as informational pages (200), while
-  // the document + POST routes refuse them.
-  if (state === "expired") return { ok: false, error: "expired" };
 
   return {
     ok: true,
@@ -280,9 +281,7 @@ export async function resolveSigner(
       consented,
       requiresAccessCode,
       accessLocked: bool(pick(signer, "accessLocked", "locked")),
-      attemptsLeft: numOrNull(
-        pick(signer, "attemptsLeft", "attempts_left")
-      ),
+      attemptsLeft: numOrNull(pick(signer, "attemptsLeft", "attempts_left")),
       envelopeId,
       envelopeStatus,
       documentId,
@@ -298,22 +297,12 @@ export async function resolveSigner(
         (pick(signing, "certificateDocumentId", "certificate_document_id") as
           | string
           | null) ?? null,
-      documentName:
-        str(
-          pick(root, "documentName", "document_name") ??
-            pick(signing, "documentName", "document_name") ??
-            pick(envelope, "documentName", "document_name")
-        ) || "Document",
+      documentName: documentName || "Document",
       senderName: str(
         pick(signing, "senderName", "sender_name") ??
-          pick(envelope, "senderName", "sender_name", "createdBy", "created_by") ??
-          pick(root, "senderName", "sender_name")
+          pick(docgen, "createdBy", "created_by")
       ),
-      senderEmail: str(
-        pick(signing, "senderEmail", "sender_email") ??
-          pick(envelope, "senderEmail", "sender_email") ??
-          pick(root, "senderEmail", "sender_email")
-      ),
+      senderEmail: str(pick(signing, "senderEmail", "sender_email")),
       signingOrder,
       expiresAt: expiresIso,
       position,
@@ -323,21 +312,26 @@ export async function resolveSigner(
   };
 }
 
-/** Map a failed resolve outcome to its HTTP response. */
-export function resolveFailure(outcome: { error: string }): NextResponse {
-  switch (outcome.error) {
-    case "expired":
-      return jsonNoStore({ error: "expired", state: "expired" }, { status: 410 });
-    case "voided":
-      return jsonNoStore({ error: "voided", state: "voided" }, { status: 200 });
-    case "declined":
-      return jsonNoStore(
-        { error: "declined", state: "declined" },
-        { status: 200 }
-      );
-    default:
-      return jsonNoStore({ error: "not_found" }, { status: 404 });
-  }
+/** The public state JSON for a resolved view (GET /api/sign/[token]). */
+export function stateBody(
+  v: SignerView,
+  consentText: string
+): Record<string, unknown> {
+  return {
+    state: v.state,
+    documentName: v.documentName,
+    senderName: v.senderName,
+    senderEmail: v.senderEmail,
+    signer: { name: v.signerName, email: v.signerEmail },
+    signingOrder: v.signingOrder,
+    position: v.position,
+    totalSigners: v.totalSigners,
+    requiresAccessCode: v.requiresAccessCode,
+    consented: v.consented,
+    expiresAt: v.expiresAt,
+    consentText,
+    downloadAvailable: v.state === "completed",
+  };
 }
 
 export interface AccessCheck {
@@ -368,8 +362,9 @@ export function normalizeAccessResult(raw: unknown): AccessCheck {
  * Lightweight POST rate limit (per brief): count this envelope's
  * access_code_failed + sign_rejected events in the last 10 minutes
  * via the service's full-envelope read; > 20 recent failures → the
- * caller answers 429. If the event read is unavailable the check is
- * skipped (the access-code lockout in the service still applies).
+ * caller answers 429. (The service's own access lockout — 5 counted
+ * attempts — is the primary control; this is a coarse backstop.) If
+ * the event read is unavailable the check is skipped.
  */
 export async function tooManyFailures(envelopeId: string): Promise<boolean> {
   if (!envelopeId) return false;

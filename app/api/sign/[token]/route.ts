@@ -4,8 +4,8 @@ import { getSigningSettings } from "@/lib/signing/service";
 import {
   NO_STORE,
   jsonNoStore,
-  resolveFailure,
   resolveSigner,
+  stateBody,
 } from "@/app/api/sign/shared";
 
 /**
@@ -26,7 +26,9 @@ export async function GET(
   headers();
   try {
     const outcome = await resolveSigner(params.token);
-    if (!outcome.ok) return resolveFailure(outcome);
+    if (!outcome.ok) {
+      return jsonNoStore({ error: "not_found" }, { status: 404 });
+    }
     const v = outcome.view;
 
     let consentText = "";
@@ -40,21 +42,11 @@ export async function GET(
       /* consent text is additive; the flow still works without it */
     }
 
-    return jsonNoStore({
-      state: v.state,
-      documentName: v.documentName,
-      senderName: v.senderName,
-      senderEmail: v.senderEmail,
-      signer: { name: v.signerName, email: v.signerEmail },
-      signingOrder: v.signingOrder,
-      position: v.position,
-      totalSigners: v.totalSigners,
-      requiresAccessCode: v.requiresAccessCode,
-      consented: v.consented,
-      expiresAt: v.expiresAt,
-      consentText,
-      downloadAvailable: v.state === "completed",
-    });
+    const body = stateBody(v, consentText);
+    if (v.state === "expired") {
+      return jsonNoStore(body, { status: 410 });
+    }
+    return jsonNoStore(body);
   } catch (err) {
     console.error(
       "[sign:get]",

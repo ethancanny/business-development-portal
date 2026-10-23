@@ -148,13 +148,20 @@ export default function SendForSignature({
         )
       );
       const rawLinks = Array.isArray(data.links) ? (data.links as Rec[]) : [];
+      // The API returns signer links as paths (/sign/<token>) — make
+      // them absolute so the sender can share them directly.
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
       setLinks(
-        rawLinks.map((l) => ({
-          signerId: str(pick(l, "signerId", "signer_id")),
-          name: str(pick(l, "name")),
-          email: str(pick(l, "email")),
-          url: str(pick(l, "url", "link")),
-        }))
+        rawLinks.map((l) => {
+          const rawUrl = str(pick(l, "url", "link"));
+          return {
+            signerId: str(pick(l, "signerId", "signer_id")),
+            name: str(pick(l, "name")),
+            email: str(pick(l, "email")),
+            url: rawUrl.startsWith("/") ? `${origin}${rawUrl}` : rawUrl,
+          };
+        })
       );
       if (onDone) onDone();
     } catch {

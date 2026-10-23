@@ -5,7 +5,6 @@ import {
   NO_STORE,
   jsonNoStore,
   normalizeAccessResult,
-  resolveFailure,
   resolveSigner,
   tooManyFailures,
 } from "@/app/api/sign/shared";
@@ -26,7 +25,9 @@ export async function POST(
   headers();
   try {
     const outcome = await resolveSigner(params.token);
-    if (!outcome.ok) return resolveFailure(outcome);
+    if (!outcome.ok) {
+      return jsonNoStore({ error: "not_found" }, { status: 404 });
+    }
     const v = outcome.view;
     if (v.state !== "active") {
       return jsonNoStore(

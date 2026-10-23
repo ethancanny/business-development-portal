@@ -176,6 +176,7 @@ export function EnvelopeDetailDialog({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [envelope, setEnvelope] = useState<Rec | null>(null);
+  const [signingInfo, setSigningInfo] = useState<Rec | null>(null);
   const [signers, setSigners] = useState<SignerRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactRow[]>([]);
@@ -206,6 +207,7 @@ export function EnvelopeDetailDialog({
       const env = (pick(data, "envelope") ?? data) as Rec;
       setEnvelope(env);
       const signing = (pick(data, "signing") ?? {}) as Rec;
+      setSigningInfo(signing);
       setSigners(
         listFrom<Rec>(data, "signers").map((s) => ({
           id: str(pick(s, "id", "signerId")),
@@ -253,6 +255,22 @@ export function EnvelopeDetailDialog({
           "Document",
         documentId: str(pick(a, "documentId", "document_id", "id")),
       }));
+      // The detail API's artifacts is an object of document ids
+      // ({ preparedDocumentId, executedDocumentId, certificateDocumentId }).
+      const artsObj = pick(data, "artifacts");
+      if (arts.length === 0 && artsObj && typeof artsObj === "object" && !Array.isArray(artsObj)) {
+        const ao = artsObj as Rec;
+        const pairs: Array<[string, string, unknown]> = [
+          ["executed", "Executed document", pick(ao, "executedDocumentId", "executed_document_id")],
+          ["certificate", "Signing certificate", pick(ao, "certificateDocumentId", "certificate_document_id")],
+          ["prepared", "Prepared document", pick(ao, "preparedDocumentId", "prepared_document_id")],
+        ];
+        for (const [kind, label, idv] of pairs) {
+          if (typeof idv === "string" && idv) {
+            arts.push({ kind, label, documentId: idv });
+          }
+        }
+      }
       // Fall back to the signing record's document ids.
       if (arts.length === 0) {
         const candidates: Array<[string, string]> = [
@@ -275,7 +293,10 @@ export function EnvelopeDetailDialog({
         }
       }
       setArtifacts(arts.filter((a) => a.documentId));
-      const exp = str(pick(env, "expiresAt", "expires_at"));
+      const signingRec = (pick(data, "signing") ?? {}) as Rec;
+      const exp =
+        str(pick(signingRec, "expiresAt", "expires_at")) ||
+        str(pick(env, "expiresAt", "expires_at"));
       if (exp) setNewExpiry(exp.slice(0, 10));
     } catch {
       setError(true);
@@ -384,14 +405,22 @@ export function EnvelopeDetailDialog({
                 {envelopeStatusLabel(status)}
               </span>{" "}
               <span className="text-xs text-slate-400 dark:text-white/40">
-                {str(pick(envelope, "signingOrder", "signing_order")) ||
-                  "parallel"}{" "}
+                {str(
+                  pick(signingInfo ?? {}, "signingOrder", "signing_order") ??
+                    pick(envelope, "signingOrder", "signing_order")
+                ) || "sequential"}{" "}
                 signing
-                {str(pick(envelope, "expiresAt", "expires_at"))
-                  ? ` · expires ${fmtDate(str(pick(envelope, "expiresAt", "expires_at")))}`
+                {str(
+                  pick(signingInfo ?? {}, "expiresAt", "expires_at") ??
+                    pick(envelope, "expiresAt", "expires_at")
+                )
+                  ? ` · expires ${fmtDate(str(pick(signingInfo ?? {}, "expiresAt", "expires_at") ?? pick(envelope, "expiresAt", "expires_at")))}`
                   : ""}
-                {str(pick(envelope, "completedAt", "completed_at"))
-                  ? ` · completed ${fmtDate(str(pick(envelope, "completedAt", "completed_at")))}`
+                {str(
+                  pick(signingInfo ?? {}, "completedAt", "completed_at") ??
+                    pick(envelope, "completedAt", "completed_at")
+                )
+                  ? ` · completed ${fmtDate(str(pick(signingInfo ?? {}, "completedAt", "completed_at") ?? pick(envelope, "completedAt", "completed_at")))}`
                   : ""}
               </span>
             </p>
@@ -439,11 +468,21 @@ export function EnvelopeDetailDialog({
                                   const data = await post("resend", {
                                     signerId: s.id,
                                   });
-                                  const url = str(
+                                  const rawUrl = str(
                                     pick(data ?? {}, "url", "link")
                                   );
-                                  if (url) {
-                                    setResentUrl(url);
+                                  if (rawUrl) {
+                                    // Links come back as paths —
+                                    // absolutize for sharing.
+                                    const origin =
+                                      typeof window !== "undefined"
+                                        ? window.location.origin
+                                        : "";
+                                    setResentUrl(
+                                      rawUrl.startsWith("/")
+                                        ? `${origin}${rawUrl}`
+                                        : rawUrl
+                                    );
                                     setCopied(false);
                                   }
                                 },
