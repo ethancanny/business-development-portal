@@ -13,6 +13,7 @@ import { SkeletonRows } from "@/components/ui";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type Executive, type MiMultiple } from "@/lib/types";
 import { fmtMoney, uniqueStrings } from "@/lib/format";
 import { dealFocusSector, resolveDealValue } from "@/lib/valuation";
+import DealsDataTools from "@/components/DealsDataTools";
 import CompanyLogo from "@/components/CompanyLogo";
 import PersonAvatar from "@/components/PersonAvatar";
 import SectorChip from "@/components/SectorChip";
@@ -286,6 +287,7 @@ export default function Dashboard() {
             + {tab === "deals" ? "Add deal" : "Add candidate"}
           </button>
           )}
+          {tab === "deals" && <DealsDataTools onImported={load} />}
         </div>
 
         {/* Board */}
