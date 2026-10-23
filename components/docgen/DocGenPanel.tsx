@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { EmptyState, ErrorState, SkeletonRows } from "@/components/ui";
 import { fmtDate } from "@/lib/format";
+import SigningActions from "@/components/signing/EnvelopeStatus";
 
 interface DocgenTemplate {
   id: string;
@@ -340,6 +341,10 @@ export default function DocGenPanel({ companyId }: { companyId: string }) {
                     >
                       Open
                     </Link>
+                    <SigningActions
+                      documentId={g.documentId}
+                      documentName={g.documentName || g.templateName}
+                    />
                   </li>
                 ))}
               </ul>

@@ -144,10 +144,10 @@ export default function SettingsPage() {
             E-signature
           </h2>
           <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
-            Send generated documents (LOIs, NDAs, consents) for signature.
-            Signing is being built into the portal itself — the
-            in-house signing build is queued right after Phase 10, and
-            envelope actions report setup required until it lands.
+            Send generated documents (LOIs, NDAs, consents) and reports
+            for signature through the portal&apos;s own in-house
+            signing module — certificate, consent disclosure, default
+            expiry, and recent envelopes.
           </p>
           <EsignSettingsCard />
         </section>
