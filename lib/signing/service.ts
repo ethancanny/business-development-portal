@@ -234,10 +234,47 @@ function sha256HexLocal(data: string | Buffer): string {
 }
 
 /**
+ * Canonical JSON for the audit hash chain: JSON.stringify with
+ * object keys sorted recursively (arrays keep order; primitives
+ * as-is). Postgres JSONB does not preserve key order, so the plain
+ * JSON.stringify(detail) used at write time could differ from a
+ * read-back stringify of the same detail — canonicalising on BOTH
+ * the write and verify sides removes that drift. This exact scheme
+ * is duplicated in lib/signing/verify.ts; keep the two in sync.
+ */
+export function canonicalJson(v: unknown): string {
+  if (v === null || typeof v !== "object") {
+    const s = JSON.stringify(v);
+    return s === undefined ? "null" : s;
+  }
+  if (Array.isArray(v)) {
+    return `[${v
+      .map((item) => canonicalJson(item === undefined ? null : item))
+      .join(",")}]`;
+  }
+  const rec = v as Record<string, unknown>;
+  const keys = Object.keys(rec)
+    .filter((k) => rec[k] !== undefined)
+    .sort();
+  return `{${keys
+    .map((k) => `${JSON.stringify(k)}:${canonicalJson(rec[k])}`)
+    .join(",")}}`;
+}
+
+/** Normalise a stored created_at to its canonical ISO form. */
+function normalizedIso(value: string): string {
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? value : d.toISOString();
+}
+
+/**
  * Append one hash-chained event. Chain rule:
  *   entry_hash = sha256(prev_hash + '|' + envelope_id + '|' + kind +
- *     '|' + actor + '|' + created_at_iso + '|' + JSON.stringify(detail))
- * Genesis prev_hash = sha256(envelope_id).
+ *     '|' + actor + '|' + created_at_iso + '|' + canonicalJson(detail))
+ * Genesis prev_hash = sha256(envelope_id). created_at_iso is the
+ * .toISOString() form of the single JS Date generated here and
+ * inserted as the row's created_at — generated ONCE, never re-read
+ * for the hash.
  *
  * Serialization: sql() is the Neon HTTP driver — it has no
  * interactive transaction that could hold a row lock across the
@@ -289,7 +326,7 @@ export async function appendEvent(
   const detail = input.detail ?? {};
   const createdIso = createdAt.toISOString();
   const entryHash = sha256HexLocal(
-    [prevHash, envelopeId, input.kind, input.actor, createdIso, JSON.stringify(detail)].join("|")
+    [prevHash, envelopeId, input.kind, input.actor, createdIso, canonicalJson(detail)].join("|")
   );
   const id = newId();
   const rows = await db`
@@ -313,7 +350,7 @@ export async function verifyEventChain(
   let prev = sha256HexLocal(envelopeId);
   for (const ev of events) {
     const expected = sha256HexLocal(
-      [prev, envelopeId, ev.kind, ev.actor, ev.createdAt, JSON.stringify(ev.detail)].join("|")
+      [prev, envelopeId, ev.kind, ev.actor, normalizedIso(ev.createdAt), canonicalJson(ev.detail ?? {})].join("|")
     );
     if (ev.prevHash !== prev || ev.entryHash !== expected) {
       return { ok: false, checked: events.length, brokenAt: ev.id };
@@ -519,9 +556,37 @@ export async function createEnvelopeForSource(
   let preparedBytes: Buffer = sourceBytes;
   let fieldMode: string = "append";
   try {
-    const presetBlocks = Array.isArray(input.templateBlocks)
+    let presetBlocks = Array.isArray(input.templateBlocks)
       ? (input.templateBlocks as PresetSignatureBlock[])
       : null;
+    if ((!presetBlocks || presetBlocks.length === 0) && hasDoc) {
+      // No explicit blocks: fall back to the docgen generation's
+      // preset signature blocks for this document (generated
+      // documents such as NDAs carry them). Dynamic import —
+      // generate.ts imports lib/signing/pdf, and a static import
+      // here would risk a cycle; its block shape
+      // ({page,x,y,width,height,roleLabel}) matches
+      // PresetSignatureBlock structurally. prepareDocument itself
+      // falls back to append mode when the block count does not
+      // match the signer count.
+      try {
+        const { getGenerationSignatureBlocks } = await import(
+          "../docgen/generate"
+        );
+        const generated = await getGenerationSignatureBlocks(
+          effectiveDocumentId
+        );
+        if (generated && generated.length) {
+          presetBlocks = generated as PresetSignatureBlock[];
+        }
+      } catch (lookupErr) {
+        console.error(
+          "[signing] preset signature block lookup failed for document",
+          effectiveDocumentId,
+          lookupErr instanceof Error ? lookupErr.message : String(lookupErr)
+        );
+      }
+    }
     const prepared = await prepareDocument({
       sourceBytes,
       signers: recipients.map((r) => ({ name: r.name, email: r.email })),
@@ -835,7 +900,11 @@ export async function resendSignerLink(
   await ensureSigning();
   const envelope = await getDocgenEnvelope(envelopeId);
   if (!envelope) throw new Error("envelope_not_found");
-  if (envelope.status !== "sent" && envelope.status !== "viewed") {
+  if (
+    envelope.status !== "sent" &&
+    envelope.status !== "viewed" &&
+    envelope.status !== "partially_signed"
+  ) {
     throw new Error("envelope_not_live");
   }
   const signer = await getSignerPublic(signerId);
@@ -1218,7 +1287,12 @@ export async function recordSignature(
   const signing = await getSigningEnvelope(signer.envelopeId);
   if (!signing) throw new Error("envelope_not_found");
   const docgen = await getDocgenEnvelope(signer.envelopeId);
-  if (!docgen || (docgen.status !== "sent" && docgen.status !== "viewed")) {
+  if (
+    !docgen ||
+    (docgen.status !== "sent" &&
+      docgen.status !== "viewed" &&
+      docgen.status !== "partially_signed")
+  ) {
     throw new Error("envelope_not_live");
   }
   const db = sql();
@@ -1287,12 +1361,30 @@ export async function recordSignature(
   const signers = await listSignersPublic(signer.envelopeId);
   const allSigned =
     signers.length > 0 && signers.every((s) => s.status === "signed");
+  const someSigned = signers.some((s) => s.status === "signed");
   const updated = await getSignerPublic(signerId);
   if (!updated) throw new Error("signer_not_found");
-  const envelopeNow = await getDocgenEnvelope(signer.envelopeId);
+  // Partial state: at least one signer has signed and others remain
+  // — the docgen status must say so (it previously stayed 'viewed').
+  // 'completed' is NOT set here: markCompleted owns it. When all
+  // have signed, still return 'partially_signed' and let the
+  // caller's finalize/markCompleted flip it to 'completed'.
+  let envelopeStatus: string;
+  if (someSigned && !allSigned) {
+    const envelopeNow = await getDocgenEnvelope(signer.envelopeId);
+    if (envelopeNow && envelopeNow.status !== "completed") {
+      await updateDocgenStatus(signer.envelopeId, "partially_signed");
+    }
+    envelopeStatus = "partially_signed";
+  } else if (allSigned) {
+    envelopeStatus = "partially_signed";
+  } else {
+    const envelopeNow = await getDocgenEnvelope(signer.envelopeId);
+    envelopeStatus = envelopeNow?.status ?? docgen.status;
+  }
   return {
     signer: updated,
-    envelopeStatus: envelopeNow?.status ?? docgen.status,
+    envelopeStatus,
     allSigned,
   };
 }
