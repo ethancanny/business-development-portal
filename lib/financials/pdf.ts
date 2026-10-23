@@ -12,6 +12,14 @@
 export interface PdfSection {
   heading: string;
   rows: string[][];
+  /**
+   * When true, this section starts on a fresh page. Additive and
+   * backward-compatible: inputs that never set it render byte-identical
+   * output to before. Used by the signing module's preset signature
+   * page (docgen) so signature blocks always land on a final page of
+   * known geometry.
+   */
+  pageBreakBefore?: boolean;
 }
 
 export interface SimplePdfInput {
@@ -85,6 +93,8 @@ interface LayoutLine {
   /** Vertical space consumed by this line (leading + extra gap). */
   height: number;
   gapBefore: number;
+  /** Force a page break before this line (section pageBreakBefore). */
+  pageBreakBefore?: boolean;
 }
 
 function layout(input: SimplePdfInput): LayoutLine[] {
@@ -112,6 +122,7 @@ function layout(input: SimplePdfInput): LayoutLine[] {
       bold: true,
       height: 17,
       gapBefore: 12,
+      pageBreakBefore: section.pageBreakBefore === true,
     });
     if (!section.rows.length) {
       lines.push({
@@ -145,6 +156,11 @@ function paginate(lines: LayoutLine[]): LayoutLine[][] {
   const capacity = TOP - BOTTOM;
   for (const line of lines) {
     const need = line.gapBefore + line.height;
+    if (current.length > 0 && line.pageBreakBefore) {
+      pages.push(current);
+      current = [];
+      used = 0;
+    }
     if (current.length > 0 && used + need > capacity) {
       pages.push(current);
       current = [];

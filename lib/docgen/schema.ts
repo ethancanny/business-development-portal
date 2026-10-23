@@ -30,6 +30,19 @@ export interface DocgenTemplateRow {
   updatedAt: string;
 }
 
+/** One preset signature field on a generated document (pdf-lib
+ * bottom-up coordinates, absolute page index). Persisted on the
+ * generation so the signing module can stamp + seal in template
+ * mode without re-deriving geometry. */
+export interface DocgenSignatureBlock {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  roleLabel: string;
+}
+
 export interface DocgenGenerationRow {
   id: string;
   templateId: string | null;
@@ -41,6 +54,7 @@ export interface DocgenGenerationRow {
   companyId: string | null;
   actor: string;
   createdAt: string;
+  signatureBlocks: DocgenSignatureBlock[] | null;
 }
 
 export interface DocgenEnvelopeRow {
@@ -102,6 +116,11 @@ export function ensureDocgenSchema(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS docgen_generations_document_idx
         ON docgen.generations (document_id)`;
+      // Preset signature blocks for signable templates (in-house
+      // e-signature build): JSONB array of DocgenSignatureBlock.
+      await db`
+        ALTER TABLE docgen.generations
+        ADD COLUMN IF NOT EXISTS signature_blocks JSONB`;
 
       await db`
         CREATE TABLE IF NOT EXISTS docgen.envelopes (

@@ -317,6 +317,35 @@ Date: [●]
 
 Prepared in connection with {{deal.companyName}} · {{date.year}}`;
 
+/* --------------------- signer roles (e-sign) --------------------- */
+
+/** Signer-role metadata for the in-house e-signature preset blocks:
+ * templates listed here get a shared signature page appended at
+ * generation time (lib/signing/pdf.ts buildSignatureSections) with one
+ * block per role, in order. Templates absent here (cim,
+ * closing-checklist) are not signable via presets — envelopes for them
+ * fall back to the signing module's append mode. board-consent carries
+ * ONE Director block by design; when an envelope's signer count
+ * differs from the block count, append mode takes over. */
+export interface TemplateSignerRole {
+  label: string;
+  title?: string;
+}
+
+export const TEMPLATE_SIGNER_ROLES: Record<string, TemplateSignerRole[]> = {
+  loi: [{ label: "Seller" }, { label: "Buyer" }],
+  ioi: [{ label: "Buyer" }],
+  nda: [{ label: "Disclosing Party" }, { label: "Receiving Party" }],
+  "board-consent": [{ label: "Director" }],
+};
+
+export function getTemplateSignerRoles(
+  key: string
+): TemplateSignerRole[] | null {
+  const roles = TEMPLATE_SIGNER_ROLES[(key ?? "").trim()];
+  return roles && roles.length ? roles : null;
+}
+
 export const SEED_TEMPLATES: SeedTemplate[] = [
   {
     key: "loi",
