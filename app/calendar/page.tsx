@@ -291,25 +291,11 @@ export default function CalendarPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, cursor]);
 
-  // Live refresh: webhook-driven changes appear without a manual reload.
-  useEffect(() => {
-    const tick = () => {
-      (view === "calendar" ? loadRange(cursor) : loadEvents()).catch(() => null);
-      loadPending().catch(() => null);
-    };
-    const id = window.setInterval(tick, 45000);
-    const onVis = () => {
-      if (document.visibilityState === "visible") tick();
-    };
-    window.addEventListener("focus", tick);
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      window.clearInterval(id);
-      window.removeEventListener("focus", tick);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, cursor]);
+  // Phase 10 transfer audit fix: the 45s interval refetch + focus
+  // refetch violated PROJECT_RULES' frontend rule (fetch on open +
+  // pull-to-refresh only, no interval polling, no focus refetch).
+  // Graph webhook changes land server-side and appear on the next
+  // open/navigation, like every other platform screen.
 
   const queueIntent = async (
     action: "create" | "update" | "delete",

@@ -386,15 +386,10 @@ export default function NewsIntel() {
   useEffect(() => {
     loadTerms();
   }, [loadTerms]);
-  useEffect(() => {
-    const onFocus = () => load();
-    window.addEventListener("focus", onFocus);
-    const t = window.setInterval(load, 5 * 60 * 1000);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      window.clearInterval(t);
-    };
-  }, [load]);
+  // Phase 10 transfer audit fix: the 5-minute interval reload + focus
+  // reload violated PROJECT_RULES' frontend rule (fetch on open +
+  // pull-to-refresh only). News data updates on the twice-daily ingest
+  // cadence, so a client poll can never find fresher data anyway.
 
   // Detail panel: Escape closes.
   useEffect(() => {
@@ -698,6 +693,7 @@ export default function NewsIntel() {
               <img
                 src={item.imageUrl ?? ""}
                 alt=""
+                loading="lazy"
                 className="h-48 w-full object-cover"
                 onError={() => setImgFailed((f) => ({ ...f, [item.id]: true }))}
               />
