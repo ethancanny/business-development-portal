@@ -535,7 +535,7 @@ export default function DocumentsLibrary() {
                         <iframe title={doc.name} src={`/api/platform/documents/${encodeURIComponent(doc.id)}/file`} className="h-[520px] w-full rounded-xl border border-slate-200 dark:border-white/10" />
                       ) : (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={`/api/platform/documents/${encodeURIComponent(doc.id)}/file`} alt={doc.name} className="max-h-[520px] w-full rounded-xl border border-slate-200 object-contain dark:border-white/10" />
+                        <img src={`/api/platform/documents/${encodeURIComponent(doc.id)}/file`} alt={doc.name} loading="lazy" className="max-h-[520px] w-full rounded-xl border border-slate-200 object-contain dark:border-white/10" />
                       )
                     ) : (
                       <div>

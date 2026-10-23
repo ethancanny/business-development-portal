@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEAL_STAGES, EXEC_STAGES, PARTNER_NAMES, type Deal, type DealDrivers, type Executive, type MiMultiple } from "@/lib/types";
 import { fmtMoney, fmtDate, uniqueStrings, dedupeSourceTokens } from "@/lib/format";
 import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, dealFocusSector, estimateMultiple, isFocusDeal, matchGroup, resolveDealValue, resolveStatedPrice, resolveStructure, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
@@ -213,13 +213,31 @@ function ModalShell({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  // Initial focus lands on the dialog panel; Escape closes. Mount-only
+  // (latest onClose via ref) so form re-renders never steal focus.
+  useEffect(() => {
+    panelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCloseRef.current();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 dark:bg-black/60"
       onClick={onClose}
     >
       <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl dark:border-white/10 dark:bg-[#132847] dark:shadow-2xl"
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl focus:outline-none dark:border-white/10 dark:bg-[#132847] dark:shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -603,16 +621,42 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
       structure: structureFromForm(),
       metrics: metricsFromForm(),
     };
-    const res = await fetch(isNew ? "/api/deals" : `/api/deals/${deal!.id}`, {
+    let res = await fetch(isNew ? "/api/deals" : `/api/deals/${deal!.id}`, {
       method: isNew ? "POST" : "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    // Phase 10 stage gates: a blocked stage change names the unmet
+    // conditions; the user may override with a reason (the override is
+    // audit-logged server-side) or cancel and fix the conditions.
+    if (res.status === 409) {
+      const d = await res.json().catch(() => ({}));
+      if (d.error === "stage_gate_blocked") {
+        const list = (Array.isArray(d.unmet) ? d.unmet : [])
+          .map((u: { label?: string }) => `• ${u.label ?? ""}`)
+          .join("\n");
+        const reason = window.prompt(
+          `This stage change is blocked — unmet conditions:\n${list}\n\nEnter a reason to override (recorded in the audit trail), or cancel:`,
+          ""
+        );
+        if (reason && reason.trim()) {
+          setBusy(true);
+          res = await fetch(`/api/deals/${deal!.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...payload,
+              gateOverride: { reason: reason.trim() },
+            }),
+          });
+        }
+      }
+    }
     setBusy(false);
     if (res.ok) onSaved();
     else {
       const d = await res.json().catch(() => ({}));
-      setError(d.error || "Failed to save");
+      setError(d.message || d.error || "Failed to save");
     }
   };
 
