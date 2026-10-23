@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Button, CardSkeleton, EmptyState, ErrorState } from "@/components/ui";
 import { fmtDate, fmtRelTime } from "@/lib/format";
 import DocumentUploader from "@/components/DocumentUploader";
+import SigningActions from "@/components/signing/EnvelopeStatus";
 
 interface DocumentRow {
   id: string;
@@ -566,6 +567,11 @@ export default function DocumentsLibrary() {
                     <Button variant="danger" onClick={() => void deleteDoc()} className="min-h-[44px]">
                       Delete
                     </Button>
+                  </div>
+
+                  <div className="mt-5 border-t border-slate-100 pt-4 dark:border-white/5">
+                    <p className={labelCls}>E-signature</p>
+                    <SigningActions documentId={doc.id} documentName={doc.name} />
                   </div>
 
                   {/* Versions */}
