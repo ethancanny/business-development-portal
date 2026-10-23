@@ -663,6 +663,21 @@ export async function generateReportNow(
 ): Promise<ReportRow> {
   await ready();
   const report = await requireReport(reportId);
+  // Terminal-state guard (Part 12 battery defect, Oct 22 2026):
+  // createReport enqueues a comms_generate_report job AND the
+  // schedule runner generates synchronously; when the queued job
+  // drained after the schedule flow had already delivered the
+  // report, regeneration rewrote it and reset status 'sent' ->
+  // 'draft'. A sent (or discarded) report is never regenerated —
+  // its delivered version is frozen; staleness is the mechanism
+  // that flags it for a NEW report instead.
+  if (report.status === "sent" || report.status === "discarded") {
+    await writeAudit(reportId, actor, "generate_skipped_terminal", {
+      version: report.currentVersion,
+      status: report.status,
+    });
+    return report;
+  }
   const template = await getTemplateAny(report.templateId);
   if (!template) throw new Error("template_not_found");
   const assembled = await assembleReport({
@@ -681,7 +696,9 @@ export async function generateReportNow(
     report.sourceFingerprint &&
     report.sourceFingerprint === assembled.fingerprint &&
     report.render &&
-    report.status === "draft"
+    (report.status === "draft" ||
+      report.status === "in_review" ||
+      report.status === "approved")
   ) {
     await writeAudit(reportId, actor, "generate_cached", {
       version: report.currentVersion,
