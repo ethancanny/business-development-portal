@@ -236,16 +236,25 @@ export default function SendDialog({
               Report delivered. Per-recipient outcomes:
             </p>
             {result.map((d, i) => (
-              <p key={i} className="text-sm text-slate-600 dark:text-white/70">
-                <span className="font-semibold">
-                  {str(d.recipientName ?? d.recipient_name) || str(d.recipientEmail ?? d.recipient_email)}
-                </span>{" "}
-                — link {str(d.status) || "created"} · email:{" "}
-                {str(d.emailStatus ?? d.email_status) || "unknown"}
-                {str(d.emailDetail ?? d.email_detail)
-                  ? ` (${str(d.emailDetail ?? d.email_detail)})`
-                  : ""}
-              </p>
+              <div key={i} className="text-sm text-slate-600 dark:text-white/70">
+                <p>
+                  <span className="font-semibold">
+                    {str(d.recipientName ?? d.recipient_name) || str(d.recipientEmail ?? d.recipient_email)}
+                  </span>{" "}
+                  — link {str(d.status) || "created"} · email:{" "}
+                  {str(d.emailStatus ?? d.email_status) || "unknown"}
+                  {str(d.emailDetail ?? d.email_detail)
+                    ? ` (${str(d.emailDetail ?? d.email_detail)})`
+                    : ""}
+                </p>
+                {str(d.link) ? (
+                  <p className="mt-1 break-all rounded-lg bg-slate-100 px-3 py-2 text-xs dark:bg-white/10">
+                    Recipient link (shown once — copy it now if the email
+                    above was not sent):{" "}
+                    <span className="font-mono">{str(d.link)}</span>
+                  </p>
+                ) : null}
+              </div>
             ))}
             <div className="flex justify-end">
               <Button variant="primary" size="sm" onClick={onClose}>Done</Button>

@@ -23,8 +23,11 @@ import type { ReportRender } from "./types";
  * tracking, revocation, and recipient replies.
  *
  * Token rules (mirroring lib/dataroom/guests.ts): a grant is a random
- * 32-byte hex token; ONLY its SHA-256 hash + last 4 chars are stored,
- * and the raw token is shown exactly once (inside the emailed link).
+ * 32-byte hex token; ONLY its SHA-256 hash + last 4 chars are stored.
+ * The raw token leaves the server exactly twice at creation: inside
+ * the emailed link, and in the one-time deliver API response (so the
+ * sender can share it manually while email transport is unavailable).
+ * It is never returned by any list/read endpoint afterwards.
  * validateReportToken re-validates on EVERY call — hash lookup,
  * revocation, expiry, and the report not being soft-deleted.
  *
@@ -81,11 +84,19 @@ async function writeActivity(
   }
 }
 
+export type DeliveryWithLink = DeliveryRow & {
+  /** One-time recipient link (raw token). Returned ONLY in the deliver
+   * response so the sender can share it manually when the notification
+   * email cannot be sent (transport setup-required) — mirroring the
+   * Phase 3 data-room pattern. Never stored; never in list reads. */
+  link: string;
+};
+
 export async function deliverReport(
   reportId: string,
   input: DeliverReportInput,
   actor: string
-): Promise<{ deliveries: DeliveryRow[]; check: PreSendCheckResult }> {
+): Promise<{ deliveries: DeliveryWithLink[]; check: PreSendCheckResult }> {
   await ensureComms();
   const report = await getReportRow(reportId);
   if (!report) throw new Error("report_not_found");
@@ -124,7 +135,7 @@ export async function deliverReport(
   const pdfFilename = `${(report.title || "report").replace(/[^a-z0-9-_]+/gi, "-").slice(0, 80)}.pdf`;
 
   const db = sql();
-  const deliveries: DeliveryRow[] = [];
+  const deliveries: DeliveryWithLink[] = [];
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   for (const recipient of recipients) {
     const token = randomBytes(32).toString("hex");
@@ -164,7 +175,7 @@ export async function deliverReport(
       WHERE id = ${id}`;
     delivery.emailStatus = result.status;
     delivery.emailDetail = result.detail;
-    deliveries.push(delivery);
+    deliveries.push({ ...delivery, link });
   }
 
   await db`
