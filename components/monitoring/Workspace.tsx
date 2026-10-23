@@ -43,6 +43,7 @@ import ValuationsTab from "@/components/portmgmt/ValuationsTab";
 import RisksTab from "@/components/portmgmt/RisksTab";
 import CapTableTab from "@/components/portmgmt/CapTableTab";
 import ExitTab from "@/components/portmgmt/ExitTab";
+import GenerateReportButton from "@/components/comms/GenerateReportButton";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -215,6 +216,7 @@ export default function MonitoringWorkspace({ companyId }: { companyId: string }
               Company profile
             </Link>
           )}
+          <GenerateReportButton subjectKind="portfolio_company" companyId={companyId} />
           <a
             href={`${exportBase}/board-pack?format=pdf`}
             className="btn btn-primary btn-sm min-h-[44px]"

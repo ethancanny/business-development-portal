@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Button, ErrorState, SkeletonRows, StatTile } from "@/components/ui";
+import GenerateReportButton from "@/components/comms/GenerateReportButton";
 import {
   API,
   INVESTOR_STATUSES,
@@ -204,6 +205,7 @@ export default function InvestorDetail({
           >
             Open in Directory
           </Link>
+          <GenerateReportButton subjectKind="investor" personId={personId} />
           {onClose && (
             <Button variant="ghost" size="sm" onClick={onClose} className="min-h-[44px]">
               Close
