@@ -30,6 +30,11 @@ export function middleware(req: NextRequest) {
     // the /api/report-guest routes authenticate the delivery token
     // themselves (hash lookup + expiry + revocation) on every call.
     "/api/report-guest",
+    // E-signature signer links (in-house signing): same pattern as
+    // /api/guest — the /api/sign routes authenticate the signer token
+    // themselves (hash lookup + envelope state) on every call. The
+    // session cookie is never read on signer routes.
+    "/api/sign",
   ];
   // PWA assets: browsers fetch the manifest, icons, splash images and the
   // service worker outside the page's auth context (notably iOS), and the
@@ -62,6 +67,9 @@ export function middleware(req: NextRequest) {
     // Report recipient page (Part 12): same pattern — the token in the
     // path IS the credential; data loads via /api/report-guest.
     pathname.startsWith("/report/") ||
+    // Signer page (in-house signing): same pattern — the token in
+    // the path IS the credential; data loads via /api/sign.
+    pathname.startsWith("/sign/") ||
     PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p)) ||
     PUBLIC_ASSETS.includes(pathname) ||
     PUBLIC_PWA.includes(pathname) ||
