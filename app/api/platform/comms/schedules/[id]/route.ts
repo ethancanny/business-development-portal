@@ -2,10 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { authed, ok, readBody, serviceError } from "@/lib/comms/http";
 import {
   deleteSchedule,
+  getSchedule,
   pauseSchedule,
   resumeSchedule,
   updateSchedule,
 } from "@/lib/comms/schedules";
+
+/** GET one schedule by id. */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+): Promise<NextResponse> {
+  const gate = await authed();
+  if ("response" in gate) return gate.response;
+  try {
+    const schedule = await getSchedule(params.id);
+    if (!schedule) {
+      return ok({ error: "schedule_not_found" }, 404);
+    }
+    return ok({ schedule });
+  } catch (err) {
+    return serviceError(err, "comms/schedules/get");
+  }
+}
 
 /**
  * PATCH a schedule. Field edits go through updateSchedule; a status
