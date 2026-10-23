@@ -108,7 +108,7 @@ export function ensureDocgenSchema(): Promise<void> {
           id TEXT PRIMARY KEY,
           document_id TEXT NOT NULL DEFAULT '',
           deal_id TEXT,
-          provider TEXT NOT NULL DEFAULT 'docusign',
+          provider TEXT NOT NULL DEFAULT 'in-house',
           status TEXT NOT NULL DEFAULT '',
           external_id TEXT,
           recipients JSONB NOT NULL DEFAULT '[]',
@@ -120,6 +120,12 @@ export function ensureDocgenSchema(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS docgen_envelopes_document_idx
         ON docgen.envelopes (document_id, created_at DESC)`;
+      // Provider is the in-house signing module (Ethan's Oct 22
+      // decision) — keep the column default provider-agnostic even if
+      // the table was created by the first Phase 10 deploy.
+      await db`
+        ALTER TABLE docgen.envelopes
+        ALTER COLUMN provider SET DEFAULT 'in-house'`;
     })().catch((err) => {
       schemaReady = null;
       throw err;

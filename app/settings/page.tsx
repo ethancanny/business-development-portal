@@ -145,8 +145,9 @@ export default function SettingsPage() {
           </h2>
           <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
             Send generated documents (LOIs, NDAs, consents) for signature.
-            The framework is in place; it activates once a provider is
-            connected.
+            Signing is being built into the portal itself — the
+            in-house signing build is queued right after Phase 10, and
+            envelope actions report setup required until it lands.
           </p>
           <EsignSettingsCard />
         </section>

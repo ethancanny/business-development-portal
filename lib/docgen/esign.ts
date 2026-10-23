@@ -4,17 +4,23 @@ import { ensureDocgen } from "./templates";
 import type { DocgenEnvelopeRow } from "./schema";
 
 /**
- * E-signature FRAMEWORK (Phase 10) — no live provider.
+ * E-signature FRAMEWORK (Phase 10) — provider-agnostic, no live
+ * provider yet.
  *
- * The provider interface, the DocuSign implementation's configuration
- * gate, envelope persistence, and status reporting are all real; the
- * live send is deliberately NOT implemented in this phase:
- * - When the four DocuSign env vars are not all set, createEnvelope
- *   throws EsignSetupRequiredError (carrying `missing`) and the route
- *   records an envelope row with status "setup_required" and returns
- *   409. Nothing is ever reported as sent.
- * - When they ARE all set, createEnvelope still throws the honest
- *   "live_send_not_implemented" error — Phase 10 makes no live calls.
+ * Ethan's decision (Oct 22, 2026): signing will be an IN-HOUSE module
+ * built into the portal — the follow-on build right after Phase 10
+ * (DocuSign, Dropbox Sign, SharePoint eSignature and DocuSeal were all
+ * evaluated and rejected). This file therefore bakes in NO external
+ * API assumptions: the provider interface, envelope persistence, and
+ * status reporting are generic, and the registered provider is the
+ * in-house module's placeholder.
+ *
+ * Until the in-house build ships, the provider reports
+ * setup_required and createEnvelope throws EsignSetupRequiredError:
+ * the route records an envelope row with status "setup_required" and
+ * returns 409. Nothing is ever reported as sent. When the in-house
+ * module lands it implements this same interface (token-link signer
+ * flow, seal, certificate) and these records/actions work unchanged.
  */
 
 export interface EsignRecipient {
@@ -25,7 +31,6 @@ export interface EsignRecipient {
 export interface EsignProviderStatus {
   configured: boolean;
   setupRequired: boolean;
-  missing: string[];
   detail: string;
 }
 
@@ -35,23 +40,9 @@ export interface EsignStatus extends EsignProviderStatus {
 }
 
 export class EsignSetupRequiredError extends Error {
-  missing: string[];
-  constructor(missing: string[]) {
-    super(
-      `E-signature is not configured: missing env vars ${missing.join(", ")}`
-    );
+  constructor(detail: string) {
+    super(detail);
     this.name = "EsignSetupRequiredError";
-    this.missing = missing;
-  }
-}
-
-export class EsignNotImplementedError extends Error {
-  code = "live_send_not_implemented";
-  constructor() {
-    super(
-      "live_send_not_implemented: DocuSign credentials are present, but live envelope sending is not implemented in this phase (framework only — no live calls are made)."
-    );
-    this.name = "EsignNotImplementedError";
   }
 }
 
@@ -67,63 +58,43 @@ export interface EsignProvider {
   }): Promise<{ externalId: string; status: string }>;
 }
 
-export const DOCUSIGN_ENV_VARS = [
-  "DOCUSIGN_INTEGRATION_KEY",
-  "DOCUSIGN_USER_ID",
-  "DOCUSIGN_ACCOUNT_ID",
-  "DOCUSIGN_PRIVATE_KEY",
-] as const;
-
 export const ESIGN_SETUP_STEPS: string[] = [
-  "Create a DocuSign developer account (developer.docusign.com) and confirm the demo environment works.",
-  "In the DocuSign developer console, create an app and note its Integration Key; add the portal's redirect URI when prompted.",
-  "Create an RSA keypair for the app and keep the private key — it becomes DOCUSIGN_PRIVATE_KEY.",
-  "Set all four env vars in Vercel (DOCUSIGN_INTEGRATION_KEY, DOCUSIGN_USER_ID, DOCUSIGN_ACCOUNT_ID, DOCUSIGN_PRIVATE_KEY) for the portal project.",
-  "Redeploy the portal, then re-check this card — it will report the provider as configured (live sending itself ships in a later phase).",
+  "Signing is built into the portal itself — no external account, API keys, or environment variables are involved.",
+  "The in-house signing build is queued as the follow-on right after Phase 10. Its scope: a token-link signer flow (recipients sign through a secure link, reusing the platform's hashed-token machinery), drawn/typed signatures with consent capture, a tamper-evident seal (document hash + signing event log), and a downloadable signing certificate for every completed envelope.",
+  "Envelope requests made before that build ships are recorded here with status setup_required — they are never reported as sent, and they carry over unchanged when the module activates.",
 ];
 
-function missingDocuSignEnv(): string[] {
-  return DOCUSIGN_ENV_VARS.filter(
-    (k) => !(process.env[k] ?? "").trim()
-  ) as string[];
-}
-
-export const docuSignProvider: EsignProvider = {
-  name: "docusign",
+/**
+ * The in-house signing provider. Phase 10 ships the framework only —
+ * the signer flow itself is the next build (deliberately NOT built
+ * here), so every action honestly reports setup_required.
+ */
+export const inHouseProvider: EsignProvider = {
+  name: "in-house",
 
   async status(): Promise<EsignProviderStatus> {
-    const missing = missingDocuSignEnv();
-    if (missing.length) {
-      return {
-        configured: false,
-        setupRequired: true,
-        missing,
-        detail: `DocuSign is not configured — missing env vars: ${missing.join(", ")}. Envelopes cannot be sent until setup is complete.`,
-      };
-    }
     return {
-      configured: true,
-      setupRequired: false,
-      missing: [],
+      configured: false,
+      setupRequired: true,
       detail:
-        "DocuSign credentials are present (all four env vars set). Live envelope sending is not implemented in this phase — the framework records requests but makes no live calls.",
+        "In-house signing — build queued after Phase 10. Envelope actions report setup_required until the signing module ships; nothing is sent.",
     };
   },
 
   async createEnvelope(): Promise<{ externalId: string; status: string }> {
-    const missing = missingDocuSignEnv();
-    if (missing.length) throw new EsignSetupRequiredError(missing);
-    throw new EsignNotImplementedError();
+    throw new EsignSetupRequiredError(
+      "In-house signing is not available yet — the signing module build is queued after Phase 10. No envelope was sent."
+    );
   },
 };
 
 export function getEsignProvider(): EsignProvider {
-  return docuSignProvider;
+  return inHouseProvider;
 }
 
 export async function getEsignStatus(): Promise<EsignStatus> {
-  const st = await docuSignProvider.status();
-  return { provider: docuSignProvider.name, ...st, setupSteps: ESIGN_SETUP_STEPS };
+  const st = await inHouseProvider.status();
+  return { provider: inHouseProvider.name, ...st, setupSteps: ESIGN_SETUP_STEPS };
 }
 
 /* ---------------------------- persistence ---------------------------- */
@@ -155,7 +126,7 @@ function rowToEnvelope(r: Record<string, unknown>): DocgenEnvelopeRow {
     id: str(r.id),
     documentId: str(r.document_id),
     dealId: r.deal_id ? str(r.deal_id) : null,
-    provider: str(r.provider) || "docusign",
+    provider: str(r.provider) || "in-house",
     status: str(r.status),
     externalId: r.external_id ? str(r.external_id) : null,
     recipients: parseRecipients(r.recipients),
@@ -223,13 +194,10 @@ export async function listEnvelopes(
 
 /**
  * Request an envelope for a document. Resolves the document (throws
- * Error("document_not_found")), then calls the provider. Outcomes:
- * - setup required → envelope row persisted with status
- *   "setup_required" (detail names the missing env vars) and the
- *   EsignSetupRequiredError is re-thrown carrying { envelope }.
- * - configured but framework phase → row persisted with status
- *   "not_implemented" and EsignNotImplementedError re-thrown.
- * NEVER returns a fake sent state.
+ * Error("document_not_found")), then calls the provider. While the
+ * provider reports setup_required, the envelope row is persisted with
+ * status "setup_required" and the EsignSetupRequiredError is
+ * re-thrown carrying { envelope }. NEVER returns a fake sent state.
  */
 export async function requestEnvelope(input: {
   documentId: string;
@@ -270,25 +238,10 @@ export async function requestEnvelope(input: {
         status: "setup_required",
         externalId: null,
         recipients: input.recipients,
-        detail: `Setup required — missing env vars: ${err.missing.join(", ")}. No envelope was sent.`,
-        actor: input.actor,
-      });
-      (err as EsignSetupRequiredError & { envelope?: DocgenEnvelopeRow }).envelope =
-        envelope;
-      throw err;
-    }
-    if (err instanceof EsignNotImplementedError) {
-      const envelope = await insertEnvelope({
-        documentId: doc.id,
-        dealId: doc.dealId,
-        provider: provider.name,
-        status: "not_implemented",
-        externalId: null,
-        recipients: input.recipients,
         detail: err.message,
         actor: input.actor,
       });
-      (err as EsignNotImplementedError & { envelope?: DocgenEnvelopeRow }).envelope =
+      (err as EsignSetupRequiredError & { envelope?: DocgenEnvelopeRow }).envelope =
         envelope;
       throw err;
     }

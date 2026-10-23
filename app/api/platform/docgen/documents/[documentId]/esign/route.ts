@@ -3,7 +3,6 @@ import { getSessionUser } from "@/lib/auth";
 import { ensurePlatform } from "@/lib/platform/service";
 import { getDocument } from "@/lib/dataroom/documents";
 import {
-  EsignNotImplementedError,
   EsignSetupRequiredError,
   getEsignStatus,
   getLatestEnvelope,
@@ -13,12 +12,13 @@ import {
 } from "@/lib/docgen/esign";
 
 /**
- * E-signature for one document (framework — no live provider).
+ * E-signature for one document (framework — provider-agnostic).
  * GET  → provider status + latest envelope + envelope history.
- * POST { recipients: [{ name, email }] } → create envelope. While
- * DocuSign is unconfigured this persists an envelope row with status
- * "setup_required" and returns 409 { error: "setup_required",
- * missing, detail } — it NEVER fakes a sent state.
+ * POST { recipients: [{ name, email }] } → create envelope. The
+ * provider is the in-house signing module (build queued after
+ * Phase 10); until it ships this persists an envelope row with
+ * status "setup_required" and returns 409 { error: "setup_required",
+ * detail } — it NEVER fakes a sent state.
  */
 export async function GET(
   _req: NextRequest,
@@ -89,20 +89,10 @@ export async function POST(
       return NextResponse.json(
         {
           error: "setup_required",
-          missing: err.missing,
           detail: err.message,
           envelope,
         },
         { status: 409 }
-      );
-    }
-    if (err instanceof EsignNotImplementedError) {
-      const envelope = (
-        err as EsignNotImplementedError & { envelope?: unknown }
-      ).envelope;
-      return NextResponse.json(
-        { error: err.code, detail: err.message, envelope },
-        { status: 501 }
       );
     }
     if (err instanceof Error && err.message === "document_not_found") {
