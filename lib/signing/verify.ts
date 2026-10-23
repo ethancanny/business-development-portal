@@ -27,10 +27,16 @@ import { getEnvelopeFull } from "./service";
  * Chain rule (confirmed verbatim against lib/signing/service.ts
  * appendEvent/verifyEventChain): entry_hash = sha256(prev_hash + '|'
  * + envelope_id + '|' + kind + '|' + actor + '|' + created_at_iso +
- * '|' + JSON.stringify(detail)); genesis prev_hash =
- * sha256(envelope_id); events ordered (created_at, id); created_at
- * and detail are the stored row's ISO string / parsed JSONB object,
- * exactly as service.ts rowToSigningEvent returns them.
+ * '|' + canonicalJson(detail)); genesis prev_hash =
+ * sha256(envelope_id); events ordered (created_at, id).
+ * canonicalJson is JSON.stringify with object keys sorted
+ * recursively (arrays keep order; primitives as-is), and
+ * created_at_iso is new Date(created_at).toISOString() — both sides
+ * canonicalise because Postgres JSONB does not preserve key order
+ * and timestamptz read-back formatting can differ from the string
+ * hashed at insert. Chains written before this canonical scheme
+ * remain unverifiable (their stored hashes used the old
+ * serialization).
  */
 
 export interface VerifyCheck {
@@ -48,6 +54,36 @@ export interface VerifyResult {
 
 function sha256HexLocal(data: string | Buffer): string {
   return createHash("sha256").update(data).digest("hex");
+}
+
+/**
+ * Canonical JSON — identical scheme to lib/signing/service.ts
+ * canonicalJson (duplicated here as sha256HexLocal is): JSON.stringify
+ * with object keys sorted recursively; arrays keep order.
+ */
+function canonicalJson(v: unknown): string {
+  if (v === null || typeof v !== "object") {
+    const s = JSON.stringify(v);
+    return s === undefined ? "null" : s;
+  }
+  if (Array.isArray(v)) {
+    return `[${v
+      .map((item) => canonicalJson(item === undefined ? null : item))
+      .join(",")}]`;
+  }
+  const rec = v as Record<string, unknown>;
+  const keys = Object.keys(rec)
+    .filter((k) => rec[k] !== undefined)
+    .sort();
+  return `{${keys
+    .map((k) => `${JSON.stringify(k)}:${canonicalJson(rec[k])}`)
+    .join(",")}}`;
+}
+
+/** Normalise a stored created_at to its canonical ISO form. */
+function normalizedIso(value: string): string {
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? value : d.toISOString();
 }
 
 /* ------------------------- PKCS#7 digest ------------------------- */
@@ -116,8 +152,8 @@ export async function verifyExecutedPdf(
           envelopeId,
           ev.kind,
           ev.actor,
-          ev.createdAt,
-          JSON.stringify(ev.detail),
+          normalizedIso(ev.createdAt),
+          canonicalJson(ev.detail ?? {}),
         ].join("|")
       );
       if (ev.prevHash !== prev || ev.entryHash !== expected) {
