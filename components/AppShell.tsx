@@ -40,6 +40,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       pathname === "/login" ||
       pathname === "/offline" ||
       pathname.startsWith("/room/") ||
+      pathname.startsWith("/report/") ||
       pathname === "/my-company" ||
       pathname.startsWith("/my-company/")
     ) {
@@ -101,6 +102,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     pathname === "/login" ||
     pathname === "/offline" ||
     pathname.startsWith("/room/") ||
+    pathname.startsWith("/report/") ||
     pathname === "/my-company" ||
     pathname.startsWith("/my-company/")
   ) {

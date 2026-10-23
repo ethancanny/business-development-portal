@@ -261,6 +261,24 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
       await findDuplicates("people");
       return;
     }
+    case "comms_generate_report": {
+      // Part 12 (Communications): assemble one report from the owning
+      // modules' pre-aggregated service surfaces. The handler never
+      // throws — failures land on the report row (status 'failed').
+      const { runCommsGenerateJob } = await import("../comms/jobs");
+      await runCommsGenerateJob(job.payload);
+      return;
+    }
+    case "comms_schedule_run": {
+      // Part 12 (Communications): one recurring-schedule occurrence —
+      // data checks, draft generation, routine auto-delivery when the
+      // schedule carries Ethan's one-time approval; auto-pauses on a
+      // failed check instead of sending. Self-perpetuating via
+      // enqueueJobAt from the handler.
+      const { runCommsScheduleJob } = await import("../comms/jobs");
+      await runCommsScheduleJob(job.payload);
+      return;
+    }
     default:
       throw new Error(`Unknown job kind: ${job.kind}`);
   }

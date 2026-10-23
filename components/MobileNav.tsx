@@ -272,7 +272,7 @@ export default function MobileNav() {
     pushedRef.current = false;
   }, [pathname]);
 
-  if (pathname === "/login" || pathname === "/offline" || pathname.startsWith("/room/") || pathname === "/my-company" || pathname.startsWith("/my-company/")) return null;
+  if (pathname === "/login" || pathname === "/offline" || pathname.startsWith("/room/") || pathname.startsWith("/report/") || pathname === "/my-company" || pathname.startsWith("/my-company/")) return null;
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });

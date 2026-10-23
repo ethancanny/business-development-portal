@@ -258,6 +258,50 @@ async function generateMeetingEvents(): Promise<GeneratedEventInput[]> {
   return out;
 }
 
+/**
+ * Part 12 — Communications report drafts + scheduled report runs
+ * (kind 'report'). Schedule-generated draft reports land on the
+ * calendar on their generation date; active schedules also project
+ * their next run date. Items come from the comms module's own service
+ * surface (listReportCalendarItems) — imported dynamically per the
+ * module-boundary pattern.
+ */
+async function generateReportEvents(): Promise<GeneratedEventInput[]> {
+  const { listReportCalendarItems } = await import(
+    "@/lib/comms/schedules"
+  );
+  const items = await listReportCalendarItems();
+  const out: GeneratedEventInput[] = [];
+  for (const item of items) {
+    const anyItem = item as unknown as Record<string, unknown>;
+    const isReport = typeof anyItem.reportId === "string";
+    const sourceId = isReport
+      ? `report:${String(anyItem.reportId)}`
+      : `schedule:${String(anyItem.scheduleId ?? "")}`;
+    const rawDate = isReport
+      ? String(anyItem.createdAt ?? "")
+      : String(anyItem.date ?? "");
+    if (!rawDate) continue;
+    const startsAt =
+      rawDate.length <= 10
+        ? `${rawDate}T09:00:00${TZ_OFFSET}`
+        : rawDate;
+    out.push({
+      sourceId,
+      title: String(anyItem.title ?? "Report"),
+      startsAt,
+      endsAt: null,
+      allDay: rawDate.length <= 10,
+      dealId: (anyItem.dealId as string | null) ?? null,
+      companyId: (anyItem.companyId as string | null) ?? null,
+      href: String(anyItem.href ?? "/communications"),
+      status: String(anyItem.status ?? ""),
+      meta: { comms: isReport ? "draft" : "scheduled" },
+    });
+  }
+  return out;
+}
+
 export const GENERATED_EVENT_GENERATORS: Partial<
   Record<GeneratedEventKind, GeneratedEventGenerator>
 > = {
@@ -267,6 +311,7 @@ export const GENERATED_EVENT_GENERATORS: Partial<
   reporting: generateReportingEvents,
   covenant: generateCovenantEvents,
   meeting: generateMeetingEvents,
+  report: generateReportEvents,
 };
 
 /* ------------------------------ regeneration ---------------------------- */

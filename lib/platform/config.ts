@@ -16,6 +16,8 @@ export const SYNC_INTERVALS = {
   watchlistAndMarketEvents: "daily 05:00",
   recordChecks:
     "monthly via the refresh_record_checks job (self-perpetuating, bootstrapped by ensureRecordChecksJob); automatable routes re-run and diff against the prior snapshot, manual snapshots flag refresh-due after 30 days",
+  commsReports:
+    "event-driven + due-time jobs only (Part 12): report generation runs as comms_generate_report jobs from pre-aggregated service surfaces; recurring schedules run as comms_schedule_run due-time jobs enqueued at the exact next occurrence (monthly/quarterly), self-perpetuating while active and auto-pausing on a failed data check; report staleness is marked by platform event handlers (financials_posted, reporting_received, investor_commitment_changed, covenant_breached, deal_closed, contact_updated); no polling loop",
   fitEnrichment: "once per new record",
   dataRoomAccessLogs: "on demand, cached 15m",
   remindersPush:

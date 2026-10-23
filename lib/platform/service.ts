@@ -626,6 +626,51 @@ export async function getIntegrations(): Promise<IntegrationStatus[]> {
     });
   }
 
+  // Communications (Part 12): the AI narrative provider and the
+  // report-delivery email transport. Both are setup-gated by design —
+  // the AI provider key comes from env vars only (a provider with
+  // no-training / limited-retention terms), and delivery email rides
+  // Microsoft Graph sendMail, which needs the Mail.Send scope from
+  // Ethan's Entra bundle. Statuses are read from the comms module's
+  // own service surface and reported honestly: 'ok' only when the
+  // provider is actually configured / a send has actually succeeded.
+  try {
+    const { getCommsStatus } = await import("../comms/service");
+    const st = await getCommsStatus();
+    out.push({
+      key: "comms_ai",
+      name: "Report Narrative AI (Communications)",
+      status: st.ai.configured ? "ok" : "unknown",
+      lastSuccessAt: null,
+      lastError: null,
+      detail: st.ai.configured
+        ? `Configured — provider ${st.ai.provider ?? "openai-compatible"} generates cited narrative drafts for Communications reports (always labeled DRAFT until approved; the per-deal document-processing toggle still blocks narrative for deals where it is off).`
+        : `Setup required: ${st.ai.detail} Setup: ${st.ai.setupSteps.join(" ")}`,
+    });
+    out.push({
+      key: "comms_email",
+      name: "Report Delivery Email (Microsoft Graph)",
+      status: st.email.mailSend === "available" ? "ok" : "unknown",
+      lastSuccessAt: null,
+      lastError: null,
+      detail:
+        st.email.mailSend === "available"
+          ? "Mail.Send verified by a successful send — delivery notification emails (login link only, never the report) go out via Microsoft Graph."
+          : st.email.mailSend === "setup_required"
+            ? `Setup required: ${st.email.detail} Setup: ${st.email.setupSteps.join(" ")} Deliveries still complete in-portal meanwhile; the email step records this state honestly and never fakes a send.`
+            : `Not yet verified: ${st.email.detail} Setup: ${st.email.setupSteps.join(" ")} Deliveries complete in-portal; the first send attempt records the verified state.`,
+    });
+  } catch (err) {
+    out.push({
+      key: "comms",
+      name: "Communications (Part 12)",
+      status: "error",
+      lastSuccessAt: null,
+      lastError: err instanceof Error ? err.message : String(err),
+      detail: "Could not read communications provider status",
+    });
+  }
+
   // Passkeys (WebAuthn credentials count).
   try {
     const rows = await db`

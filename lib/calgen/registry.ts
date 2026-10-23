@@ -20,6 +20,7 @@ export type GeneratedEventKind =
   | "capital_call"
   | "closing"
   | "meeting"
+  | "report"
   | "dataroom";
 
 export interface GeneratedEventSource {
@@ -45,6 +46,8 @@ export const GENERATED_EVENT_SOURCES: GeneratedEventSource[] = [
   { kind: "closing", label: "Closings", color: "#0d1f3c" },
   // Slate blue (stage progression family).
   { kind: "meeting", label: "Investor/board meetings", color: "#5B7BA6" },
+  // Warm bronze — Communications report drafts + scheduled report runs (Part 12).
+  { kind: "report", label: "Report drafts", color: "#946B2D" },
   // Hospitality plum.
   { kind: "dataroom", label: "Data room expirations", color: "#7A4E7E" },
 ];
