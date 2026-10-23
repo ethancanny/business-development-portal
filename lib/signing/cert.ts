@@ -190,8 +190,16 @@ export async function ensureSigningKey(): Promise<CertificateInfo> {
   return toInfo(stored);
 }
 
-/** Public certificate metadata, or null when no key exists yet. */
+/**
+ * Public certificate metadata. Ensures the platform key exists first
+ * (ensureSigningKey is idempotent — it generates and persists the
+ * self-signed certificate only when the key_store row is absent), so
+ * status surfaces show the fingerprint even before any envelope has
+ * been finalized. Returns null only if the row is still unreadable
+ * after ensuring.
+ */
 export async function getCertificateInfo(): Promise<CertificateInfo | null> {
+  await ensureSigningKey();
   const row = await readKeyRow();
   if (!row || !row.p12Base64) return null;
   return toInfo(row);
