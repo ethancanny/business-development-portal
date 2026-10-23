@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Button, EmptyState, ErrorState, SkeletonRows } from "@/components/ui";
 import { fmtDate, fmtRelTime } from "@/lib/format";
 import DocumentUploader from "@/components/DocumentUploader";
+import SigningActions from "@/components/signing/EnvelopeStatus";
 
 interface RoomRow {
   id: string;
@@ -463,6 +464,7 @@ export default function DataRoomDetail({ roomId }: { roomId: string }) {
           Download
         </a>
       </span>
+      <SigningActions documentId={doc.documentId} documentName={doc.name} />
     </li>
   );
 
