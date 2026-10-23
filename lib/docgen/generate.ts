@@ -13,9 +13,17 @@ import {
   ensureDocgen,
   getTemplateById,
   getTemplateByKey,
+  getTemplateSignerRoles,
 } from "./templates";
+import {
+  buildSignatureSections,
+  signatureFieldRects,
+  SIG_DOCGEN_HEADER_LINES,
+} from "../signing/pdf";
+import { PDFDocument } from "pdf-lib";
 import type {
   DocgenGenerationRow,
+  DocgenSignatureBlock,
   DocgenTemplateRow,
 } from "./schema";
 
@@ -333,7 +341,38 @@ export async function generateDocument(input: {
     built.companyName,
     todayLong
   );
+
+  // Signable templates get the shared signature page as a fresh final
+  // page (role captions; no signer identities exist at generation
+  // time). The field rects are computed with the signing module's
+  // geometry and persisted on the generation; non-signable templates
+  // render byte-identical output to before (no extra page).
+  const signerRoles = getTemplateSignerRoles(template.key);
+  if (signerRoles && signerRoles.length) {
+    pdfInput.sections.push(
+      ...buildSignatureSections(
+        signerRoles.map((r) => ({ caption: r.label, title: r.title })),
+        { withHeader: true, pageBreakFirst: true }
+      )
+    );
+  }
   const buffer = buildSimplePdf(pdfInput);
+  let signatureBlocks: DocgenSignatureBlock[] | null = null;
+  if (signerRoles && signerRoles.length) {
+    const pageCount = (await PDFDocument.load(buffer)).getPageCount();
+    const rects = signatureFieldRects(signerRoles.length, {
+      headerLines: SIG_DOCGEN_HEADER_LINES,
+      titles: signerRoles.map((r) => r.title),
+    });
+    signatureBlocks = rects.map((rect, i) => ({
+      page: pageCount - 1 + rect.page,
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      roleLabel: signerRoles[i].label,
+    }));
+  }
 
   const generationId = newId();
   const filename = `${template.name} — ${built.companyName}.pdf`;
@@ -369,9 +408,11 @@ export async function generateDocument(input: {
   const db = sql();
   await db`
     INSERT INTO docgen.generations
-      (id, template_id, template_key, document_id, deal_id, company_id, actor)
+      (id, template_id, template_key, document_id, deal_id, company_id, actor,
+        signature_blocks)
     VALUES (${generationId}, ${template.id}, ${template.key},
-      ${document.id}, ${dealId}, ${built.companyId}, ${input.actor})`;
+      ${document.id}, ${dealId}, ${built.companyId}, ${input.actor},
+      ${signatureBlocks ? JSON.stringify(signatureBlocks) : null}::jsonb)`;
 
   return {
     documentId: document.id,
@@ -389,6 +430,40 @@ export async function generateDocument(input: {
 
 /* ---------------------------- generations ---------------------------- */
 
+function parseSignatureBlocks(v: unknown): DocgenSignatureBlock[] | null {
+  const arr = Array.isArray(v)
+    ? v
+    : typeof v === "string" && v
+      ? (() => {
+          try {
+            const p = JSON.parse(v) as unknown;
+            return Array.isArray(p) ? p : null;
+          } catch {
+            return null;
+          }
+        })()
+      : null;
+  if (!arr) return null;
+  const blocks: DocgenSignatureBlock[] = [];
+  for (const raw of arr) {
+    if (!raw || typeof raw !== "object") continue;
+    const b = raw as Record<string, unknown>;
+    const num = (x: unknown) => {
+      const n = Number(x);
+      return isFinite(n) ? n : 0;
+    };
+    blocks.push({
+      page: num(b.page),
+      x: num(b.x),
+      y: num(b.y),
+      width: num(b.width),
+      height: num(b.height),
+      roleLabel: str(b.roleLabel),
+    });
+  }
+  return blocks.length ? blocks : null;
+}
+
 function rowToGeneration(r: Record<string, unknown>): DocgenGenerationRow {
   return {
     id: str(r.id),
@@ -401,7 +476,29 @@ function rowToGeneration(r: Record<string, unknown>): DocgenGenerationRow {
     companyId: r.company_id ? str(r.company_id) : null,
     actor: str(r.actor),
     createdAt: isoOrNull(r.created_at) ?? "",
+    signatureBlocks: parseSignatureBlocks(r.signature_blocks),
   };
+}
+
+/**
+ * Preset signature blocks for a document's latest generation, or null
+ * when the document was not generated from a signable template (or
+ * predates signature blocks). The signing module's createEnvelope /
+ * finalize paths call this to run in template mode.
+ */
+export async function getGenerationSignatureBlocks(
+  documentId: string
+): Promise<DocgenSignatureBlock[] | null> {
+  await ensureDocgen();
+  const db = sql();
+  const rows = await db`
+    SELECT signature_blocks FROM docgen.generations
+    WHERE document_id = ${documentId}
+    ORDER BY created_at DESC LIMIT 1`;
+  if (!rows.length) return null;
+  return parseSignatureBlocks(
+    (rows[0] as Record<string, unknown>).signature_blocks
+  );
 }
 
 export async function listGenerations(opts: {
