@@ -197,6 +197,13 @@ export function parseTabular(
   for (const c of columns) {
     byNorm.set(normHeader(c.key), c.key);
     byNorm.set(normHeader(c.label), c.key);
+    // Also accept the key's natural spaced form ("companyName" ->
+    // "company name") so hand-made sheets using plain-English
+    // headers round-trip too.
+    const spaced = c.key
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .toLowerCase();
+    if (!byNorm.has(spaced)) byNorm.set(spaced, c.key);
   }
 
   const headers = (aoa[0] ?? []).map((h) => String(h ?? ""));
