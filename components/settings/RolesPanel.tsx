@@ -115,9 +115,9 @@ export default function RolesPanel() {
           <table className="w-full min-w-[560px] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400 dark:border-white/10 dark:text-white/40">
-                <th className="py-2 pr-3 font-semibold">Email</th>
-                <th className="py-2 pr-3 font-semibold">Role</th>
-                <th className="py-2 font-semibold">Scope</th>
+                <th scope="col" className="py-2 pr-3 font-semibold">Email</th>
+                <th scope="col" className="py-2 pr-3 font-semibold">Role</th>
+                <th scope="col" className="py-2 font-semibold">Scope</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-white/5">
