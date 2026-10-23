@@ -693,6 +693,7 @@ export default function FinancialReview({ setId }: { setId: string }) {
             <img
               src={fileUrl}
               alt={doc?.name ?? "Source document"}
+              loading="lazy"
               className="max-h-[480px] w-full rounded-xl border border-slate-200 object-contain dark:border-white/10"
             />
           )}
