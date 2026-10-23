@@ -361,12 +361,30 @@ export async function runDataChecks(
     } catch {
       failures.push("missing_period");
     }
-    // tie_out_failure: any integrity check failing on live data.
+    // tie_out_failure: a STATEMENT tie-out failing on live data
+    // (balance sheet balances, cash flow ties to cash, retained
+    // earnings roll-forward, period continuity). The finanalysis
+    // 'subledger_ties' check is deliberately NOT a gate here: its
+    // detection heuristic treats any set with >= 2 unmapped parser
+    // lines as an AR/AP detail schedule, so it reports 'fail' on
+    // essentially every parsed workbook — including fully-tying ones
+    // (verified on two independent fixtures during the Part 12 build,
+    // Oct 22 2026) — which would make routine schedules unusable.
+    // Genuine statement tie-outs (e.g. a cash-flow statement that
+    // does not tie) still pause the schedule. subledger_ties remains
+    // visible in the finanalysis integrity views.
     try {
       const checks = await getIntegrityLive(companyId);
-      if ((checks ?? []).some((c) => c.status === "fail")) {
-        failures.push("tie_out_failure");
-      }
+      const tieOutFailed = (checks ?? []).some((c) => {
+        if (c.status !== "fail") return false;
+        const name =
+          (c as { check?: string; name?: string; key?: string }).check ??
+          (c as { name?: string }).name ??
+          (c as { key?: string }).key ??
+          "";
+        return name !== "subledger_ties";
+      });
+      if (tieOutFailed) failures.push("tie_out_failure");
     } catch {
       /* integrity unavailable is not itself a tie-out failure */
     }
