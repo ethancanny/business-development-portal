@@ -195,14 +195,78 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updatedAt: new Date().toISOString(),
   };
 
+  // Phase 10 stage gates: a forward move into a stage that has enabled
+  // rules must satisfy every rule, unless the request carries a
+  // gateOverride reason — then the move proceeds and the bypass is
+  // recorded (workflow.gate_overrides + core.audit_log). "Passed" and
+  // "Sourcing" carry no rules and are never gated. Blocked moves return
+  // 409 BEFORE anything is saved.
+  const gateActor = getSessionUser()?.name ?? "Someone";
+  let gateUnmet: Array<{ key: string; label: string }> = [];
+  let gateOverrideReason = "";
+  if (
+    body.stage !== undefined &&
+    newStage !== prev.stage &&
+    newStage !== "Passed" &&
+    newStage !== "Sourcing"
+  ) {
+    const { evaluateStageGates } = await import("@/lib/workflow/gates");
+    const evaluation = await evaluateStageGates(params.id, newStage, {
+      contactName: updated.contactName,
+      contactEmail: updated.contactEmail,
+    });
+    if (evaluation.unmet.length) {
+      const reason =
+        typeof body.gateOverride?.reason === "string"
+          ? body.gateOverride.reason.trim()
+          : "";
+      if (reason) {
+        gateUnmet = evaluation.unmet;
+        gateOverrideReason = reason;
+      } else {
+        return NextResponse.json(
+          {
+            error: "stage_gate_blocked",
+            message: `Cannot move to ${newStage} yet: ${evaluation.unmet
+              .map((u) => u.label)
+              .join("; ")}`,
+            unmet: evaluation.unmet,
+          },
+          { status: 409 }
+        );
+      }
+    }
+  }
+
   deals[idx] = updated;
   await saveDeals(deals);
+
+  if (gateUnmet.length && gateOverrideReason) {
+    try {
+      const { recordGateOverride } = await import("@/lib/workflow/gates");
+      await recordGateOverride({
+        dealId: updated.id,
+        dealName: updated.companyName,
+        fromStage: prev.stage,
+        toStage: newStage,
+        actor: gateActor,
+        reason: gateOverrideReason,
+        bypassed: gateUnmet,
+      });
+    } catch {
+      /* override audit is best-effort — the approved move stands */
+    }
+  }
 
   const user = getSessionUser();
   const actor = user?.name ?? "Someone";
   if (newStage === "Closed Won" && prev.stage !== "Closed Won") {
-    // Phase 8: publish deal_closed (Portfolio Monitoring handoff) and
-    // enqueue the durable handoff job — ids only, no figures.
+    // Phase 8/10: publish deal_closed (Portfolio Monitoring's immediate
+    // onEvent path stays; the handoff inside the cascade is idempotent)
+    // and enqueue the Phase 10 deal-close cascade — monitoring record,
+    // baseline, VC plan shell, reporting calendar, room archive,
+    // notification. Ids only, no figures. An override used to reach
+    // Closed Won still runs the cascade.
     try {
       const { publishEvent } = await import("@/lib/platform/events");
       await publishEvent("deal_closed", {
@@ -211,10 +275,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
         payload: { dealId: updated.id },
         actor,
       });
-      const { enqueueJob } = await import("@/lib/platform/jobs");
-      await enqueueJob("monitoring_handoff", { dealId: updated.id });
+      const { enqueueCloseCascade } = await import("@/lib/platform/cascade");
+      await enqueueCloseCascade(updated.id, actor);
     } catch {
-      /* handoff wiring is best-effort — the stage change stands */
+      /* cascade wiring is best-effort — the stage change stands */
     }
   }
   if (newStage !== prev.stage) {

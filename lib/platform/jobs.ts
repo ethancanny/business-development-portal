@@ -227,6 +227,14 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
       await runRecordRefreshJob(job.payload);
       return;
     }
+    case "deal_close_cascade": {
+      // Phase 10 (Stage gates + close cascade): the ordered, resumable
+      // deal-close sequence — progress lives in the job payload, so a
+      // retry re-runs only incomplete steps.
+      const { runCascadeJob } = await import("./cascade");
+      await runCascadeJob(job);
+      return;
+    }
     case "monitoring_handoff": {
       // Phase 8 (Portfolio Monitoring): the durable deal_closed
       // handoff path — copies the closing baseline into
