@@ -14,6 +14,7 @@ import Link from "next/link";
 import { Button, ErrorState, SkeletonRows } from "@/components/ui";
 import ReportView from "@/components/comms/ReportView";
 import SendDialog from "@/components/comms/SendDialog";
+import SigningActions from "@/components/signing/EnvelopeStatus";
 import {
   COMMS_API,
   CommsApiError,
@@ -379,6 +380,24 @@ export default function ReportDetail({ reportId }: { reportId: string }) {
         deliveries={deliveries}
         onChanged={() => void refreshDeliveries()}
       />
+
+      {/* E-signature (in-house) */}
+      <section className="card-surface mt-5 p-5" aria-label="E-signature">
+        <h3 className="font-display text-xl font-semibold text-navy-900 dark:text-white">
+          E-signature
+        </h3>
+        <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+          Send this report&apos;s PDF for signature through the
+          portal&apos;s in-house signing — signers get a personal
+          token link, and the executed copy files back to Documents.
+        </p>
+        <div className="mt-3">
+          <SigningActions
+            reportId={reportId}
+            documentName={str(pick(r, "title")) || "Report"}
+          />
+        </div>
+      </section>
 
       {/* Threads */}
       <ThreadsPanel reportId={reportId} />
