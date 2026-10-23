@@ -29,6 +29,7 @@ import DataRoomButton from "@/components/hubs/DataRoomButton";
 import GenerateReportButton from "@/components/comms/GenerateReportButton";
 import FinancialsSection from "@/components/FinancialsSection";
 import FinancialAnalysis from "@/components/FinancialAnalysis";
+import DocGenPanel from "@/components/docgen/DocGenPanel";
 
 interface CompanyDetail extends CompanyCard {
   source: string | null;
@@ -300,6 +301,8 @@ export default function CompanyProfilePage() {
           <FinancialsSection companyId={c.id} companyName={c.name} />
 
           <FinancialAnalysis companyId={c.id} />
+
+          <DocGenPanel companyId={c.id} />
 
           {/* Photo gallery */}
           <section className="card-surface p-5" aria-label="Photos">

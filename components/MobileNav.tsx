@@ -265,6 +265,17 @@ export default function MobileNav() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  /* Escape closes the More sheet (it already closes on backdrop tap,
+   * swipe-down, X, and browser back). */
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeSheet();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [moreOpen, closeSheet]);
+
   // Navigating (tab tap or sheet item) always leaves the sheet closed.
   useEffect(() => {
     setMoreOpen(false);
@@ -439,7 +450,7 @@ export default function MobileNav() {
                     {active && (
                       <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-[#b8975a]" />
                     )}
-                    <span className={active ? "text-[#b8975a]" : "text-slate-400 dark:text-white/50"}>
+                    <span className={active ? "text-[#b8975a]" : "text-slate-500 dark:text-white/60"}>
                       <l.Icon className="h-5 w-5" />
                     </span>
                     {l.label}
@@ -449,7 +460,7 @@ export default function MobileNav() {
 
               {/* Appearance: Night / Day as a switch with line icons. */}
               <button onClick={toggle} className={rowCls(false)} role="switch" aria-checked={theme === "dark"}>
-                <span className="text-slate-400 dark:text-white/50">
+                <span className="text-slate-500 dark:text-white/60">
                   {theme === "dark" ? <IconMoon className="h-5 w-5" /> : <IconSun className="h-5 w-5" />}
                 </span>
                 {theme === "dark" ? "Night" : "Day"}

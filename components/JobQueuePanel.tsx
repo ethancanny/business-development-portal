@@ -10,6 +10,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { ErrorState, SkeletonRows } from "@/components/ui";
 
+interface JobStep {
+  key: string;
+  label: string;
+  status: string;
+  detail?: string;
+  error?: string;
+}
+
 interface Job {
   id: string;
   kind: string;
@@ -18,6 +26,7 @@ interface Job {
   lastError?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  payload?: { steps?: JobStep[] };
 }
 
 function fmtWhen(iso?: string): string {
@@ -132,6 +141,38 @@ export default function JobQueuePanel() {
                       {job.lastError}
                     </p>
                   )}
+                  {Array.isArray(job.payload?.steps) &&
+                    job.payload.steps.length > 0 && (
+                      <ul className="mt-1.5 space-y-0.5">
+                        {job.payload.steps.map((s) => (
+                          <li
+                            key={s.key}
+                            className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-white/50"
+                          >
+                            <span
+                              className={`badge ${
+                                s.status === "done"
+                                  ? "badge-fit"
+                                  : s.status === "failed"
+                                    ? "badge-danger"
+                                    : s.status === "skipped"
+                                      ? "badge-neutral"
+                                      : "badge-warn"
+                              }`}
+                            >
+                              {s.status}
+                            </span>
+                            <span className="font-medium">{s.label}</span>
+                            {s.detail && <span>— {s.detail}</span>}
+                            {s.error && (
+                              <span className="text-red-600 dark:text-red-300">
+                                {s.error}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                 </div>
                 {failed && (
                   <button

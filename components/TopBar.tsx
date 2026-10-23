@@ -343,7 +343,7 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
                 {userName}
               </span>
             )}
-            <IconChevronDown className="hidden h-4 w-4 text-slate-400 sm:block dark:text-white/50" />
+            <IconChevronDown className="hidden h-4 w-4 text-slate-500 sm:block dark:text-white/60" />
           </button>
           {userOpen && (
             <div

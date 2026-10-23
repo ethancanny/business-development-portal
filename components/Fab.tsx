@@ -57,6 +57,16 @@ export default function Fab() {
     setOpen(false);
   }, [pathname]);
 
+  /* Escape closes the quick-action menu. */
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open ]);
+
   /* Extra page bottom padding while the FAB is on this route. */
   useEffect(() => {
     document.documentElement.classList.toggle("fab-visible", !routeHidden);

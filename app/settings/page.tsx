@@ -8,6 +8,8 @@ import JobQueuePanel from "@/components/JobQueuePanel";
 import DuplicatesPanel from "@/components/DuplicatesPanel";
 import ValuationParamsSettings from "@/components/ValuationParamsSettings";
 import SettingsNav from "@/components/settings/SettingsNav";
+import StageGatesCard from "@/components/settings/StageGatesCard";
+import EsignSettingsCard from "@/components/docgen/EsignSettingsCard";
 
 /**
  * Settings — General (CRM Phase 2, Oct 2026; restructured with the
@@ -123,6 +125,30 @@ export default function SettingsPage() {
             A deal inherits these wherever its own inputs are blank.
           </p>
           <ValuationParamsSettings />
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Stage gates
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            Conditions that must be met before a deal can advance to a
+            pipeline stage. A blocked move names what&apos;s missing; an
+            override needs a reason and is written to the audit trail.
+          </p>
+          <StageGatesCard />
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            E-signature
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            Send generated documents (LOIs, NDAs, consents) for signature.
+            The framework is in place; it activates once a provider is
+            connected.
+          </p>
+          <EsignSettingsCard />
         </section>
       </div>
     </div>

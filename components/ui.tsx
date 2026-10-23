@@ -514,7 +514,7 @@ export function BulkActionBar({
 
 export function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex items-center rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-slate-500 dark:border-white/20 dark:bg-white/5 dark:text-white/50">
+    <kbd className="inline-flex items-center rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-slate-500 dark:border-white/20 dark:bg-white/5 dark:text-white/60">
       {children}
     </kbd>
   );
