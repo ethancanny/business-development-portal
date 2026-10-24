@@ -14,12 +14,45 @@ export { fmtDate, fmtMoney, fmtMoneyCompact };
 
 /* ------------------------------ plans ------------------------------ */
 
+export interface PlanPhase {
+  key: string;
+  name: string;
+  fromDay: number;
+  toDay: number;
+}
+
 export interface PlanSummary {
   openInitiatives: number;
   impactWeighted: number;
   impactUnweighted: number;
   /** Exit readiness overall, 0–100 (null when unscored). */
   exitOverall: number | null;
+  /** Per-status initiative counts (redesign batch A). */
+  initiativeCounts?: Record<string, number>;
+  totalOneTimeCost?: number;
+  totalRecurringCost?: number;
+}
+
+/** On track / at risk / off track rollup (Ethan's §2 tile definition). */
+export function trackCounts(summary: PlanSummary | null): { onTrack: number; atRisk: number; offTrack: number } {
+  const c = summary?.initiativeCounts ?? {};
+  return {
+    onTrack: (c["on_track"] ?? 0) + (c["in_progress"] ?? 0),
+    atRisk: c["at_risk"] ?? 0,
+    offTrack: c["deferred"] ?? 0,
+  };
+}
+
+/** Payback in years = one-time cost ÷ weighted run-rate impact. */
+export function paybackYears(oneTimeCost: number, impactWeighted: number): number | null {
+  if (!oneTimeCost || oneTimeCost <= 0 || !impactWeighted || impactWeighted <= 0) return null;
+  return oneTimeCost / impactWeighted;
+}
+
+export function fmtPayback(years: number | null): string {
+  if (years === null || !Number.isFinite(years)) return "—";
+  if (years < 1) return `${Math.round(years * 12)} mo`;
+  return `${years.toFixed(1)} yr`;
 }
 
 export interface VcPlan {
@@ -31,6 +64,10 @@ export interface VcPlan {
   status: string;
   thesis: string;
   incentiveNotes?: string;
+  /** Redesign batch A: baseline + target EBITDA and 100-day phases. */
+  baselineEbitda?: number | null;
+  targetEbitda?: number | null;
+  phases?: PlanPhase[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -52,6 +89,8 @@ export interface PlanDetail {
   plan: VcPlan;
   summary: PlanSummary;
   initiatives: Initiative[];
+  /** Company vertical/industry for the plan's company (batch A). */
+  companyVertical?: string;
 }
 
 /* ------------------------------ initiatives ------------------------------ */
@@ -74,10 +113,122 @@ export interface Initiative {
   /** 1–5 */
   effort: number | null;
   dependsOn: string[];
-  sourceKind: string; // manual | playbook | remediation
+  sourceKind: string; // manual | playbook | remediation | finding
   sourceRef: Record<string, unknown> | string | null;
+  /** Redesign batch A: KPI, actual spend, risks, derived progress. */
+  kpiName?: string;
+  kpiBaseline?: number | null;
+  kpiTarget?: number | null;
+  kpiUnit?: string;
+  actualSpend?: number | null;
+  risks?: string;
+  /** 0–100, derived server-side. */
+  progressPct?: number;
+  milestonesTotal?: number;
+  milestonesDone?: number;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/* --------------------- redesign: drawer sub-resources -------------------- */
+
+export interface InitiativeMilestone {
+  id: string;
+  initiativeId: string;
+  title: string;
+  dueDate: string | null;
+  done: boolean;
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface InitiativeLink {
+  id: string;
+  initiativeId: string;
+  kind: string; // document | process_map | url
+  label: string;
+  url: string;
+  refId: string;
+  createdAt?: string;
+}
+
+export interface FindingCandidate {
+  findingId: string;
+  workspaceId: string;
+  dealId: string;
+  title: string;
+  severity: string;
+  category: string;
+  status: string;
+  ebitdaImpact: number | null;
+  priceImpact: number | null;
+  detail: string;
+  alreadyConverted: boolean;
+}
+
+/** Mirrors BaselineRow / BaselineState in lib/valuecreation/service.ts. */
+export interface BaselineSnapshot {
+  id: string;
+  planId: string;
+  version: number;
+  lockedBy: string;
+  lockedAt: string;
+  note: string;
+  baselineEbitda: number | null;
+  targetEbitda: number | null;
+  /** Stored plan_summary totals as of locking. */
+  totals: Record<string, unknown>;
+  initiatives: Array<Record<string, unknown>>;
+  supersededAt: string | null;
+}
+
+export interface BaselineState {
+  current: BaselineSnapshot | null;
+  versions: BaselineSnapshot[];
+  /** Deltas: current stored totals minus the snapshot's. */
+  variance: {
+    impactUnweighted: number;
+    impactWeighted: number;
+    totalOneTimeCost: number;
+    totalRecurringCost: number;
+    openInitiatives: number;
+    initiativeCount: number;
+  } | null;
+}
+
+export interface PlanOverviewData {
+  plan: VcPlan;
+  summary: PlanSummary;
+  companyVertical: string;
+  leverImpacts: Array<{ lever: string; impact: number; weightedImpact: number; count: number }>;
+  atRisk: Initiative[];
+  nextMilestones: Array<{ milestoneId: string; title: string; dueDate: string | null; done: boolean; initiativeId: string; initiativeTitle: string }>;
+  defaultScenario: {
+    id: string; name: string;
+    /** Stored ScenarioBridge JSON (lib/valuecreation/scenarios.ts). */
+    bridge: {
+      baseEbitda: number;
+      baseRevenue: number;
+      rows: Array<{ initiativeId: string; title: string; impact: number; weightedImpact: number; confidence: number }>;
+      totalImpact: number;
+      totalWeightedImpact: number;
+      adjustedEbitda: number;
+      adjustedWeightedEbitda: number;
+      realizationSensitivity: Array<{ pct: number; ebitda: number }>;
+    } | null;
+  } | null;
+  scenarios: Array<{ id: string; name: string; isDefault: boolean }>;
+  baseline: BaselineState;
+  monitoring: {
+    hasMonitoring: boolean;
+    monitoringUrl: string;
+    actualEbitda: number | null;
+    latestPeriodEnd: string | null;
+    realizedImpact: number | null;
+    baselineUsed: number | null;
+  };
+  activity: Array<{ id: string; kind: string; actor: string; message: string; createdAt: string }>;
 }
 
 /** Mirrors INITIATIVE_STATUSES in lib/valuecreation/schema.ts. */
@@ -141,13 +292,15 @@ export interface Playbook {
   category: string;
   description: string;
   steps: PlaybookStep[];
+  /** Industry tag for industry-specific system playbooks (batch A). */
+  industry?: string;
   isSystem?: boolean;
   isBuiltin?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
 
-/** The six playbook categories (lib/valuecreation/schema.ts). */
+/** Playbook categories / initiative levers (lib/valuecreation/schema.ts). */
 export const PLAYBOOK_CATEGORIES: Array<{ key: string; label: string }> = [
   { key: "pricing", label: "Pricing" },
   { key: "procurement", label: "Procurement" },
@@ -155,6 +308,9 @@ export const PLAYBOOK_CATEGORIES: Array<{ key: string; label: string }> = [
   { key: "working_capital", label: "Working capital" },
   { key: "org_design", label: "Org design" },
   { key: "systems", label: "Systems" },
+  { key: "operations", label: "Operations" },
+  { key: "quality", label: "Quality" },
+  { key: "workforce", label: "Workforce" },
 ];
 
 export function playbookStepImpact(s: PlaybookStep): number {
@@ -587,6 +743,15 @@ export interface VcTabProps {
   summary: PlanSummary | null;
   initiatives: Initiative[];
   reload: () => Promise<void>;
+  /** Redesign: company vertical for industry-aware surfaces. */
+  companyVertical?: string;
+  /** Redesign: active Initiatives view (table | board | timeline | matrix). */
+  view?: string;
+  /** Redesign: switch workspace group/sub-view (empty-state cards etc.). */
+  onNavigate?: (group: string, sub?: string) => void;
+  /** Redesign: initiative the shell wants opened in the detail drawer. */
+  focusInitiativeId?: string | null;
+  onFocusHandled?: () => void;
 }
 
 export function labelOf(

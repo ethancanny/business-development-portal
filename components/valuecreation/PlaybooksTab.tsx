@@ -48,7 +48,7 @@ const EMPTY_STEP: StepRow = {
   durationDays: "30",
 };
 
-export default function PlaybooksTab({ planId, reload }: VcTabProps) {
+export default function PlaybooksTab({ planId, reload, companyVertical }: VcTabProps) {
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -185,12 +185,32 @@ export default function PlaybooksTab({ planId, reload }: VcTabProps) {
           message="Create the first reusable playbook below — each one bundles the steps that become initiatives when instantiated into a plan."
         />
       ) : (
+        <>
+        {companyVertical && playbooks.some((p) => p.industry === companyVertical) && (
+          <p className="rounded-xl bg-[#b8975a]/10 px-4 py-3 text-sm text-[#0d1f3c] dark:text-white/85">
+            <span className="font-semibold">{companyVertical} playbooks</span> for this
+            company are listed first — the seeded set covers quoting &amp; pricing,
+            machine utilization &amp; OEE, scrap &amp; rework, quality systems,
+            supplier consolidation, workforce &amp; apprenticeship and working capital.
+          </p>
+        )}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {playbooks.map((p) => (
+          {[...playbooks]
+            .sort((a, b) => {
+              const am = companyVertical && a.industry === companyVertical ? 0 : 1;
+              const bm = companyVertical && b.industry === companyVertical ? 0 : 1;
+              return am - bm;
+            })
+            .map((p) => (
             <div key={p.id} className={cardCls}>
               <div className="flex items-start justify-between gap-2">
                 <h3 className="font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">{p.name}</h3>
-                <span className="badge badge-neutral shrink-0">{labelOf(PLAYBOOK_CATEGORIES, p.category)}</span>
+                <span className="flex shrink-0 flex-col items-end gap-1">
+                  <span className="badge badge-neutral">{labelOf(PLAYBOOK_CATEGORIES, p.category)}</span>
+                  {p.industry && (
+                    <span className="badge badge-fit">{p.industry}</span>
+                  )}
+                </span>
               </div>
               {p.description && (
                 <p className="mt-1 text-sm text-slate-500 dark:text-white/50">{p.description}</p>
@@ -259,6 +279,7 @@ export default function PlaybooksTab({ planId, reload }: VcTabProps) {
             </div>
           ))}
         </div>
+        </>
       )}
 
       <div className={cardCls}>

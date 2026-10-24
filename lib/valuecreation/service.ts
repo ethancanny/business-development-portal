@@ -2762,14 +2762,15 @@ export async function getPlanOverview(
       Record<string, unknown>
     >;
     activity = timeline
-      .filter((t) =>
-        [
-          "initiative_updated",
-          "initiative_created",
-          "plan_created",
-          "deal_closed",
-        ].includes(str(t.kind)) || str(t.message).length > 0
-      )
+      .filter((t) => {
+        const kind = str(t.kind);
+        return (
+          kind === "deal_closed" ||
+          kind.includes("initiative") ||
+          kind.includes("value_creation") ||
+          kind.startsWith("vc_")
+        );
+      })
       .slice(0, 12)
       .map((t) => ({
         id: str(t.id),

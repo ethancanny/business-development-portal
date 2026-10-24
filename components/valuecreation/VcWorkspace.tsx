@@ -11,31 +11,46 @@
  *
  * Tab selection persists per plan in sessionStorage (same pattern
  * as Market Intel's main tab).
+ *
+ * VCP REDESIGN (Oct 24, 2026): the flat tab row became grouped
+ * navigation — Overview / Initiatives (Table · Board · Timeline ·
+ * Matrix views) / 100-Day Plan / Playbooks & Models / Operations &
+ * People / Targets & Exit — with §2 clickable summary tiles fed by
+ * the stored plan summary. Every legacy tab key still resolves:
+ * LEGACY_TAB_MAP maps old keys (and ?tab= deep links) onto the new
+ * locations, and the session key keeps storing the legacy key of the
+ * current location so old and new readers agree. Only the active
+ * group's component mounts (no cross-tab fetching).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Button, ErrorState, SkeletonRows, StatTile } from "@/components/ui";
+import { Button, ErrorState, SkeletonRows } from "@/components/ui";
 import {
   API,
   api,
   fmtDateShort,
   fmtMoneyCompact,
   fmtMoneyN,
+  fmtPayback,
   fmtUpdated,
   inputCls,
   labelCls,
   listFrom,
+  paybackYears,
   todayIso,
+  trackCounts,
   type Initiative,
   type PlanDetail,
   type PlanListItem,
   type PlanSummary,
   type VcPlan,
 } from "@/components/valuecreation/types";
+import GroupedNav, { type NavGroup } from "@/components/valuecreation/GroupedNav";
+import OverviewTab from "@/components/valuecreation/OverviewTab";
 import InitiativesTab from "@/components/valuecreation/InitiativesTab";
-import TimelineTab from "@/components/valuecreation/TimelineTab";
-import MatrixTab from "@/components/valuecreation/MatrixTab";
+import HundredDayTab from "@/components/valuecreation/HundredDayTab";
+import BaselinePanel from "@/components/valuecreation/BaselinePanel";
 import PlaybooksTab from "@/components/valuecreation/PlaybooksTab";
 import TreesTab from "@/components/valuecreation/TreesTab";
 import ScenariosTab from "@/components/valuecreation/ScenariosTab";
@@ -46,29 +61,97 @@ import TargetsTab from "@/components/valuecreation/TargetsTab";
 import ExitTab from "@/components/valuecreation/ExitTab";
 import DataRoomButton from "@/components/hubs/DataRoomButton";
 
-const TABS = [
-  { key: "initiatives", label: "Initiatives" },
-  { key: "timeline", label: "100-Day Plan" },
-  { key: "matrix", label: "Matrix" },
-  { key: "playbooks", label: "Playbooks" },
-  { key: "trees", label: "Driver Trees" },
-  { key: "scenarios", label: "Scenarios" },
-  { key: "process-maps", label: "Process Maps" },
-  { key: "addons", label: "Add-ons" },
-  { key: "org", label: "Org & Talent" },
-  { key: "targets", label: "Targets" },
-  { key: "exit", label: "Exit Readiness" },
-] as const;
+/** Redesign §3 groups; Initiatives subs are its four views. */
+const GROUPS: NavGroup[] = [
+  { key: "overview", label: "Overview", subs: [] },
+  {
+    key: "initiatives",
+    label: "Initiatives",
+    subs: [
+      { key: "table", label: "Table" },
+      { key: "board", label: "Board" },
+      { key: "timeline", label: "Timeline" },
+      { key: "matrix", label: "Matrix" },
+    ],
+  },
+  { key: "hundred", label: "100-Day Plan", subs: [] },
+  {
+    key: "playbooks-models",
+    label: "Playbooks & Models",
+    subs: [
+      { key: "playbooks", label: "Playbooks" },
+      { key: "trees", label: "Driver Trees" },
+      { key: "scenarios", label: "Scenarios" },
+    ],
+  },
+  {
+    key: "ops",
+    label: "Operations & People",
+    subs: [
+      { key: "process-maps", label: "Process Maps" },
+      { key: "org", label: "Org & Talent" },
+      { key: "addons", label: "Add-ons" },
+    ],
+  },
+  {
+    key: "targets-exit",
+    label: "Targets & Exit",
+    subs: [
+      { key: "targets", label: "Targets" },
+      { key: "exit", label: "Exit Readiness" },
+    ],
+  },
+];
 
-type TabKey = (typeof TABS)[number]["key"];
+interface NavLoc { group: string; sub: string }
 
-export default function VcWorkspace({ companyId }: { companyId: string }) {
+const DEFAULT_LOC: NavLoc = { group: "overview", sub: "" };
+
+/** Every pre-redesign tab key → its new location (§3 mapping). */
+const LEGACY_TAB_MAP: Record<string, NavLoc> = {
+  overview: DEFAULT_LOC,
+  initiatives: { group: "initiatives", sub: "table" },
+  matrix: { group: "initiatives", sub: "matrix" },
+  timeline: { group: "hundred", sub: "" },
+  playbooks: { group: "playbooks-models", sub: "playbooks" },
+  trees: { group: "playbooks-models", sub: "trees" },
+  scenarios: { group: "playbooks-models", sub: "scenarios" },
+  "process-maps": { group: "ops", sub: "process-maps" },
+  org: { group: "ops", sub: "org" },
+  addons: { group: "ops", sub: "addons" },
+  targets: { group: "targets-exit", sub: "targets" },
+  exit: { group: "targets-exit", sub: "exit" },
+};
+
+/** The legacy key stored for a location (session persistence compat). */
+function legacyKeyOf(loc: NavLoc): string {
+  for (const [key, target] of Object.entries(LEGACY_TAB_MAP)) {
+    if (target.group === loc.group && target.sub === loc.sub) return key;
+  }
+  return "overview";
+}
+
+function locFromLegacy(key: string | null | undefined): NavLoc | null {
+  if (!key) return null;
+  return LEGACY_TAB_MAP[key] ?? null;
+}
+
+export default function VcWorkspace({
+  companyId,
+  initialTab,
+}: {
+  companyId: string;
+  /** ?tab= deep link (legacy key or group key) from the page. */
+  initialTab?: string;
+}) {
   const [plan, setPlan] = useState<VcPlan | null>(null);
   const [companyName, setCompanyName] = useState("");
+  const [companyVertical, setCompanyVertical] = useState("");
   const [summary, setSummary] = useState<PlanSummary | null>(null);
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready" | "none" | "error">("loading");
-  const [tab, setTab] = useState<TabKey>("initiatives");
+  const [loc, setLoc] = useState<NavLoc>(() => locFromLegacy(initialTab) ?? DEFAULT_LOC);
+  const [focusInitiativeId, setFocusInitiativeId] = useState<string | null>(null);
 
   const [createForm, setCreateForm] = useState({ name: "", planStartDate: todayIso(), thesis: "" });
   const [creating, setCreating] = useState(false);
@@ -81,6 +164,7 @@ export default function VcWorkspace({ companyId }: { companyId: string }) {
     setPlan(data.plan);
     setSummary(data.summary ?? null);
     setInitiatives(Array.isArray(data.initiatives) ? data.initiatives : []);
+    setCompanyVertical(data.companyVertical ?? "");
   }, []);
 
   const resolve = useCallback(async () => {
@@ -107,27 +191,41 @@ export default function VcWorkspace({ companyId }: { companyId: string }) {
     void resolve();
   }, [resolve]);
 
-  /* Restore the session's tab for this plan. */
+  /* Restore the session's location for this plan (a ?tab= deep link
+   * already seeded the initial state and wins over the session). */
   useEffect(() => {
-    if (!plan) return;
+    if (!plan || initialTab) return;
     try {
       const saved = window.sessionStorage.getItem(`ccp-vc-tab:${plan.id}`) ?? "";
-      if (TABS.some((t) => t.key === saved)) setTab(saved as TabKey);
+      const restored = locFromLegacy(saved);
+      if (restored) setLoc(restored);
     } catch {
-      /* storage unavailable — default tab stands */
+      /* storage unavailable — default location stands */
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan]);
 
-  const selectTab = (t: TabKey) => {
-    setTab(t);
-    if (plan) {
+  const planIdRef = useRef<string>("");
+  useEffect(() => { planIdRef.current = plan?.id ?? ""; }, [plan]);
+
+  const navigate = useCallback((group: string, sub?: string) => {
+    const g = GROUPS.find((x) => x.key === group) ?? GROUPS[0];
+    const next: NavLoc = { group: g.key, sub: sub ?? g.subs[0]?.key ?? "" };
+    setLoc(next);
+    if (planIdRef.current) {
       try {
-        window.sessionStorage.setItem(`ccp-vc-tab:${plan.id}`, t);
+        window.sessionStorage.setItem(`ccp-vc-tab:${planIdRef.current}`, legacyKeyOf(next));
       } catch {
-        /* storage unavailable — tab still switches */
+        /* storage unavailable — location still switches */
       }
     }
-  };
+  }, []);
+
+  /** Overview at-risk click-through: open the initiative's drawer. */
+  const openInitiative = useCallback((id: string) => {
+    setFocusInitiativeId(id);
+    setLoc({ group: "initiatives", sub: "table" });
+  }, []);
 
   const reload = useCallback(async () => {
     if (plan) await loadDetail(plan.id);
@@ -221,8 +319,25 @@ export default function VcWorkspace({ companyId }: { companyId: string }) {
     );
   }
 
-  const tabProps = { planId: plan.id, plan, summary, initiatives, reload };
+  const tabProps = {
+    planId: plan.id,
+    plan,
+    summary,
+    initiatives,
+    reload,
+    companyVertical,
+    onNavigate: navigate,
+    focusInitiativeId,
+    onFocusHandled: () => setFocusInitiativeId(null),
+  };
   const openCount = summary?.openInitiatives ?? initiatives.filter((i) => i.status !== "done" && i.status !== "deferred").length;
+  const tracks = trackCounts(summary);
+  const oneTime = summary?.totalOneTimeCost ?? 0;
+  const recurring = summary?.totalRecurringCost ?? 0;
+  const derivedTarget =
+    plan.targetEbitda ?? (plan.baselineEbitda !== null && plan.baselineEbitda !== undefined && summary
+      ? plan.baselineEbitda + summary.impactUnweighted
+      : null);
 
   return (
     <div>
@@ -261,83 +376,109 @@ export default function VcWorkspace({ companyId }: { companyId: string }) {
         </div>
       </div>
 
-      {/* Summary tiles */}
-      <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div className="card-surface p-4">
-          <StatTile
-            label="Open initiatives"
-            display={String(openCount)}
-            numericValue={openCount}
-            format={(n) => String(n)}
-            caption={`${initiatives.length} total in the plan`}
-          />
-        </div>
-        <div className="card-surface p-4">
-          <StatTile
-            label="Weighted EBITDA impact"
-            display={summary ? fmtMoneyN(summary.impactWeighted) : "—"}
-            numericValue={summary?.impactWeighted}
-            format={(n) => fmtMoneyCompact(n)}
-            caption="Confidence-weighted, open initiatives"
-          />
-        </div>
-        <div className="card-surface p-4">
-          <StatTile
-            label="Unweighted impact"
-            display={summary ? fmtMoneyN(summary.impactUnweighted) : "—"}
-            numericValue={summary?.impactUnweighted}
-            format={(n) => fmtMoneyCompact(n)}
-            caption="Full value if everything lands"
-          />
-        </div>
-        <div className="card-surface p-4">
-          <StatTile
-            label="Exit readiness"
-            display={summary?.exitOverall !== null && summary?.exitOverall !== undefined ? `${summary.exitOverall}/100` : "—"}
-            numericValue={summary?.exitOverall ?? undefined}
-            format={(n) => `${n}/100`}
-            caption="See the Exit Readiness tab"
-          />
-        </div>
+      {/* §2 summary tiles — every tile links to its view. All figures
+          come from the stored plan summary + plan fields. */}
+      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <SummaryTile
+          label="Baseline → target EBITDA"
+          value={plan.baselineEbitda !== null && plan.baselineEbitda !== undefined
+            ? `${fmtMoneyCompact(plan.baselineEbitda)} → ${derivedTarget !== null ? fmtMoneyCompact(derivedTarget) : "—"}`
+            : "Not set"}
+          caption={plan.targetEbitda
+            ? "Baseline and target on the plan"
+            : derivedTarget !== null
+              ? "Target = baseline + unweighted impact · set it in Targets & Exit"
+              : "Set baseline and target in Targets & Exit"}
+          onClick={() => navigate("targets-exit", "targets")}
+        />
+        <SummaryTile
+          label="Weighted EBITDA impact"
+          value={summary ? fmtMoneyN(summary.impactWeighted) : "—"}
+          caption={`Confidence-weighted · ${openCount} open initiatives`}
+          onClick={() => navigate("initiatives", "table")}
+        />
+        <SummaryTile
+          label="Unweighted impact"
+          value={summary ? fmtMoneyN(summary.impactUnweighted) : "—"}
+          caption="Full value if everything lands"
+          onClick={() => navigate("initiatives", "table")}
+        />
+        <SummaryTile
+          label="Costs & payback"
+          value={fmtMoneyN(oneTime)}
+          caption={`one-time · + ${fmtMoneyN(recurring)}/yr recurring · payback ${fmtPayback(paybackYears(oneTime, summary?.impactWeighted ?? 0))}`}
+          onClick={() => navigate("initiatives", "table")}
+        />
+        <SummaryTile
+          label="On track / at risk / off track"
+          value={`${tracks.onTrack} / ${tracks.atRisk} / ${tracks.offTrack}`}
+          caption="Open initiatives by track state"
+          onClick={() => navigate("initiatives", "table")}
+        />
+        <SummaryTile
+          label="Exit readiness"
+          value={summary?.exitOverall !== null && summary?.exitOverall !== undefined ? `${summary.exitOverall}/100` : "—"}
+          caption="Overall score — detail in Targets & Exit"
+          onClick={() => navigate("targets-exit", "exit")}
+        />
       </div>
 
-      {/* Tabs */}
-      <div className="mt-6 flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="Value creation sections">
-        {TABS.map((t) => {
-          const active = tab === t.key;
-          const badge = t.key === "initiatives" && openCount > 0 ? openCount : null;
-          return (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={active}
-              onClick={() => selectTab(t.key)}
-              className={`chip min-h-[44px] shrink-0 ${active ? "chip-active" : ""}`}
-            >
-              {t.label}
-              {badge !== null && (
-                <span className="ml-1.5 rounded-full bg-[#b8975a] px-1.5 text-[11px] font-bold text-white">
-                  {badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      {/* §3 grouped navigation */}
+      <div className="mt-6">
+        <GroupedNav groups={GROUPS} group={loc.group} sub={loc.sub} onChange={navigate} />
       </div>
 
       <div className="mt-5">
-        {tab === "initiatives" && <InitiativesTab {...tabProps} />}
-        {tab === "timeline" && <TimelineTab {...tabProps} />}
-        {tab === "matrix" && <MatrixTab {...tabProps} />}
-        {tab === "playbooks" && <PlaybooksTab {...tabProps} />}
-        {tab === "trees" && <TreesTab {...tabProps} />}
-        {tab === "scenarios" && <ScenariosTab {...tabProps} />}
-        {tab === "process-maps" && <ProcessMapsTab {...tabProps} />}
-        {tab === "addons" && <AddonsTab {...tabProps} />}
-        {tab === "org" && <OrgTab {...tabProps} />}
-        {tab === "targets" && <TargetsTab {...tabProps} />}
-        {tab === "exit" && <ExitTab {...tabProps} />}
+        {loc.group === "overview" && (
+          <OverviewTab {...tabProps} onOpenInitiative={openInitiative} />
+        )}
+        {loc.group === "initiatives" && (
+          <InitiativesTab {...tabProps} view={loc.sub || "table"} />
+        )}
+        {loc.group === "hundred" && <HundredDayTab {...tabProps} />}
+        {loc.group === "playbooks-models" && loc.sub === "playbooks" && <PlaybooksTab {...tabProps} />}
+        {loc.group === "playbooks-models" && loc.sub === "trees" && <TreesTab {...tabProps} />}
+        {loc.group === "playbooks-models" && loc.sub === "scenarios" && <ScenariosTab {...tabProps} />}
+        {loc.group === "ops" && loc.sub === "process-maps" && <ProcessMapsTab {...tabProps} />}
+        {loc.group === "ops" && loc.sub === "org" && <OrgTab {...tabProps} />}
+        {loc.group === "ops" && loc.sub === "addons" && <AddonsTab {...tabProps} />}
+        {loc.group === "targets-exit" && loc.sub === "targets" && (
+          <div className="space-y-4">
+            <BaselinePanel {...tabProps} />
+            <TargetsTab {...tabProps} />
+          </div>
+        )}
+        {loc.group === "targets-exit" && loc.sub === "exit" && <ExitTab {...tabProps} />}
       </div>
     </div>
+  );
+}
+
+/** One §2 summary tile — a button, so the whole tile is the link. */
+function SummaryTile({
+  label,
+  value,
+  caption,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  caption: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="card-surface min-h-[92px] p-4 text-left transition hover:border-[#b8975a]/60 hover:shadow-md"
+    >
+      <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-white/45">
+        {label}
+      </span>
+      <span className="tnum mt-1 block truncate text-xl font-semibold text-[#0d1f3c] dark:text-white">
+        {value}
+      </span>
+      <span className="mt-0.5 block text-xs text-slate-500 dark:text-white/50">{caption}</span>
+    </button>
   );
 }

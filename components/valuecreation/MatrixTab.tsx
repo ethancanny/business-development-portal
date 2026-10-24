@@ -34,9 +34,13 @@ import {
 interface Point {
   x: number;
   y: number;
+  /** Bubble size driver (redesign §5): one-time cost, with a mid-size
+   *  fallback so cost-less initiatives still render. */
+  z: number;
   title: string;
   status: string;
   confidence: number | null;
+  oneTimeCost: number | null;
 }
 
 export default function MatrixTab({ initiatives }: VcTabProps) {
@@ -52,9 +56,11 @@ export default function MatrixTab({ initiatives }: VcTabProps) {
         .map((i) => ({
           x: i.effort as number,
           y: i.ebitdaImpact as number,
+          z: i.oneTimeCost && i.oneTimeCost > 0 ? i.oneTimeCost : 25000,
           title: i.title,
           status: i.status,
           confidence: i.confidence,
+          oneTimeCost: i.oneTimeCost,
         })),
     [initiatives, includeClosed]
   );
@@ -71,7 +77,7 @@ export default function MatrixTab({ initiatives }: VcTabProps) {
           </h3>
           <p className="mt-0.5 max-w-xl text-sm text-slate-500 dark:text-white/50">
             Top-left is where to start: high EBITDA impact for low effort.
-            Bubble size follows confidence. Tap a bubble for its initiative.
+            Bubble size follows one-time cost. Tap a bubble for its initiative.
           </p>
         </div>
         <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm text-[#0d1f3c] dark:text-white">
@@ -130,7 +136,7 @@ export default function MatrixTab({ initiatives }: VcTabProps) {
                 tickFormatter={(v: number) => fmtMoneyCompact(v)}
                 label={{ value: "EBITDA impact", angle: -90, position: "insideLeft", fontSize: 11, fill: dark ? "rgba(255,255,255,0.55)" : "#64748b" }}
               />
-              <ZAxis type="number" dataKey="confidence" range={[70, 260]} />
+              <ZAxis type="number" dataKey="z" range={[60, 320]} />
               <ReferenceArea x1={0.5} x2={3} y1={midY} y2={maxY * 1.05} fill="#b8975a" fillOpacity={0.1} />
               <ReferenceArea x1={3} x2={5.5} y1={0} y2={midY} fill="#dc2626" fillOpacity={0.05} />
               <Tooltip
@@ -168,7 +174,7 @@ export default function MatrixTab({ initiatives }: VcTabProps) {
             <li key={idx} className="flex items-baseline justify-between gap-3">
               <span className="min-w-0 truncate text-[#0d1f3c] dark:text-white/90">{p.title}</span>
               <span className="tnum shrink-0 text-xs text-slate-500 dark:text-white/50">
-                effort {p.x} · {fmtMoneyN(p.y)} · {labelOf(INITIATIVE_STATUSES, p.status)}
+                effort {p.x} · {fmtMoneyN(p.y)} · cost {fmtMoneyN(p.oneTimeCost)} · {labelOf(INITIATIVE_STATUSES, p.status)}
               </span>
             </li>
           ))}

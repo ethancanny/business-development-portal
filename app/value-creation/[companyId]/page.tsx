@@ -4,8 +4,10 @@ import DealBanner from "@/components/identity/DealBanner";
 
 export default function ValueCreationWorkspacePage({
   params,
+  searchParams,
 }: {
   params: { companyId: string };
+  searchParams?: { tab?: string };
 }) {
   return (
     <div>
@@ -16,7 +18,7 @@ export default function ValueCreationWorkspacePage({
       />
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
         <DealBanner companyId={params.companyId} />
-        <VcWorkspace companyId={params.companyId} />
+        <VcWorkspace companyId={params.companyId} initialTab={searchParams?.tab} />
       </div>
     </div>
   );
