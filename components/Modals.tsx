@@ -15,6 +15,7 @@ import { fmtMoney, fmtDate, uniqueStrings, dedupeSourceTokens } from "@/lib/form
 import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, dealFocusSector, estimateMultiple, matchGroup, resolveDealValue, resolveStatedPrice, resolveStructure, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
 import SectorChip, { StageChip } from "@/components/SectorChip";
 import DealRecordHeader from "@/components/DealRecordHeader";
+import DealForm from "@/components/DealForm";
 
 function fmtMultRange(lo: number, hi: number): string {
   return lo.toFixed(1) === hi.toFixed(1)
@@ -79,7 +80,7 @@ function MultBubble({
  * (stated price ÷ EBITDA) and actual effective after discounting its
  * structure. Used in the deal modal's view and edit modes; edit mode
  * recomputes it live. */
-function EstimateBody({ est }: { est: MultipleEstimate }) {
+export function EstimateBody({ est }: { est: MultipleEstimate }) {
   const headlineVerdict = !est.headlineLocked
     ? "No price recorded — the headline is shown at the market multiple."
     : Math.abs(est.gapHeadlineX) < 0.05
@@ -290,7 +291,7 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
  * mi_multiples as sourceReport "Canny Comp Log"; once a group + size
  * band has ≥5 entries, the valuation engine blends their median into
  * the base multiple for that group/band. */
-function CompLogSection({ deal, onLogged }: { deal: Deal; onLogged: () => void }) {
+export function CompLogSection({ deal, onLogged }: { deal: Deal; onLogged: () => void }) {
   const now = new Date();
   const group0 = matchGroup(deal.industry) ?? deal.industry;
   const stated = resolveStatedPrice(deal);
@@ -456,12 +457,15 @@ interface DealModalProps {
   deal: Deal | null; // null = create new
   executives?: Executive[];
   allDeals?: Deal[];
+  /** Pipeline's active type chip — preselected in the New
+   * investment form for a new deal (Oct 24, 2026). */
+  initialType?: string;
   onClose: () => void;
   onSaved: () => void;
   onDeleted: () => void;
 }
 
-export function DealModal({ deal, executives = [], allDeals = [], onClose, onSaved, onDeleted }: DealModalProps) {
+export function DealModal({ deal, executives = [], allDeals = [], initialType, onClose, onSaved, onDeleted }: DealModalProps) {
   const isNew = !deal;
   const [editing, setEditing] = useState(isNew);
   const [busy, setBusy] = useState(false);
@@ -784,8 +788,25 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     else setError("Failed to delete");
   };
 
+  // New investment form (Oct 24, 2026): create + edit render the
+  // type-first DealForm (sections from bd.metric_definitions). The
+  // read-only view below is unchanged; Cancel in the form returns
+  // here for an existing deal.
+  if (editing) {
+    return (
+      <DealForm
+        deal={deal}
+        executives={executives}
+        allDeals={allDeals}
+        initialType={initialType}
+        onClose={isNew ? onClose : () => setEditing(false)}
+        onSaved={onSaved}
+      />
+    );
+  }
+
   return (
-    <ModalShell title={isNew ? "New Acquisition Target" : deal!.companyName} onClose={onClose}>
+    <ModalShell title={isNew ? "New investment" : deal!.companyName} onClose={onClose}>
       {error && (
         <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</p>
       )}
@@ -996,540 +1017,7 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
           </div>
           </div>
         </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <Field label="Company name *">
-            <input className={inputCls} value={form.companyName} onChange={set("companyName")} />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Industry">
-              <input className={inputCls} value={form.industry} onChange={set("industry")} />
-            </Field>
-            <Field label="City">
-              <input
-                className={inputCls}
-                value={form.city}
-                onChange={set("city")}
-                placeholder="e.g. Scottsdale, AZ"
-              />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Deal value (USD)">
-              <input
-                type="number"
-                min="0"
-                className={inputCls}
-                value={form.dealValue}
-                onChange={set("dealValue")}
-              />
-            </Field>
-            <Field label="Asking price (USD)">
-              <input
-                type="number"
-                min="0"
-                className={inputCls}
-                value={form.askingPrice}
-                onChange={set("askingPrice")}
-                placeholder="—"
-              />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Revenue (USD)">
-              <input
-                type="number"
-                min="0"
-                className={inputCls}
-                value={form.revenue}
-                onChange={set("revenue")}
-                placeholder="—"
-              />
-            </Field>
-            <Field label="EBITDA (USD)">
-              <input
-                type="number"
-                min="0"
-                className={inputCls}
-                value={form.ebitda}
-                onChange={set("ebitda")}
-                placeholder="—"
-              />
-            </Field>
-          </div>
-          <div className="rounded-xl border border-slate-200 p-3 dark:border-white/10">
-            <p className="mb-1 text-sm font-semibold text-slate-900 dark:text-white">
-              Valuation estimate — rough, updates as you record more
-            </p>
-            {est ? (
-              <EstimateBody est={est} />
-            ) : (
-              <p className="text-xs text-slate-400 dark:text-white/40">
-                Needs an industry that matches Market Intel plus revenue/EBITDA on the deal.
-              </p>
-            )}
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {DRIVER_DEFS.map((def) => (
-                <label key={def.key} className="block">
-                  <span className={labelCls}>{def.label}</span>
-                  <select
-                    className={inputCls}
-                    value={form.drivers[def.key] ?? ""}
-                    onChange={(e) => setDriver(def.key, e.target.value)}
-                  >
-                    <option value="">Not noted yet</option>
-                    <option value="neg">{def.negLabel} (−{def.weight.toFixed(2)}×)</option>
-                    <option value="neu">{def.neuLabel} (no change)</option>
-                    <option value="pos">{def.posLabel} (+{def.weight.toFixed(2)}×)</option>
-                  </select>
-                </label>
-              ))}
-            </div>
-            <div className="mt-3 flex flex-wrap items-end gap-3">
-              <div className="w-52">
-                <Field label="Growth outlook — projected growth %/yr">
-                  <input type="number" step="1" className={inputCls} value={form.growthPct} onChange={set("growthPct")} placeholder="e.g. 10" />
-                </Field>
-              </div>
-              <p className="pb-2 text-xs text-slate-500 dark:text-white/50">
-                Growth gets its own adjustment, separate from the drivers above: about +0.5× per 10 points of projected growth, −0.5× per 10 points of decline (clamped at ±1.25×).
-              </p>
-            </div>
-            <p className="mt-3 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
-              Measured metrics — from the CIM / diligence. Each one replaces its dropdown above with a continuous adjustment that scales with the actual number and the deal's size.
-            </p>
-            <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <Field label="Top customer % of revenue">
-                <input type="number" min="0" max="100" className={inputCls} value={form.topCustomerPct} onChange={set("topCustomerPct")} placeholder="—" />
-              </Field>
-              <Field label="Top 3 customers %">
-                <input type="number" min="0" max="100" className={inputCls} value={form.top3Pct} onChange={set("top3Pct")} placeholder="—" />
-              </Field>
-              <Field label="Recurring / contracted %">
-                <input type="number" min="0" max="100" className={inputCls} value={form.recurringPct} onChange={set("recurringPct")} placeholder="—" />
-              </Field>
-              <Field label="Owner hours / week">
-                <input type="number" min="0" max="80" className={inputCls} value={form.ownerHoursPerWeek} onChange={set("ownerHoursPerWeek")} placeholder="—" />
-              </Field>
-            </div>
-            <p className="mt-3 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
-              Deal structure — stated amounts ($) — the headline price is their sum; leave all blank to assume the industry-typical mix
-            </p>
-            <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <Field label="Cash $">
-                <input type="number" min="0" className={inputCls} value={form.cashAmt} onChange={set("cashAmt")} placeholder="—" />
-              </Field>
-              <Field label="Seller note $">
-                <input type="number" min="0" className={inputCls} value={form.sellerAmt} onChange={set("sellerAmt")} placeholder="—" />
-              </Field>
-              <Field label="Earnout $">
-                <input type="number" min="0" className={inputCls} value={form.earnoutAmt} onChange={set("earnoutAmt")} placeholder="—" />
-              </Field>
-              <Field label="Rollover $">
-                <input type="number" min="0" className={inputCls} value={form.rolloverAmt} onChange={set("rolloverAmt")} placeholder="—" />
-              </Field>
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <Field label="Seller note rate % (if known)">
-                <input type="number" min="0" step="0.1" className={inputCls} value={form.sellerRatePct} onChange={set("sellerRatePct")} placeholder="—" />
-              </Field>
-              <Field label="Seller note term, years">
-                <input type="number" min="0" step="0.5" className={inputCls} value={form.sellerTermYrs} onChange={set("sellerTermYrs")} placeholder="—" />
-              </Field>
-            </div>
-            <p className="mt-3 text-xs font-medium text-slate-600 dark:text-[#c8bfa8]">
-              Earnout & rollover terms — accounting style (probability-weighted, discounted at the SBA rate)
-            </p>
-            <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Field label="Earnout metric">
-                <select className={inputCls} value={form.earnoutMetric} onChange={set("earnoutMetric")}>
-                  <option value="">—</option>
-                  <option value="EBITDA">EBITDA</option>
-                  <option value="Revenue">Revenue</option>
-                  <option value="Gross profit">Gross profit</option>
-                  <option value="Other">Other</option>
-                </select>
-              </Field>
-              <Field label="Earnout period (yrs)">
-                <input type="number" min="0" step="0.5" className={inputCls} value={form.earnoutPeriodYrs} onChange={set("earnoutPeriodYrs")} placeholder="2" />
-              </Field>
-              <Field label="Expected payout %">
-                <input type="number" min="0" max="100" className={inputCls} value={form.earnoutProbPct} onChange={set("earnoutProbPct")} placeholder="70" />
-              </Field>
-              <Field label="Rollover vesting (yrs)">
-                <input type="number" min="0" step="0.5" className={inputCls} value={form.rolloverVestYrs} onChange={set("rolloverVestYrs")} placeholder="—" />
-              </Field>
-              <Field label="Rollover retention %">
-                <input type="number" min="0" max="100" className={inputCls} value={form.rolloverProbPct} onChange={set("rolloverProbPct")} placeholder="100" />
-              </Field>
-            </div>
-            <p className="mt-2 text-[11px] text-slate-400 dark:text-white/30">
-              The headline is the stated total — add $100K of earnout and the headline rises $100K. The effective multiple discounts it back down, piece by piece, for expected payout and time value: cash at face value, rollover ~90¢, an earnout ~60¢. A seller note defaults to ~95¢ — but record its rate and term and it&apos;s priced properly against the SBA rate from Market Intel (prime + 3.00% — what LMM buyers actually pay). Earnouts are valued the accounting way (contingent consideration): expected payout % × the amount, discounted at the SBA rate over the earnout period.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Broker / intermediary">
-              <input
-                className={inputCls}
-                value={form.broker}
-                onChange={set("broker")}
-                placeholder="—"
-              />
-            </Field>
-            <Field label="Source">
-              <select className={inputCls} value={form.source} onChange={set("source")}>
-                <option value="">—</option>
-                <option value="Proprietary">Proprietary</option>
-                <option value="Intermediated">Intermediated</option>
-                <option value="Referral">Referral</option>
-                <option value="Inbound">Inbound</option>
-              </select>
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Investment type">
-              <select
-                className={inputCls}
-                value={form.investmentType}
-                onChange={(e) =>
-                  onTypeChange(e.target.value as InvestmentTypeKey)
-                }
-              >
-                {(bd?.config.types ?? [])
-                  .filter((t) => t.enabled || t.key === form.investmentType)
-                  .map((t) => (
-                    <option key={t.key} value={t.key}>
-                      {t.label}
-                    </option>
-                  ))}
-                {!bd &&
-                  (Object.keys(INVESTMENT_TYPE_LABELS) as InvestmentTypeKey[])
-                    .filter((k) => k !== "minority_growth")
-                    .map((k) => (
-                      <option key={k} value={k}>
-                        {INVESTMENT_TYPE_LABELS[k]}
-                      </option>
-                    ))}
-              </select>
-            </Field>
-            <Field label="Stage">
-              <select className={inputCls} value={form.stage} onChange={set("stage")}>
-                {stageOptionsFor(form.investmentType).map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-                {!stageOptionsFor(form.investmentType).includes(form.stage) && (
-                  <option value={form.stage}>{form.stage}</option>
-                )}
-              </select>
-            </Field>
-          </div>
-          {!isNew && deal && form.investmentType !== (deal.investmentType ?? "platform_lbo") && (
-            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
-              Changing the investment type keeps every shared field
-              (financials, structure, contacts, notes). Stage moves to
-              the closest stage in the new type.
-              {hiddenOnTypeChange.length > 0 ? (
-                <>
-                  {" "}These {INVESTMENT_TYPE_LABELS[(deal.investmentType ?? "platform_lbo") as InvestmentTypeKey]} fields
-                  have values and will be hidden for the new type — the
-                  values stay on record: {hiddenOnTypeChange.join(", ")}.
-                </>
-              ) : (
-                <> No type-specific fields with values will be hidden.</>
-              )}
-            </p>
-          )}
-          {form.investmentType === "add_on" && (
-            <Field label="Parent platform *">
-              <select
-                className={inputCls}
-                value={form.parentDealId}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, parentDealId: e.target.value }))
-                }
-              >
-                <option value="">Select the platform this bolts onto…</option>
-                {allDeals
-                  .filter(
-                    (x) =>
-                      (x.investmentType ?? "platform_lbo") === "platform_lbo" &&
-                      x.id !== deal?.id
-                  )
-                  .map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.companyName}
-                    </option>
-                  ))}
-              </select>
-            </Field>
-          )}
-          {form.investmentType === "early_stage" && (
-            <Field label="Sourced from (flywheel)">
-              <select
-                className={inputCls}
-                value={
-                  form.sourcedFromType && form.sourcedFromId
-                    ? `${form.sourcedFromType}:${form.sourcedFromId}`
-                    : ""
-                }
-                onChange={(e) => {
-                  const [t, id] = e.target.value.split(":");
-                  setForm((f) => ({
-                    ...f,
-                    sourcedFromType: (t ?? "") as typeof f.sourcedFromType,
-                    sourcedFromId: id ?? "",
-                  }));
-                }}
-              >
-                <option value="">—</option>
-                {bd && bd.sourcedFromOptions.portfolioCompanies.length > 0 && (
-                  <optgroup label="Portfolio companies">
-                    {bd.sourcedFromOptions.portfolioCompanies.map((o) => (
-                      <option key={o.id} value={`company:${o.id}`}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {bd && bd.sourcedFromOptions.marketInsights.length > 0 && (
-                  <optgroup label="Market insights">
-                    {bd.sourcedFromOptions.marketInsights.map((o) => (
-                      <option key={o.id} value={`insight:${o.id}`}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
-            </Field>
-          )}
-          {bd &&
-            (() => {
-              const defs = applicableDefs(
-                bd.config,
-                form.investmentType,
-                form.industry
-              );
-              if (!defs.length) return null;
-              const typeDefs = defs.filter((d) =>
-                d.appliesTo.startsWith("type:")
-              );
-              const packDefs = defs.filter((d) =>
-                d.appliesTo.startsWith("sector:")
-              );
-              const renderDef = (d: (typeof defs)[number]) => (
-                <Field
-                  key={d.key}
-                  label={`${d.label}${d.required ? " *" : ""}`}
-                >
-                  {d.dataType === "bool" ? (
-                    <select
-                      className={inputCls}
-                      value={metricForm[d.key] ?? ""}
-                      onChange={(e) =>
-                        setMetricForm((m) => ({ ...m, [d.key]: e.target.value }))
-                      }
-                    >
-                      <option value="">—</option>
-                      <option value="yes">Yes</option>
-                      <option value="no">No</option>
-                    </select>
-                  ) : d.dataType === "enum" ? (
-                    <select
-                      className={inputCls}
-                      value={metricForm[d.key] ?? ""}
-                      onChange={(e) =>
-                        setMetricForm((m) => ({ ...m, [d.key]: e.target.value }))
-                      }
-                    >
-                      <option value="">—</option>
-                      {(d.config.options ?? []).map((o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type={
-                        d.dataType === "date"
-                          ? "date"
-                          : d.dataType === "text"
-                            ? "text"
-                            : "number"
-                      }
-                      step="any"
-                      className={inputCls}
-                      value={metricForm[d.key] ?? ""}
-                      onChange={(e) =>
-                        setMetricForm((m) => ({ ...m, [d.key]: e.target.value }))
-                      }
-                      placeholder="—"
-                    />
-                  )}
-                </Field>
-              );
-              return (
-                <div className="rounded-xl border border-slate-200 p-3 dark:border-white/10">
-                  <p className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">
-                    {INVESTMENT_TYPE_LABELS[form.investmentType]} metrics
-                  </p>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {typeDefs.map(renderDef)}
-                  </div>
-                  {packDefs.length > 0 && (
-                    <>
-                      <p className="mb-2 mt-3 text-sm font-semibold text-slate-900 dark:text-white">
-                        Sector pack — {form.industry}
-                      </p>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        {packDefs.map(renderDef)}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })()}
-          {form.stage === "Passed" && (
-            <Field label="Pass reason">
-              <select className={inputCls} value={form.passReason ?? ""} onChange={set("passReason")}>
-                <option value="">Select a reason…</option>
-                <option value="Valuation / price">Valuation / price</option>
-                <option value="Margins / fit">Margins / fit</option>
-                <option value="Size / scale">Size / scale</option>
-                <option value="Timing / readiness">Timing / readiness</option>
-                <option value="Financials / diligence">Financials / diligence</option>
-                <option value="Seller circumstances">Seller circumstances</option>
-                <option value="Lost to another buyer">Lost to another buyer</option>
-                <option value="Financing">Financing</option>
-                <option value="Other">Other</option>
-              </select>
-            </Field>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Contact name">
-              <input className={inputCls} value={form.contactName} onChange={set("contactName")} />
-            </Field>
-            <Field label="Contact email">
-              <input type="email" className={inputCls} value={form.contactEmail} onChange={set("contactEmail")} />
-            </Field>
-          </div>
-          <Field label="Claimed by">
-            <select
-              className={inputCls}
-              value={form.owner}
-              onChange={set("owner")}
-            >
-              <option value="">Unclaimed</option>
-              {PARTNER_NAMES.map((p) => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Paired operators">
-            {executives.length === 0 ? (
-              <p className="text-xs text-slate-400 dark:text-white/40">
-                No executives yet — add candidates in Executive Sourcing first.
-              </p>
-            ) : (
-              <div className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-lg border border-slate-300 p-2 dark:border-white/15">
-                {executives.map((e) => {
-                  const isMatch =
-                    form.industry.trim() !== "" &&
-                    (e.industries ?? []).some(
-                      (ind) =>
-                        ind.toLowerCase() === form.industry.trim().toLowerCase()
-                    );
-                  return (
-                    <label
-                      key={e.id}
-                      className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-100 dark:hover:bg-white/5"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={form.operatorIds.includes(e.id)}
-                        onChange={() => toggleOperator(e.id)}
-                        className="h-4 w-4 accent-[#b8975a]"
-                      />
-                      <span className="text-slate-800 dark:text-[#e8dfc8]">
-                        {e.name}
-                      </span>
-                      {isMatch && (
-                        <span className="shrink-0 rounded-full bg-emerald-100 px-1.5 py-px text-[10px] font-bold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
-                          ✓ industry match
-                        </span>
-                      )}
-                      {e.industries && e.industries.length > 0 && (
-                        <span className="truncate text-xs text-slate-400 dark:text-white/40">
-                          {uniqueStrings(e.industries).join(", ")}
-                        </span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-          </Field>
-          <Field label="Notes">
-            <textarea className={inputCls} rows={3} value={form.notes} onChange={set("notes")} />
-          </Field>
-          <Field label="Links (CIM, data room, website…)">
-            <div className="flex flex-col gap-2">
-              {form.links.map((l, i) => (
-                <div key={i} className="flex gap-2">
-                  <input
-                    className={inputCls}
-                    value={l.label}
-                    onChange={(e) => setLink(i, "label", e.target.value)}
-                    placeholder="Label"
-                  />
-                  <input
-                    className={`${inputCls} flex-[2]`}
-                    value={l.url}
-                    onChange={(e) => setLink(i, "url", e.target.value)}
-                    placeholder="https://…"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeLinkRow(i)}
-                    className="shrink-0 rounded-lg px-2 text-sm text-slate-400 hover:bg-red-50 hover:text-red-600 dark:text-white/40 dark:hover:bg-red-500/15 dark:hover:text-red-300"
-                    aria-label="Remove link"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={addLinkRow}
-                className="btn btn-ghost btn-sm self-start"
-              >
-                + Add link
-              </button>
-            </div>
-          </Field>
-          {!isNew && (form.stage === "Passed" || form.stage === "Closed Won") && (
-            <CompLogSection deal={formDeal} onLogged={loadMultiples} />
-          )}
-          <div className="flex gap-2 pt-1">
-            <button
-              onClick={save}
-              disabled={busy} data-loading={busy || undefined}
-              className="btn btn-primary flex-1"
-            >
-              {busy ? "Saving…" : isNew ? "Add deal" : "Save changes"}
-            </button>
-            {!isNew && (
-              <button
-                onClick={() => setEditing(false)}
-                className="btn btn-secondary"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      ) : null}
     </ModalShell>
   );
 }
