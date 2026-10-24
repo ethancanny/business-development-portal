@@ -1,4 +1,5 @@
 import { sql, newId, str, num, numOrNull, isoOrNull } from "../platform/db";
+import { onEvent } from "../platform/events";
 import { logUsage } from "../platform/usage";
 import {
   ensureDiligence,
@@ -207,6 +208,132 @@ export async function createWorkspace(
   if (!ws) throw new Error("workspace_create_failed");
   return { workspace: ws, existed: false };
 }
+
+/* --------------------- BD → DD handoff (Oct 24, 2026) -------------------- */
+
+/**
+ * Terminal stages never gain a workspace from the handoff (the close
+ * cascade owns Closed; Passed deals stay out of Due Diligence).
+ */
+const HANDOFF_TERMINAL_STAGES: ReadonlySet<string> = new Set([
+  "Passed",
+  "Closed",
+  "Closed Won",
+]);
+
+/**
+ * Does `stage` put a deal of investment type `typeKey` in (or past)
+ * diligence? Stage lists are per-type data (bd.type_config, read via
+ * the bd service): the anchor is the stage named "Diligence"; any
+ * later stage in the same list (LOI, Financing, …) also qualifies,
+ * because the workspace — closing checklist included — is the deal's
+ * working record from diligence entry through closing. A type whose
+ * configured list has no "Diligence" stage never auto-creates.
+ */
+export async function stageEntersDiligence(
+  stage: string,
+  typeKey: string
+): Promise<boolean> {
+  if (!stage || HANDOFF_TERMINAL_STAGES.has(stage)) return false;
+  const { stagesForType } = await import("../bd/service");
+  const stages = await stagesForType(typeKey || "platform_lbo");
+  const anchor = stages.indexOf("Diligence");
+  if (anchor === -1) return false;
+  return stages.indexOf(stage) >= anchor;
+}
+
+export interface DiligenceHandoffResult {
+  created: boolean;
+  existed: boolean;
+  workspaceId: string | null;
+  /** Why no workspace was created, when neither flag is set. */
+  reason: "deal_not_found" | "stage_not_in_diligence" | "error" | null;
+}
+
+/**
+ * The BD → Due Diligence handoff: if the deal currently sits in (or
+ * past) a diligence stage for its investment type, make sure it has a
+ * diligence workspace, creating and seeding it when missing.
+ * Idempotent (createWorkspace is) and NEVER throws — the handoff runs
+ * inside other modules' write paths and must not break them.
+ *
+ * Until Oct 24, 2026 nothing called this: `deal_stage_changed` was a
+ * defined event type with no publisher and no handler, and workspaces
+ * came only from the manual "Start diligence" action — so deals that
+ * were seeded, imported, or moved into Diligence without that manual
+ * step never appeared on the Due Diligence page (its hub summary lists
+ * workspace-holders only). Wired from: the deal_stage_changed handler
+ * below, the deals PUT/POST/import routes, and the one-time backfill
+ * in lib/diligence/backfill.ts.
+ */
+export async function ensureWorkspaceForDeal(
+  dealId: string,
+  actor: string
+): Promise<DiligenceHandoffResult> {
+  const none = (
+    reason: DiligenceHandoffResult["reason"]
+  ): DiligenceHandoffResult => ({
+    created: false,
+    existed: false,
+    workspaceId: null,
+    reason,
+  });
+  try {
+    await ensureDiligence();
+    const db = sql();
+    const rows = await db`
+      SELECT stage, investment_type FROM deals WHERE id = ${dealId} LIMIT 1`;
+    if (!rows.length) return none("deal_not_found");
+    const rec = rows[0] as Record<string, unknown>;
+    const stage = str(rec.stage);
+    const typeKey = str(rec.investment_type) || "platform_lbo";
+    if (!(await stageEntersDiligence(stage, typeKey))) {
+      return none("stage_not_in_diligence");
+    }
+    // The core projection is normally kept fresh by the platform
+    // backfill top-up (hourly); a deal that entered diligence seconds
+    // ago may not be projected yet, and createWorkspace resolves the
+    // deal through core.deals — upsert this deal's rows first.
+    const { ensureCoreDealProjection } = await import("../platform/migrate");
+    await ensureCoreDealProjection(db, dealId);
+    const res = await createWorkspace(dealId, actor || "system");
+    return {
+      created: !res.existed,
+      existed: res.existed,
+      workspaceId: res.workspace.id,
+      reason: null,
+    };
+  } catch (err) {
+    console.error(
+      "[diligence] workspace handoff failed for deal",
+      dealId,
+      err instanceof Error ? err.message : String(err)
+    );
+    return none("error");
+  }
+}
+
+/**
+ * deal_stage_changed → workspace handoff. Registered once per process
+ * at module load, mirroring lib/monitoring/service.ts and
+ * lib/capital/service.ts. The deals write paths also call
+ * ensureWorkspaceForDeal directly (a cold process may not have this
+ * module loaded when the event is published); both paths are
+ * idempotent, so double-firing is harmless.
+ */
+let diligenceHandlersRegistered = false;
+function registerDiligenceHandlers(): void {
+  if (diligenceHandlersRegistered) return;
+  diligenceHandlersRegistered = true;
+  onEvent("deal_stage_changed", async (evt) => {
+    const dealId =
+      (typeof evt.payload?.dealId === "string" && evt.payload.dealId) ||
+      evt.entityId;
+    if (!dealId) return;
+    await ensureWorkspaceForDeal(dealId, evt.actor || "system");
+  });
+}
+registerDiligenceHandlers();
 
 export async function updateWorkspace(
   id: string,
