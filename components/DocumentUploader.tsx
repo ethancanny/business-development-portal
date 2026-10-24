@@ -61,6 +61,7 @@ export default function DocumentUploader({
   companyId,
   tags,
   onUploaded,
+  exportWarning,
 }: {
   roomId?: string;
   folderId?: string;
@@ -69,7 +70,11 @@ export default function DocumentUploader({
   companyId?: string;
   tags?: string[];
   onUploaded?: (result: UploadResult) => void;
+  /** Export-control gate (Step 1): when set, uploads stay disabled
+   * until the user explicitly confirms the controls warning. */
+  exportWarning?: string;
 }) {
+  const [warningAcked, setWarningAcked] = useState(false);
   const [items, setItems] = useState<QueueItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const browseRef = useRef<HTMLInputElement | null>(null);
@@ -193,6 +198,26 @@ export default function DocumentUploader({
     },
     [patchItem]
   );
+
+  if (exportWarning && !warningAcked) {
+    return (
+      <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-5 py-6 dark:border-amber-500/40 dark:bg-amber-500/10">
+        <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+          Export-control warning
+        </p>
+        <p className="mt-1 text-sm text-amber-700 dark:text-amber-200/80">
+          {exportWarning}
+        </p>
+        <button
+          type="button"
+          onClick={() => setWarningAcked(true)}
+          className="btn btn-primary btn-sm mt-3 min-h-[44px]"
+        >
+          Controls confirmed — enable uploads
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -182,6 +182,31 @@ export default function DocumentsLibrary() {
     if (showDuplicates) void loadDuplicates();
   }, [showDuplicates, loadDuplicates]);
 
+  /** Controlled-data tag (Step 1): the reserved "controlled-data"
+   * tag, toggled in one click alongside the free-form tag editor. */
+  const toggleControlledData = async () => {
+    if (!detail) return;
+    const current = detail.document.tags ?? [];
+    const next = current.includes("controlled-data")
+      ? current.filter((t) => t !== "controlled-data")
+      : [...current, "controlled-data"];
+    setSavingTags(true);
+    try {
+      const res = await fetch(`/api/platform/documents/${encodeURIComponent(detail.document.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags: next }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await loadDetail(detail.document.id);
+      await loadList();
+    } catch {
+      /* ignore */
+    } finally {
+      setSavingTags(false);
+    }
+  };
+
   const saveTags = async () => {
     if (!detail) return;
     setSavingTags(true);
@@ -429,11 +454,17 @@ export default function DocumentsLibrary() {
                           </span>
                           {d.tags && d.tags.length > 0 && (
                             <span className="flex flex-wrap gap-1">
-                              {d.tags.map((t) => (
-                                <span key={t} className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-500 dark:border-white/10 dark:text-white/60">
-                                  {t}
-                                </span>
-                              ))}
+                              {d.tags.map((t) =>
+                                t === "controlled-data" ? (
+                                  <span key={t} className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700 dark:bg-red-500/20 dark:text-red-200">
+                                    🔒 Controlled data
+                                  </span>
+                                ) : (
+                                  <span key={t} className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-500 dark:border-white/10 dark:text-white/60">
+                                    {t}
+                                  </span>
+                                )
+                              )}
                             </span>
                           )}
                         </button>
@@ -516,14 +547,29 @@ export default function DocumentsLibrary() {
                       <Button variant="secondary" onClick={() => void saveTags()} disabled={savingTags} className="min-h-[44px]">
                         {savingTags ? "Saving..." : "Save tags"}
                       </Button>
+                      <Button
+                        variant={(doc.tags ?? []).includes("controlled-data") ? "primary" : "secondary"}
+                        onClick={() => void toggleControlledData()}
+                        disabled={savingTags}
+                        className="min-h-[44px]"
+                        title="Reserved tag for export-controlled material (ITAR / EAR / CUI)"
+                      >
+                        {(doc.tags ?? []).includes("controlled-data") ? "✓ Controlled data" : "Mark controlled data"}
+                      </Button>
                     </div>
                     {doc.tags && doc.tags.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1">
-                        {doc.tags.map((t) => (
-                          <span key={t} className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-500 dark:border-white/10 dark:text-white/60">
-                            {t}
-                          </span>
-                        ))}
+                        {doc.tags.map((t) =>
+                          t === "controlled-data" ? (
+                            <span key={t} className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700 dark:bg-red-500/20 dark:text-red-200">
+                              🔒 Controlled data
+                            </span>
+                          ) : (
+                            <span key={t} className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-500 dark:border-white/10 dark:text-white/60">
+                              {t}
+                            </span>
+                          )
+                        )}
                       </div>
                     )}
                   </div>
