@@ -5,6 +5,9 @@ import {
   ensureDiligence,
   CHECKLIST_TEMPLATE,
   CHECKLIST_STATUSES,
+  CHECKLIST_PRIORITIES,
+  TEMPLATE_PACKS,
+  templatePacksForDeal,
   WORKSTREAMS,
   RED_FLAG_STATUSES,
   FINDING_STATUSES,
@@ -13,6 +16,7 @@ import {
   LICENSE_TRANSFERABILITY,
 } from "./schema";
 import {
+  computeCompleteness,
   getRoomChecklist,
   getRoomIndex,
   listFolders,
@@ -87,6 +91,15 @@ export interface DealContext {
   /** Claimed-by partner name (legacy deals.owner; "" when unclaimed).
    * Added for the Due Diligence hub cards (WS-C nav restructure). */
   owner: string;
+  /** Workspace redesign (Oct 24, 2026): header key facts + template
+   * pack selection, read through the same legacy-deals join the
+   * context already performs. */
+  investmentType: string;
+  industry: string;
+  askingPrice: number | null;
+  dealValue: number | null;
+  ebitda: number | null;
+  revenue: number | null;
 }
 
 export async function getDealContext(
@@ -98,7 +111,10 @@ export async function getDealContext(
     SELECT cd.id, cd.company_id, cd.stage,
       coalesce(ld.company_name, co.name, '') AS deal_name,
       coalesce(co.name, '') AS company_name,
-      coalesce(ld.owner, '') AS deal_owner
+      coalesce(ld.owner, '') AS deal_owner,
+      coalesce(ld.investment_type, '') AS investment_type,
+      coalesce(ld.industry, '') AS industry,
+      ld.asking_price, ld.deal_value, ld.ebitda, ld.revenue
     FROM core.deals cd
     LEFT JOIN deals ld ON ld.id = cd.id
     LEFT JOIN core.companies co ON co.id = cd.company_id
@@ -112,6 +128,12 @@ export async function getDealContext(
     companyName: str(r.company_name),
     stage: str(r.stage),
     owner: str(r.deal_owner),
+    investmentType: str(r.investment_type),
+    industry: str(r.industry),
+    askingPrice: numOrNull(r.asking_price),
+    dealValue: numOrNull(r.deal_value),
+    ebitda: numOrNull(r.ebitda),
+    revenue: numOrNull(r.revenue),
   };
 }
 
@@ -124,6 +146,11 @@ export interface WorkspaceRow {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** Key dates (workspace redesign, Oct 24, 2026) — owned by the
+   * workspace; no deal-level source for them exists. */
+  loiDate: string | null;
+  exclusivityExpiry: string | null;
+  targetCloseDate: string | null;
 }
 
 function rowToWorkspace(r: Record<string, unknown>): WorkspaceRow {
@@ -136,7 +163,35 @@ function rowToWorkspace(r: Record<string, unknown>): WorkspaceRow {
     createdBy: str(r.created_by),
     createdAt: isoOrNull(r.created_at) ?? "",
     updatedAt: isoOrNull(r.updated_at) ?? "",
+    loiDate: dateOrNull(r.loi_date),
+    exclusivityExpiry: dateOrNull(r.exclusivity_expiry),
+    targetCloseDate: dateOrNull(r.target_close_date),
   };
+}
+
+/**
+ * Workspace activity (redesign) — diligence mutations record rows in
+ * the platform activity log (core.activity_log, the collab feed's
+ * table) under the workspace entity, so the workspace Overview feed
+ * and the drawers' History share one source. Best-effort: an activity
+ * write never fails the mutation it describes.
+ */
+export async function logDiligenceActivity(
+  workspaceId: string,
+  actor: string,
+  kind: string,
+  message: string
+): Promise<void> {
+  try {
+    const db = sql();
+    await db`
+      INSERT INTO core.activity_log
+        (id, entity_kind, entity_id, actor, kind, message, source)
+      VALUES (${newId()}, 'diligence_workspace', ${workspaceId},
+        ${actor}, ${kind}, ${message.slice(0, 300)}, 'manual')`;
+  } catch (err) {
+    console.error("[diligence] activity log write failed", err);
+  }
 }
 
 export async function getWorkspaceById(
@@ -195,6 +250,12 @@ export async function createWorkspace(
         (id, workspace_id, workstream, title, sort, created_by)
       VALUES (${`dci_${newId()}`}, ${id}, ${item.workstream}, ${item.title},
         ${sort}, ${actor})`;
+  }
+  // Template packs for NEW workspaces (redesign): selected from the
+  // deal's investment type / industry. Existing workspaces are never
+  // re-seeded — packs reach them only via applyTemplatePack().
+  for (const packKey of templatePacksForDeal(ctx)) {
+    sort = await insertPackItems(id, packKey, actor, sort);
   }
   await db`
     INSERT INTO diligence.tax_profiles (id, workspace_id)
@@ -337,7 +398,13 @@ registerDiligenceHandlers();
 
 export async function updateWorkspace(
   id: string,
-  input: { status?: string; notes?: string }
+  input: {
+    status?: string;
+    notes?: string;
+    loiDate?: string | null;
+    exclusivityExpiry?: string | null;
+    targetCloseDate?: string | null;
+  }
 ): Promise<WorkspaceRow> {
   const ws = await requireWorkspace(id);
   const db = sql();
@@ -345,9 +412,89 @@ export async function updateWorkspace(
     UPDATE diligence.workspaces
     SET status = ${input.status !== undefined ? String(input.status) : ws.status},
         notes = ${input.notes !== undefined ? String(input.notes) : ws.notes},
+        loi_date = ${input.loiDate !== undefined ? cleanDate(input.loiDate) : ws.loiDate},
+        exclusivity_expiry = ${input.exclusivityExpiry !== undefined ? cleanDate(input.exclusivityExpiry) : ws.exclusivityExpiry},
+        target_close_date = ${input.targetCloseDate !== undefined ? cleanDate(input.targetCloseDate) : ws.targetCloseDate},
         updated_at = now()
     WHERE id = ${id}`;
   return (await getWorkspaceById(id)) as WorkspaceRow;
+}
+
+/**
+ * Insert a template pack's items into a workspace, skipping titles
+ * already present (case-insensitive). Returns the new max sort.
+ * Shared by workspace creation and the explicit apply action.
+ */
+async function insertPackItems(
+  workspaceId: string,
+  packKey: string,
+  actor: string,
+  startSort: number
+): Promise<number> {
+  const pack = TEMPLATE_PACKS[packKey];
+  if (!pack) return startSort;
+  const db = sql();
+  const existing = await db`
+    SELECT lower(title) AS t FROM diligence.checklist_items
+    WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL`;
+  const seen = new Set(
+    existing.map((r) => str((r as Record<string, unknown>).t))
+  );
+  let sort = startSort;
+  for (const item of pack.items) {
+    if (seen.has(item.title.toLowerCase())) continue;
+    sort += 10;
+    await db`
+      INSERT INTO diligence.checklist_items
+        (id, workspace_id, workstream, title, sort, created_by)
+      VALUES (${`dci_${newId()}`}, ${workspaceId}, ${item.workstream},
+        ${item.title}, ${sort}, ${actor})`;
+    seen.add(item.title.toLowerCase());
+  }
+  return sort;
+}
+
+/**
+ * Explicit "Add from template" action (redesign): applies a pack to
+ * an existing workspace. Only missing titles are inserted; nothing
+ * already there is touched.
+ */
+export async function applyTemplatePack(
+  workspaceId: string,
+  packKey: string,
+  actor: string
+): Promise<{ pack: string; added: number }> {
+  const pack = TEMPLATE_PACKS[packKey];
+  if (!pack) throw new Error("template_pack_not_found");
+  await requireWorkspace(workspaceId);
+  const db = sql();
+  const before = await db`
+    SELECT count(*)::int AS n FROM diligence.checklist_items
+    WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL`;
+  const maxRows = await db`
+    SELECT coalesce(max(sort), 0)::int AS m FROM diligence.checklist_items
+    WHERE workspace_id = ${workspaceId}`;
+  await insertPackItems(
+    workspaceId,
+    packKey,
+    actor,
+    num((maxRows[0] as Record<string, unknown>).m)
+  );
+  const after = await db`
+    SELECT count(*)::int AS n FROM diligence.checklist_items
+    WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL`;
+  const added =
+    num((after[0] as Record<string, unknown>).n) -
+    num((before[0] as Record<string, unknown>).n);
+  if (added > 0) {
+    await logDiligenceActivity(
+      workspaceId,
+      actor,
+      "checklist",
+      `Added ${added} item(s) from the ${pack.label}`
+    );
+  }
+  return { pack: packKey, added };
 }
 
 export async function deleteWorkspace(id: string): Promise<boolean> {
@@ -377,7 +524,10 @@ export async function listDealWorkspaces(): Promise<
     SELECT cd.id, cd.company_id, cd.stage,
       coalesce(ld.company_name, co.name, '') AS deal_name,
       coalesce(co.name, '') AS company_name,
-      coalesce(ld.owner, '') AS deal_owner
+      coalesce(ld.owner, '') AS deal_owner,
+      coalesce(ld.investment_type, '') AS investment_type,
+      coalesce(ld.industry, '') AS industry,
+      ld.asking_price, ld.deal_value, ld.ebitda, ld.revenue
     FROM core.deals cd
     LEFT JOIN deals ld ON ld.id = cd.id
     LEFT JOIN core.companies co ON co.id = cd.company_id
@@ -404,6 +554,12 @@ export async function listDealWorkspaces(): Promise<
       companyName: str(rec.company_name),
       stage: str(rec.stage),
       owner: str(rec.deal_owner),
+      investmentType: str(rec.investment_type),
+      industry: str(rec.industry),
+      askingPrice: numOrNull(rec.asking_price),
+      dealValue: numOrNull(rec.deal_value),
+      ebitda: numOrNull(rec.ebitda),
+      revenue: numOrNull(rec.revenue),
     };
     const ws = await getWorkspaceByDeal(deal.dealId);
     let checklistTotal = 0;
@@ -417,7 +573,7 @@ export async function listDealWorkspaces(): Promise<
             WHERE workspace_id = ${ws.id} AND deleted_at IS NULL) AS total,
           (SELECT count(*)::int FROM diligence.checklist_items
             WHERE workspace_id = ${ws.id} AND deleted_at IS NULL
-              AND status IN ('received','reviewed','approved','waived','na')) AS done,
+              AND status IN ('complete','na')) AS done,
           (SELECT count(*)::int FROM diligence.red_flags
             WHERE workspace_id = ${ws.id} AND deleted_at IS NULL
               AND status IN ('open','mitigating')) AS open_flags,
@@ -466,6 +622,9 @@ export interface ChecklistItemRow {
   status: string;
   dueDate: string | null;
   notes: string;
+  /** Redesign additions: priority + longer-form description. */
+  priority: string;
+  description: string;
   dataroomChecklistItemId: string | null;
   dataroomDocumentId: string | null;
   sort: number;
@@ -483,6 +642,8 @@ function rowToChecklistItem(r: Record<string, unknown>): ChecklistItemRow {
     status: str(r.status) || "not_started",
     dueDate: dateOrNull(r.due_date),
     notes: str(r.notes),
+    priority: str(r.priority) || "normal",
+    description: str(r.description),
     dataroomChecklistItemId: r.dataroom_checklist_item_id
       ? str(r.dataroom_checklist_item_id)
       : null,
@@ -516,6 +677,8 @@ export async function createChecklistItem(
     status?: string;
     dueDate?: string | null;
     notes?: string;
+    priority?: string;
+    description?: string;
     dataroomChecklistItemId?: string | null;
     dataroomDocumentId?: string | null;
   },
@@ -534,6 +697,11 @@ export async function createChecklistItem(
   )
     ? (input.status as string)
     : "not_started";
+  const priority = (CHECKLIST_PRIORITIES as readonly string[]).includes(
+    input.priority ?? ""
+  )
+    ? (input.priority as string)
+    : "normal";
   const db = sql();
   const maxRows = await db`
     SELECT coalesce(max(sort), 0)::int AS m FROM diligence.checklist_items
@@ -542,13 +710,21 @@ export async function createChecklistItem(
   await db`
     INSERT INTO diligence.checklist_items
       (id, workspace_id, workstream, title, owner, status, due_date, notes,
+       priority, description,
        dataroom_checklist_item_id, dataroom_document_id, sort, created_by)
     VALUES (${id}, ${workspaceId}, ${workstream}, ${title},
       ${(input.owner ?? "").trim()}, ${status},
       ${cleanDate(input.dueDate)}, ${(input.notes ?? "").trim()},
+      ${priority}, ${(input.description ?? "").trim()},
       ${input.dataroomChecklistItemId ?? null},
       ${input.dataroomDocumentId ?? null},
       ${num((maxRows[0] as Record<string, unknown>).m) + 10}, ${actor})`;
+  await logDiligenceActivity(
+    workspaceId,
+    actor,
+    "checklist",
+    `Checklist item added: ${title}`
+  );
   const rows = await db`
     SELECT * FROM diligence.checklist_items WHERE id = ${id} LIMIT 1`;
   return rowToChecklistItem(rows[0] as Record<string, unknown>);
@@ -563,9 +739,12 @@ export async function updateChecklistItem(
     status?: string;
     dueDate?: string | null;
     notes?: string;
+    priority?: string;
+    description?: string;
     dataroomChecklistItemId?: string | null;
     dataroomDocumentId?: string | null;
-  }
+  },
+  actor = ""
 ): Promise<ChecklistItemRow> {
   await ensureDiligence();
   const db = sql();
@@ -590,6 +769,13 @@ export async function updateChecklistItem(
     dueDate:
       input.dueDate !== undefined ? cleanDate(input.dueDate) : cur.dueDate,
     notes: input.notes !== undefined ? input.notes : cur.notes,
+    priority:
+      input.priority !== undefined &&
+      (CHECKLIST_PRIORITIES as readonly string[]).includes(input.priority)
+        ? input.priority
+        : cur.priority,
+    description:
+      input.description !== undefined ? input.description : cur.description,
     dataroomChecklistItemId:
       input.dataroomChecklistItemId !== undefined
         ? input.dataroomChecklistItemId
@@ -605,21 +791,43 @@ export async function updateChecklistItem(
     SET workstream = ${next.workstream}, title = ${next.title},
         owner = ${next.owner}, status = ${next.status},
         due_date = ${next.dueDate}, notes = ${next.notes},
+        priority = ${next.priority}, description = ${next.description},
         dataroom_checklist_item_id = ${next.dataroomChecklistItemId},
         dataroom_document_id = ${next.dataroomDocumentId},
         updated_at = now()
     WHERE id = ${itemId}`;
+  if (actor && next.status !== cur.status) {
+    await logDiligenceActivity(
+      cur.workspaceId,
+      actor,
+      "checklist",
+      `Checklist: ${cur.title} — ${cur.status} → ${next.status}`
+    );
+  }
   const after = await db`
     SELECT * FROM diligence.checklist_items WHERE id = ${itemId} LIMIT 1`;
   return rowToChecklistItem(after[0] as Record<string, unknown>);
 }
 
-export async function deleteChecklistItem(itemId: string): Promise<boolean> {
+export async function deleteChecklistItem(
+  itemId: string,
+  actor = ""
+): Promise<boolean> {
   await ensureDiligence();
   const db = sql();
   const rows = await db`
     UPDATE diligence.checklist_items SET deleted_at = now(), updated_at = now()
-    WHERE id = ${itemId} AND deleted_at IS NULL RETURNING id`;
+    WHERE id = ${itemId} AND deleted_at IS NULL
+    RETURNING workspace_id, title`;
+  if (rows.length && actor) {
+    const rec = rows[0] as Record<string, unknown>;
+    await logDiligenceActivity(
+      str(rec.workspace_id),
+      actor,
+      "checklist",
+      `Checklist item deleted: ${str(rec.title)}`
+    );
+  }
   return rows.length > 0;
 }
 
@@ -787,7 +995,7 @@ export async function listRequestSends(
  */
 export async function composeRequestEmail(
   workspaceId: string,
-  input: { templateId?: string; recipient?: string }
+  input: { templateId?: string; recipient?: string; itemIds?: string[] }
 ): Promise<{
   subject: string;
   body: string;
@@ -797,8 +1005,10 @@ export async function composeRequestEmail(
 }> {
   const ws = await requireWorkspace(workspaceId);
   const ctx = await getDealContext(ws.dealId);
+  const only =
+    input.itemIds && input.itemIds.length ? new Set(input.itemIds) : null;
   const items = (await listRequestItems(workspaceId)).filter(
-    (i) => i.status === "requested"
+    (i) => i.status === "requested" && (!only || only.has(i.id))
   );
   const dealName = ctx?.dealName || ctx?.companyName || "the target";
   const numbered = items.map((i, idx) => `${idx + 1}. ${i.label}`).join("\n");
@@ -857,6 +1067,15 @@ export async function logRequestSend(
       SET last_requested_at = now(), updated_at = now()
       WHERE id = ${itemId} AND workspace_id = ${workspaceId}`;
   }
+  const recipient = (input.recipient ?? "").trim();
+  await logDiligenceActivity(
+    workspaceId,
+    actor,
+    "request",
+    `Request email recorded — ${itemIds.length} item(s)${
+      recipient ? ` to ${recipient}` : ""
+    }`
+  );
   const rows = await db`
     SELECT * FROM diligence.request_sends WHERE id = ${id} LIMIT 1`;
   const rec = rows[0] as Record<string, unknown>;
@@ -875,7 +1094,8 @@ export async function logRequestSend(
 
 export async function updateRequestItem(
   itemId: string,
-  input: { status?: string; responseNotes?: string }
+  input: { status?: string; responseNotes?: string },
+  actor = ""
 ): Promise<RequestItemRow> {
   await ensureDiligence();
   const db = sql();
@@ -901,6 +1121,14 @@ export async function updateRequestItem(
         response_notes = ${input.responseNotes !== undefined ? input.responseNotes : cur.responseNotes},
         responded_at = ${respondedAt}, updated_at = now()
     WHERE id = ${itemId}`;
+  if (actor && status !== cur.status) {
+    await logDiligenceActivity(
+      cur.workspaceId,
+      actor,
+      "request",
+      `Request: ${cur.label} — ${cur.status} → ${status}`
+    );
+  }
   const after = await db`
     SELECT * FROM diligence.request_items WHERE id = ${itemId} LIMIT 1`;
   return rowToRequestItem(after[0] as Record<string, unknown>);
@@ -921,6 +1149,10 @@ export interface FindingRow {
   redFlagId: string | null;
   decidedBy: string | null;
   decidedAt: string | null;
+  /** Redesign additions: dollar impact, owner, checklist link. */
+  impactAmount: number | null;
+  owner: string;
+  checklistItemId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -939,6 +1171,9 @@ function rowToFinding(r: Record<string, unknown>): FindingRow {
     redFlagId: r.red_flag_id ? str(r.red_flag_id) : null,
     decidedBy: r.decided_by ? str(r.decided_by) : null,
     decidedAt: isoOrNull(r.decided_at),
+    impactAmount: numOrNull(r.impact_amount),
+    owner: str(r.owner),
+    checklistItemId: r.checklist_item_id ? str(r.checklist_item_id) : null,
     createdAt: isoOrNull(r.created_at) ?? "",
     updatedAt: isoOrNull(r.updated_at) ?? "",
   };
@@ -966,6 +1201,9 @@ export async function createFinding(
     proposedTermType?: string;
     proposedTermDetail?: string;
     redFlagId?: string | null;
+    impactAmount?: number | null;
+    owner?: string;
+    checklistItemId?: string | null;
   },
   actor: string
 ): Promise<FindingRow> {
@@ -977,13 +1215,23 @@ export async function createFinding(
   await db`
     INSERT INTO diligence.findings
       (id, workspace_id, title, detail, category, severity,
-       proposed_term_type, proposed_term_detail, red_flag_id, created_by)
+       proposed_term_type, proposed_term_detail, red_flag_id,
+       impact_amount, owner, checklist_item_id, created_by)
     VALUES (${id}, ${workspaceId}, ${title}, ${(input.detail ?? "").trim()},
       ${(input.category ?? "").trim()},
       ${["high", "medium", "low"].includes(input.severity ?? "") ? input.severity : "medium"},
       ${input.proposedTermType ?? "other"},
       ${(input.proposedTermDetail ?? "").trim()},
-      ${input.redFlagId ?? null}, ${actor})`;
+      ${input.redFlagId ?? null},
+      ${input.impactAmount ?? null},
+      ${(input.owner ?? "").trim()},
+      ${input.checklistItemId ?? null}, ${actor})`;
+  await logDiligenceActivity(
+    workspaceId,
+    actor,
+    "finding",
+    `Finding added: ${title}`
+  );
   const rows = await db`
     SELECT * FROM diligence.findings WHERE id = ${id} LIMIT 1`;
   return rowToFinding(rows[0] as Record<string, unknown>);
@@ -999,6 +1247,9 @@ export async function updateFinding(
     proposedTermType?: string;
     proposedTermDetail?: string;
     status?: string;
+    impactAmount?: number | null;
+    owner?: string;
+    checklistItemId?: string | null;
   },
   actor: string
 ): Promise<FindingRow> {
@@ -1024,10 +1275,21 @@ export async function updateFinding(
         proposed_term_type = ${input.proposedTermType !== undefined ? input.proposedTermType : cur.proposedTermType},
         proposed_term_detail = ${input.proposedTermDetail !== undefined ? input.proposedTermDetail : cur.proposedTermDetail},
         status = ${status},
+        impact_amount = ${input.impactAmount !== undefined ? input.impactAmount : cur.impactAmount},
+        owner = ${input.owner !== undefined ? input.owner.trim() : cur.owner},
+        checklist_item_id = ${input.checklistItemId !== undefined ? input.checklistItemId : cur.checklistItemId},
         decided_by = ${decided ? actor : cur.decidedBy},
         decided_at = ${decided ? new Date().toISOString() : cur.decidedAt},
         updated_at = now()
     WHERE id = ${findingId}`;
+  if (status !== cur.status) {
+    await logDiligenceActivity(
+      cur.workspaceId,
+      actor,
+      "finding",
+      `Finding: ${cur.title} — ${cur.status} → ${status}`
+    );
+  }
   const after = await db`
     SELECT * FROM diligence.findings WHERE id = ${findingId} LIMIT 1`;
   return rowToFinding(after[0] as Record<string, unknown>);
@@ -2107,6 +2369,8 @@ export interface WorkspaceBundle {
     checklistDone: number;
     requestsOutstanding: number;
     findingsProposed: number;
+    findingsOpenBySeverity: { high: number; medium: number; low: number };
+    findingsImpactTotal: number;
     redFlagsOpen: number;
     redFlagsCandidate: number;
     closingOpen: number;
@@ -2147,7 +2411,8 @@ export async function getWorkspaceBundle(
     listRedFlags(workspaceId),
     listClosingItems(workspaceId),
   ]);
-  const doneStatuses = ["received", "reviewed", "approved", "waived", "na"];
+  const doneStatuses = ["complete", "na"];
+  const openFindings = findings.filter((f) => f.status !== "rejected");
   return {
     workspace: ws,
     deal,
@@ -2169,6 +2434,15 @@ export async function getWorkspaceBundle(
         .length,
       findingsProposed: findings.filter((f) => f.status === "proposed")
         .length,
+      findingsOpenBySeverity: {
+        high: openFindings.filter((f) => f.severity === "high").length,
+        medium: openFindings.filter((f) => f.severity === "medium").length,
+        low: openFindings.filter((f) => f.severity === "low").length,
+      },
+      findingsImpactTotal: openFindings.reduce(
+        (sum, f) => sum + (f.impactAmount ?? 0),
+        0
+      ),
       redFlagsOpen: redFlags.filter((f) =>
         ["open", "mitigating"].includes(f.status)
       ).length,
@@ -2176,6 +2450,341 @@ export async function getWorkspaceBundle(
         .length,
       closingOpen: closingItems.filter((c) => c.status === "open").length,
     },
+  };
+}
+
+/* --------------------- workspace summary (redesign) -------------------- */
+
+export interface WorkspaceSummary {
+  workspace: WorkspaceRow;
+  deal: DealContext | null;
+  room: { id: string; name: string } | null;
+  counts: {
+    checklistTotal: number;
+    checklistDone: number;
+    checklistPct: number;
+    requestsOutstanding: number;
+    findingsProposed: number;
+    findingsOpen: number;
+    findingsOpenBySeverity: { high: number; medium: number; low: number };
+    findingsImpactTotal: number;
+    redFlagsOpen: number;
+    redFlagsCandidate: number;
+    closingOpen: number;
+  };
+  workstreams: Array<{
+    workstream: string;
+    total: number;
+    done: number;
+    pct: number;
+  }>;
+  needsAttention: {
+    overdueItems: Array<{
+      id: string;
+      title: string;
+      workstream: string;
+      owner: string;
+      dueDate: string | null;
+      daysOverdue: number;
+    }>;
+    agingRequests: Array<{
+      id: string;
+      label: string;
+      lastRequestedAt: string | null;
+      createdAt: string;
+      daysOutstanding: number;
+    }>;
+    highFindings: Array<{
+      id: string;
+      title: string;
+      severity: string;
+      status: string;
+      impactAmount: number | null;
+    }>;
+  };
+  keyDates: {
+    loiDate: string | null;
+    exclusivityExpiry: string | null;
+    targetCloseDate: string | null;
+    startedOn: string;
+    daysInDiligence: number;
+  };
+  dataroom: {
+    roomId: string;
+    roomName: string;
+    total: number;
+    satisfied: number;
+    pct: number;
+  } | null;
+  bridge: {
+    reportedEbitda: number | null;
+    adjustedEbitda: number | null;
+    items: Array<{ label: string; amount: number }>;
+  } | null;
+  activity: Array<{
+    id: string;
+    actor: string;
+    kind: string;
+    message: string;
+    source: string;
+    createdAt: string;
+  }>;
+  team: string[];
+}
+
+/**
+ * Header + tiles + Overview aggregates for the redesigned workspace.
+ * Everything here is aggregate SQL over the module's own tables (the
+ * same pattern the DD hub counts use) plus two service-layer reads
+ * (data room completeness, QoE bridge) — never a full bundle load.
+ */
+export async function getWorkspaceSummary(
+  workspaceId: string
+): Promise<WorkspaceSummary> {
+  const ws = await requireWorkspace(workspaceId);
+  await syncRedFlagCandidates(workspaceId).catch(() => null);
+  const db = sql();
+  const [deal, room, countRows, wsRows, overdueRows, agingRows, highRows] =
+    await Promise.all([
+      getDealContext(ws.dealId),
+      findRoomForDeal(ws.dealId),
+      db`
+        SELECT
+          (SELECT count(*)::int FROM diligence.checklist_items
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL) AS cl_total,
+          (SELECT count(*)::int FROM diligence.checklist_items
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status IN ('complete','na')) AS cl_done,
+          (SELECT count(*)::int FROM diligence.request_items
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status = 'requested') AS req_out,
+          (SELECT count(*)::int FROM diligence.findings
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status = 'proposed') AS f_prop,
+          (SELECT count(*)::int FROM diligence.findings
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status <> 'rejected') AS f_open,
+          (SELECT count(*)::int FROM diligence.findings
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status <> 'rejected' AND severity = 'high') AS f_high,
+          (SELECT count(*)::int FROM diligence.findings
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status <> 'rejected' AND severity = 'medium') AS f_med,
+          (SELECT count(*)::int FROM diligence.findings
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status <> 'rejected' AND severity = 'low') AS f_low,
+          (SELECT coalesce(sum(impact_amount), 0)::float FROM diligence.findings
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status <> 'rejected') AS f_impact,
+          (SELECT count(*)::int FROM diligence.red_flags
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status IN ('open','mitigating')) AS rf_open,
+          (SELECT count(*)::int FROM diligence.red_flags
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status = 'candidate') AS rf_cand,
+          (SELECT count(*)::int FROM diligence.closing_items
+            WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+              AND status = 'open') AS closing_open`,
+      db`
+        SELECT workstream,
+          count(*)::int AS total,
+          count(*) FILTER (WHERE status IN ('complete','na'))::int AS done
+        FROM diligence.checklist_items
+        WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+        GROUP BY workstream`,
+      db`
+        SELECT id, title, workstream, owner, due_date
+        FROM diligence.checklist_items
+        WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+          AND due_date IS NOT NULL AND due_date < CURRENT_DATE
+          AND status NOT IN ('complete','na')
+        ORDER BY due_date ASC LIMIT 8`,
+      db`
+        SELECT id, label, last_requested_at, created_at
+        FROM diligence.request_items
+        WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+          AND status = 'requested'
+        ORDER BY coalesce(last_requested_at, created_at) ASC LIMIT 6`,
+      db`
+        SELECT id, title, severity, status, impact_amount
+        FROM diligence.findings
+        WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL
+          AND severity = 'high' AND status <> 'rejected'
+        ORDER BY created_at DESC LIMIT 6`,
+    ]);
+  const c = (countRows[0] ?? {}) as Record<string, unknown>;
+  const clTotal = num(c.cl_total);
+  const clDone = num(c.cl_done);
+  const now = Date.now();
+  const dayDiff = (iso: string | null, dateOnly = false) => {
+    if (!iso) return 0;
+    const t = new Date(dateOnly ? `${iso}T12:00:00` : iso).getTime();
+    return Number.isNaN(t) ? 0 : Math.max(0, Math.floor((now - t) / DAY_MS));
+  };
+
+  let dataroom: WorkspaceSummary["dataroom"] = null;
+  if (room) {
+    try {
+      const items = await getRoomChecklist(room.id);
+      const comp = computeCompleteness(items);
+      dataroom = {
+        roomId: room.id,
+        roomName: room.name,
+        total: comp.total,
+        satisfied: comp.satisfied,
+        pct: comp.pct,
+      };
+    } catch {
+      dataroom = null;
+    }
+  }
+
+  let bridge: WorkspaceSummary["bridge"] = null;
+  if (ws.companyId) {
+    try {
+      const { getQoeWorkbench } = await import("./qoe");
+      const wb = await getQoeWorkbench(workspaceId);
+      if (wb.bridge) {
+        bridge = {
+          reportedEbitda: wb.bridge.reportedEbitda,
+          adjustedEbitda: wb.bridge.adjustedEbitda,
+          items: wb.bridge.items ?? [],
+        };
+      }
+    } catch {
+      bridge = null;
+    }
+  }
+
+  let activity: WorkspaceSummary["activity"] = [];
+  try {
+    const rows = await db`
+      SELECT id, actor, kind, message, source, created_at
+      FROM core.activity_log
+      WHERE entity_id = ${workspaceId} OR entity_id = ${ws.dealId}
+        OR (entity_kind IN ('diligence_checklist_item', 'diligence_finding',
+              'diligence_request_item')
+            AND entity_id IN (
+              SELECT id FROM diligence.checklist_items
+                WHERE workspace_id = ${workspaceId}
+              UNION SELECT id FROM diligence.findings
+                WHERE workspace_id = ${workspaceId}
+              UNION SELECT id FROM diligence.request_items
+                WHERE workspace_id = ${workspaceId}))
+      ORDER BY created_at DESC LIMIT 12`;
+    activity = rows.map((r) => {
+      const rec = r as Record<string, unknown>;
+      return {
+        id: str(rec.id),
+        actor: str(rec.actor),
+        kind: str(rec.kind),
+        message: str(rec.message),
+        source: str(rec.source),
+        createdAt: isoOrNull(rec.created_at) ?? "",
+      };
+    });
+  } catch {
+    activity = [];
+  }
+
+  const ownerRows = await db`
+    SELECT DISTINCT owner FROM diligence.checklist_items
+    WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL AND owner <> ''
+    UNION SELECT DISTINCT owner FROM diligence.red_flags
+    WHERE workspace_id = ${workspaceId} AND deleted_at IS NULL AND owner <> ''`;
+  const team: string[] = [];
+  const pushName = (n: string | null | undefined) => {
+    const v = (n ?? "").trim();
+    if (v && !team.some((t) => t.toLowerCase() === v.toLowerCase())) {
+      team.push(v);
+    }
+  };
+  pushName(deal?.owner);
+  pushName(ws.createdBy);
+  for (const r of ownerRows) {
+    pushName(str((r as Record<string, unknown>).owner));
+  }
+  for (const p of ["Ethan Canny", "Ronan Canny", "Ian Canny"]) pushName(p);
+
+  return {
+    workspace: ws,
+    deal,
+    room,
+    counts: {
+      checklistTotal: clTotal,
+      checklistDone: clDone,
+      checklistPct: clTotal ? Math.round((100 * clDone) / clTotal) : 0,
+      requestsOutstanding: num(c.req_out),
+      findingsProposed: num(c.f_prop),
+      findingsOpen: num(c.f_open),
+      findingsOpenBySeverity: {
+        high: num(c.f_high),
+        medium: num(c.f_med),
+        low: num(c.f_low),
+      },
+      findingsImpactTotal: num(c.f_impact),
+      redFlagsOpen: num(c.rf_open),
+      redFlagsCandidate: num(c.rf_cand),
+      closingOpen: num(c.closing_open),
+    },
+    workstreams: wsRows.map((r) => {
+      const rec = r as Record<string, unknown>;
+      const total = num(rec.total);
+      const done = num(rec.done);
+      return {
+        workstream: str(rec.workstream),
+        total,
+        done,
+        pct: total ? Math.round((100 * done) / total) : 0,
+      };
+    }),
+    needsAttention: {
+      overdueItems: overdueRows.map((r) => {
+        const rec = r as Record<string, unknown>;
+        const due = dateOrNull(rec.due_date);
+        return {
+          id: str(rec.id),
+          title: str(rec.title),
+          workstream: str(rec.workstream),
+          owner: str(rec.owner),
+          dueDate: due,
+          daysOverdue: dayDiff(due, true),
+        };
+      }),
+      agingRequests: agingRows.map((r) => {
+        const rec = r as Record<string, unknown>;
+        const last = isoOrNull(rec.last_requested_at);
+        const created = isoOrNull(rec.created_at) ?? "";
+        return {
+          id: str(rec.id),
+          label: str(rec.label),
+          lastRequestedAt: last,
+          createdAt: created,
+          daysOutstanding: dayDiff(last ?? created),
+        };
+      }),
+      highFindings: highRows.map((r) => {
+        const rec = r as Record<string, unknown>;
+        return {
+          id: str(rec.id),
+          title: str(rec.title),
+          severity: str(rec.severity),
+          status: str(rec.status),
+          impactAmount: numOrNull(rec.impact_amount),
+        };
+      }),
+    },
+    keyDates: {
+      loiDate: ws.loiDate,
+      exclusivityExpiry: ws.exclusivityExpiry,
+      targetCloseDate: ws.targetCloseDate,
+      startedOn: ws.createdAt,
+      daysInDiligence: dayDiff(ws.createdAt),
+    },
+    dataroom,
+    bridge,
+    activity,
+    team,
   };
 }
 
