@@ -115,7 +115,10 @@ function statusBadge(status: string) {
   return <span className={`badge ${cls}`}>{status}</span>;
 }
 
-export default function QoeTab({ workspaceId }: TabProps) {
+export default function QoeTab({
+  workspaceId,
+  view = "workbench",
+}: TabProps & { view?: "workbench" | "analysis" }) {
   const [data, setData] = useState<QoeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -310,6 +313,12 @@ export default function QoeTab({ workspaceId }: TabProps) {
         </p>
       )}
 
+      {/* Financial Analysis view: statements, EBITDA / SDE views.
+          The workbench view below holds adjustments + posting. Every
+          control from the pre-redesign single tab lives in exactly
+          one of the two views (redesign spec §2 mapping). */}
+      {view === "analysis" && (
+        <>
       {/* EBITDA view and SDE view — separate cards, never combined */}
       <div className="grid gap-4 lg:grid-cols-2">
         <div className={cardCls}>
@@ -382,7 +391,11 @@ export default function QoeTab({ workspaceId }: TabProps) {
           </p>
         </div>
       </div>
+        </>
+      )}
 
+      {view === "workbench" && (
+        <>
       {/* Engine adjustments */}
       <div className={cardCls}>
         <h3 className="font-display text-lg font-semibold text-[#0d1f3c] dark:text-white">
@@ -724,6 +737,8 @@ export default function QoeTab({ workspaceId }: TabProps) {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }
