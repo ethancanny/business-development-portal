@@ -99,6 +99,16 @@ export async function ensurePlatform(): Promise<void> {
   } catch (err) {
     console.error("[platform] normalized-name repair failed", err);
   }
+  // Investment Types Step 1 (Oct 23, 2026): one-time deal stage/type
+  // migration — marker-guarded inside lib/bd/migrate.ts, writes its
+  // own persistent report. Runs on the first platform boot after the
+  // deploy that carries it. Never breaks reads.
+  try {
+    const { runBdMigrationIfNeeded } = await import("../bd/migrate");
+    await runBdMigrationIfNeeded();
+  } catch (err) {
+    console.error("[platform] bd investment-types migration failed (will retry)", err);
+  }
   // Event-driven push (Oct 21, 2026): keep the daily digest job
   // scheduled and drain due push jobs opportunistically on platform
   // activity — this is one of the queue's drain triggers (no polling

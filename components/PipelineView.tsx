@@ -10,7 +10,13 @@ import PairingTable, { type Pairing } from "@/components/PairingTable";
 import { DealModal, ExecutiveModal } from "@/components/Modals";
 import PageHero from "@/components/PageHero";
 import { SkeletonRows } from "@/components/ui";
-import { DEAL_STAGES, EXEC_STAGES, type Deal, type Executive, type MiMultiple } from "@/lib/types";
+import { ALL_DEAL_STAGES, EXEC_STAGES, PLATFORM_LBO_STAGES, type Deal, type Executive, type InvestmentTypeKey, type MiMultiple } from "@/lib/types";
+import {
+  fetchBdBootstrap,
+  stagesForType,
+  TypeBadge,
+  type BdBootstrap,
+} from "@/components/InvestmentTypeBits";
 import { fmtMoney, uniqueStrings } from "@/lib/format";
 import { dealFocusSector, resolveDealValue } from "@/lib/valuation";
 import DealsDataTools from "@/components/DealsDataTools";
@@ -82,6 +88,11 @@ export default function PipelineView({
   const [dealModal, setDealModal] = useState<{ deal: Deal | null } | null>(null);
   const [execModal, setExecModal] = useState<{ exec: Executive | null } | null>(null);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
+  // Investment Types (Step 1): type filter chips + bd bootstrap
+  // (config/metrics) + the LBO hold-period column toggle.
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [bd, setBd] = useState<BdBootstrap | null>(null);
+  const [holdView, setHoldView] = useState(false);
   const [primeRate, setPrimeRate] = useState<number | null>(null);
   const [sbaRate, setSbaRate] = useState<number | null>(null);
 
@@ -98,6 +109,7 @@ export default function PipelineView({
         return;
       }
       if (dealsRes.ok) setDeals(await dealsRes.json());
+      void fetchBdBootstrap(true).then((b) => setBd(b));
       if (execsRes.ok) setExecs(await execsRes.json());
       if (multRes.ok) setMultiples(await multRes.json());
       if (ratesRes.ok) {
@@ -135,7 +147,37 @@ export default function PipelineView({
     return Array.from(s).sort();
   }, [deals, execs]);
 
-  const stages = tab === "deals" ? DEAL_STAGES : EXEC_STAGES;
+  const dealTypeOf = (d: Deal): InvestmentTypeKey =>
+    (d.investmentType ?? "platform_lbo") as InvestmentTypeKey;
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const d of deals) {
+      const k = dealTypeOf(d);
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    return counts;
+  }, [deals]);
+  const enabledTypes = (bd?.config.types ?? []).filter((t) => t.enabled);
+  /** Kanban/stage-filter stage list: the selected type's stages; for
+   * "All", the Platform LBO list (majority type — Step 1 design note). */
+  const activeStages: readonly string[] =
+    tab !== "deals"
+      ? EXEC_STAGES
+      : typeFilter !== "all"
+        ? stagesForType(bd?.config ?? null, typeFilter).length
+          ? stagesForType(bd?.config ?? null, typeFilter)
+          : PLATFORM_LBO_STAGES
+        : PLATFORM_LBO_STAGES;
+  const stageFilterOptions: readonly string[] =
+    tab !== "deals"
+      ? EXEC_STAGES
+      : typeFilter !== "all"
+        ? activeStages
+        : ALL_DEAL_STAGES.filter(
+            (s) =>
+              !["Sourcing", "Initial Contact", "Negotiation", "Closing", "Closed Won"].includes(s)
+          );
+  const stages = stageFilterOptions;
 
   const filteredDeals = useMemo(
     () =>
@@ -146,10 +188,11 @@ export default function PipelineView({
         return (
           (!q || hay.includes(q)) &&
           (!ownerFilter || d.owner === ownerFilter) &&
-          (!stageFilter || d.stage === stageFilter)
+          (!stageFilter || d.stage === stageFilter) &&
+          (typeFilter === "all" || dealTypeOf(d) === typeFilter)
         );
       }),
-    [deals, search, ownerFilter, stageFilter]
+    [deals, search, ownerFilter, stageFilter, typeFilter]
   );
 
   const filteredExecs = useMemo(
@@ -239,7 +282,7 @@ export default function PipelineView({
       {!embedded && (
         <PageHero
           eyebrow="Canny Capital Partners"
-          title={tab === "deals" ? "Acquisition Pipeline" : tab === "execs" ? "Executive Sourcing" : "Paired Operators"}
+          title={tab === "deals" ? "Investment Pipeline" : tab === "execs" ? "Executive Sourcing" : "Paired Operators"}
           subtitle="Arizona market activity"
         />
       )}
@@ -251,7 +294,7 @@ export default function PipelineView({
             onClick={() => setTab("deals")}
             className={`chip text-sm ${tab === "deals" ? "chip-active" : ""}`}
           >
-            Acquisitions ({deals.length})
+            Investments ({deals.length})
           </button>
           <button
             onClick={() => setTab("execs")}
@@ -339,8 +382,39 @@ export default function PipelineView({
             + {tab === "deals" ? "Add deal" : "Add candidate"}
           </button>
           )}
-          {tab === "deals" && <DealsDataTools onImported={load} />}
+          {tab === "deals" && <DealsDataTools onImported={load} typeFilter={typeFilter} />}
         </div>
+
+        {/* Investment type filter chips (Step 1) — deals tab only.
+            Counts are live from the loaded pipeline. */}
+        {tab === "deals" && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => { setTypeFilter("all"); setStageFilter(""); }}
+              className={`chip text-sm ${typeFilter === "all" ? "chip-active" : ""}`}
+            >
+              All ({deals.length})
+            </button>
+            {enabledTypes.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => { setTypeFilter(t.key); setStageFilter(""); }}
+                className={`chip text-sm ${typeFilter === t.key ? "chip-active" : ""}`}
+              >
+                {t.label} ({typeCounts[t.key] ?? 0})
+              </button>
+            ))}
+            {typeFilter === "platform_lbo" && (
+              <button
+                onClick={() => setHoldView((v) => !v)}
+                className={`chip text-sm ml-auto ${holdView ? "chip-active" : ""}`}
+                title="Swap the LBO operating metrics for the hold-period analysis (target IRR / MOIC / hold)"
+              >
+                {holdView ? "◉ Hold-period view" : "○ Hold-period view"}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Board */}
         {tab === "deals" ? (
@@ -351,6 +425,10 @@ export default function PipelineView({
               onSelect={(d) => setDealModal({ deal: d })}
               multiples={multiples}
               rates={{ prime: primeRate, sba: sbaRate }}
+              typeFilter={typeFilter}
+              bd={bd}
+              holdView={holdView}
+              allDeals={deals}
             />
           ) : view === "cards" ? (
             <DealCardGrid
@@ -358,10 +436,11 @@ export default function PipelineView({
               multiples={multiples}
               rates={{ prime: primeRate, sba: sbaRate }}
               onSelect={(d) => setDealModal({ deal: d })}
+              allDeals={deals}
             />
           ) : (
           <KanbanBoard<Deal>
-            stages={DEAL_STAGES}
+            stages={activeStages}
             items={filteredDeals}
             getId={(d) => d.id}
             getStage={(d) => d.stage}
@@ -383,6 +462,9 @@ export default function PipelineView({
                     <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
                   </p>
                 )}
+                <p className="mt-1.5">
+                  <TypeBadge type={d.investmentType} />
+                </p>
                 <div className="mt-2 flex items-center justify-between">
                   <span className="text-sm font-medium text-slate-700 dark:text-[#e8dfc8]">{valueLabel(d)}</span>
                 </div>
@@ -493,7 +575,7 @@ export default function PipelineView({
               />
             ) : (
               <KanbanBoard<Pairing>
-                stages={DEAL_STAGES}
+                stages={activeStages}
                 items={filteredPairings}
                 getId={(x) => `${x.deal.id}-${x.operator.id}`}
                 getStage={(x) => x.deal.stage}
