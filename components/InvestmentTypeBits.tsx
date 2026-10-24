@@ -28,7 +28,13 @@ export interface BdMetricDefinition {
   sort: number;
   required: boolean;
   enabled: boolean;
-  config: { group?: "primary" | "hold"; options?: string[]; types?: string[] };
+  config: {
+    group?: "primary" | "hold";
+    options?: string[];
+    types?: string[];
+    /** New investment form section key (Oct 24, 2026). */
+    section?: string;
+  };
 }
 
 export interface BdSectorPack {

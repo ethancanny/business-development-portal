@@ -86,7 +86,7 @@ export default function PipelineView({
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
   const [stageFilter, setStageFilter] = useState("");
-  const [dealModal, setDealModal] = useState<{ deal: Deal | null } | null>(null);
+  const [dealModal, setDealModal] = useState<{ deal: Deal | null; initialType?: string } | null>(null);
   const [execModal, setExecModal] = useState<{ exec: Executive | null } | null>(null);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   // Investment Types (Step 1): type filter chips + bd bootstrap
@@ -133,7 +133,7 @@ export default function PipelineView({
     const sp = new URLSearchParams(window.location.search);
     if (sp.get("new") === "deal") {
       setTab("deals");
-      setDealModal({ deal: null });
+      setDealModal({ deal: null, initialType: typeFilter !== "all" ? typeFilter : undefined });
     }
     if (sp.get("new") === "exec") {
       setTab("execs");
@@ -403,7 +403,9 @@ export default function PipelineView({
           {tab !== "paired" && (
           <button
             onClick={() =>
-              tab === "deals" ? setDealModal({ deal: null }) : setExecModal({ exec: null })
+              tab === "deals"
+                ? setDealModal({ deal: null, initialType: typeFilter !== "all" ? typeFilter : undefined })
+                : setExecModal({ exec: null })
             }
             className="btn btn-primary"
           >
@@ -668,6 +670,7 @@ export default function PipelineView({
           deal={dealModal.deal}
           executives={execs}
           allDeals={deals}
+          initialType={dealModal.initialType}
           onClose={() => setDealModal(null)}
           onSaved={refreshAndClose}
           onDeleted={refreshAndClose}
