@@ -21,6 +21,11 @@ export async function POST(
         typeof body.templateId === "string" ? body.templateId : undefined,
       recipient:
         typeof body.recipient === "string" ? body.recipient : undefined,
+      itemIds: Array.isArray(body.itemIds)
+        ? body.itemIds.filter(
+            (v): v is string => typeof v === "string"
+          )
+        : undefined,
     });
     return ok(composed);
   } catch (err) {

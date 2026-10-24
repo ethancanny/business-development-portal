@@ -6,7 +6,22 @@ import {
   serviceError,
   contractInputFrom,
 } from "@/lib/diligence/http";
-import { createContract } from "@/lib/diligence/service";
+import { createContract, listContracts } from "@/lib/diligence/service";
+
+/** GET — the workspace's contract register (per-tab load, redesign). */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+): Promise<NextResponse> {
+  const gate = await authed();
+  if ("response" in gate) return gate.response;
+  try {
+    const contracts = await listContracts(params.id);
+    return ok({ contracts });
+  } catch (err) {
+    return serviceError(err, "contracts-list");
+  }
+}
 
 /** POST — add a material contract to the register (manual entry). */
 export async function POST(

@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authed, ok, readBody, serviceError } from "@/lib/diligence/http";
-import { createFinding } from "@/lib/diligence/service";
+import { createFinding, listFindings } from "@/lib/diligence/service";
+
+/** GET — the workspace's findings (per-tab load, redesign). */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+): Promise<NextResponse> {
+  const gate = await authed();
+  if ("response" in gate) return gate.response;
+  try {
+    const findings = await listFindings(params.id);
+    return ok({ findings });
+  } catch (err) {
+    return serviceError(err, "findings-list");
+  }
+}
 
 /** POST — record a finding with a proposed deal-term consequence. */
 export async function POST(
@@ -23,6 +38,13 @@ export async function POST(
         proposedTermDetail: s(body.proposedTermDetail),
         redFlagId:
           typeof body.redFlagId === "string" ? body.redFlagId : null,
+        impactAmount:
+          typeof body.impactAmount === "number" ? body.impactAmount : null,
+        owner: s(body.owner),
+        checklistItemId:
+          typeof body.checklistItemId === "string"
+            ? body.checklistItemId
+            : null,
       },
       gate.user.name
     );

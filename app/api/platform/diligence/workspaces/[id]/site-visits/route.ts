@@ -2,8 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { authed, ok, readBody, serviceError } from "@/lib/diligence/http";
 import {
   createSiteVisit,
+  listSiteVisits,
   type SiteVisitInput,
 } from "@/lib/diligence/service";
+
+/** GET — the workspace's site visits (per-tab load, redesign). */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+): Promise<NextResponse> {
+  const gate = await authed();
+  if ("response" in gate) return gate.response;
+  try {
+    const visits = await listSiteVisits(params.id);
+    return ok({ visits });
+  } catch (err) {
+    return serviceError(err, "site-visits-list");
+  }
+}
 
 /**
  * POST — record a site visit. Photos are core.documents ids only

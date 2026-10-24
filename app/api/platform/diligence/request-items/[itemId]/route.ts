@@ -11,13 +11,17 @@ export async function PATCH(
   if ("response" in gate) return gate.response;
   try {
     const body = await readBody(req);
-    const item = await updateRequestItem(params.itemId, {
-      status: typeof body.status === "string" ? body.status : undefined,
-      responseNotes:
-        typeof body.responseNotes === "string"
-          ? body.responseNotes
-          : undefined,
-    });
+    const item = await updateRequestItem(
+      params.itemId,
+      {
+        status: typeof body.status === "string" ? body.status : undefined,
+        responseNotes:
+          typeof body.responseNotes === "string"
+            ? body.responseNotes
+            : undefined,
+      },
+      gate.user.name
+    );
     return ok({ item });
   } catch (err) {
     return serviceError(err, "request-item-update");

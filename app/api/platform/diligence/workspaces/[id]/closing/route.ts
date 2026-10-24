@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authed, ok, readBody, serviceError } from "@/lib/diligence/http";
-import { createClosingItem } from "@/lib/diligence/service";
+import { createClosingItem, listClosingItems } from "@/lib/diligence/service";
+
+/** GET — the workspace's closing checklist (per-tab load, redesign). */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+): Promise<NextResponse> {
+  const gate = await authed();
+  if ("response" in gate) return gate.response;
+  try {
+    const items = await listClosingItems(params.id);
+    return ok({ items });
+  } catch (err) {
+    return serviceError(err, "closing-list");
+  }
+}
 
 /**
  * POST — add a closing checklist item. category 'post_closing' items

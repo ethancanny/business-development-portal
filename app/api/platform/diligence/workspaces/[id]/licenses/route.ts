@@ -6,7 +6,22 @@ import {
   serviceError,
   licenseInputFrom,
 } from "@/lib/diligence/http";
-import { createLicense } from "@/lib/diligence/service";
+import { createLicense, listLicenses } from "@/lib/diligence/service";
+
+/** GET — the workspace's licenses & permits (per-tab load, redesign). */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+): Promise<NextResponse> {
+  const gate = await authed();
+  if ("response" in gate) return gate.response;
+  try {
+    const licenses = await listLicenses(params.id);
+    return ok({ licenses });
+  } catch (err) {
+    return serviceError(err, "licenses-list");
+  }
+}
 
 /** POST — add a license to the tracker. */
 export async function POST(

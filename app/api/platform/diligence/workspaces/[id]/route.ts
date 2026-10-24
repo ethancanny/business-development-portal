@@ -29,9 +29,14 @@ export async function PATCH(
   if ("response" in gate) return gate.response;
   try {
     const body = await readBody(req);
+    const dateOrNull = (v: unknown) =>
+      typeof v === "string" || v === null ? (v as string | null) : undefined;
     const workspace = await updateWorkspace(params.id, {
       status: typeof body.status === "string" ? body.status : undefined,
       notes: typeof body.notes === "string" ? body.notes : undefined,
+      loiDate: dateOrNull(body.loiDate),
+      exclusivityExpiry: dateOrNull(body.exclusivityExpiry),
+      targetCloseDate: dateOrNull(body.targetCloseDate),
     });
     return ok({ workspace });
   } catch (err) {

@@ -22,6 +22,16 @@ export async function PATCH(
         proposedTermType: s(body.proposedTermType),
         proposedTermDetail: s(body.proposedTermDetail),
         status: s(body.status),
+        impactAmount:
+          typeof body.impactAmount === "number" || body.impactAmount === null
+            ? (body.impactAmount as number | null)
+            : undefined,
+        owner: s(body.owner),
+        checklistItemId:
+          typeof body.checklistItemId === "string" ||
+          body.checklistItemId === null
+            ? (body.checklistItemId as string | null)
+            : undefined,
       },
       gate.user.name
     );
