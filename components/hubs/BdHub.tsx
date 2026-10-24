@@ -1,31 +1,34 @@
 "use client";
 
 /**
- * Business Development hub (navigation restructure): live summary
- * sections — Pipeline, Market Intel, Activity, Tasks & Follow-ups —
- * under a sticky in-page tab bar. Ethan, Oct 23, 2026: these are
- * TABS, not a scroll page — only the selected tab's section renders
- * (which also means an unselected section never fetches). The tab
- * restores from the URL hash (#bd-pipeline / #bd-market /
- * #bd-activity / #bd-tasks) so deep links keep working. No Directory
- * or Audit Trail tiles — those live in the main nav. The header
- * replicates PageHero's markup; the Capture button that used to sit
- * at its right was removed at Ethan's direction (Oct 23, 2026) — the
- * /capture page itself is unchanged.
+ * Business Development hub. Ethan, Oct 23, 2026 (supersedes the
+ * Oct 22 hub spec and the summary-section design):
+ * - The tab bar is exactly three tabs, in this order: Pipeline,
+ *   Activity, Market Intel. There is NO Tasks & Follow-ups tab —
+ *   open tasks and follow-ups are referenced on the Pipeline page
+ *   itself (a Tasks & Follow-ups section under the pipeline).
+ * - Each tab renders the FULL page for that area — the actual
+ *   /pipeline, /activity, and /market-intel page components with
+ *   their heroes suppressed (embedded) — never a summary overview
+ *   with an "Open full view" link.
+ * - Only the selected tab renders, so an unselected page never
+ *   fetches. The tab restores from the URL hash (#bd-pipeline /
+ *   #bd-activity / #bd-market) so deep links keep working.
+ * - The Capture button that used to sit at the right of the banner
+ *   was removed; the /capture page itself is unchanged.
+ * No Directory or Audit Trail tiles — those live in the main nav.
  */
 
 import { useEffect, useState } from "react";
 import { BANNER_DARK, BANNER_LIGHT } from "@/lib/sector-colors";
-import BdPipelineSection from "./BdPipelineSection";
-import BdMarketSection from "./BdMarketSection";
-import BdActivitySection from "./BdActivitySection";
-import BdTasksSection from "./BdTasksSection";
+import PipelineView from "@/components/PipelineView";
+import ActivityView from "@/components/ActivityView";
+import MarketIntelView from "@/components/MarketIntelView";
 
 const NAV: { id: string; label: string }[] = [
   { id: "bd-pipeline", label: "Pipeline" },
-  { id: "bd-market", label: "Market Intel" },
   { id: "bd-activity", label: "Activity" },
-  { id: "bd-tasks", label: "Tasks & Follow-ups" },
+  { id: "bd-market", label: "Market Intel" },
 ];
 
 export default function BdHub() {
@@ -111,11 +114,13 @@ export default function BdHub() {
         </nav>
       </div>
 
-      <div className="mx-auto max-w-[1400px] space-y-10 px-4 py-6 sm:px-6">
-        {active === "bd-pipeline" && <BdPipelineSection />}
-        {active === "bd-market" && <BdMarketSection />}
-        {active === "bd-activity" && <BdActivitySection />}
-        {active === "bd-tasks" && <BdTasksSection />}
+      {/* The full pages, embedded (their own heroes suppressed; each
+          page supplies its own content container). */}
+      {active === "bd-pipeline" && <PipelineView embedded />}
+      {active === "bd-activity" && <ActivityView embedded />}
+      {active === "bd-market" && <MarketIntelView embedded />}
+
+      <div className="mx-auto max-w-[1400px] px-4 pb-6 sm:px-6">
         <p className="text-sm text-slate-400 dark:text-white/40">
           The existing CRM, now under Business Development — every record
           here links to the central company record, so deals, people, and
