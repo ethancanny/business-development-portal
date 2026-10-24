@@ -228,6 +228,53 @@ export async function runBackfillOnce(
 }
 
 /**
+ * Single-deal core projection (Oct 24, 2026): the two deal statements
+ * from runBackfillOnce, scoped to one legacy deal id. The hourly top-up
+ * keeps core.deals converged in general, but a module that must act on
+ * a deal RIGHT NOW (the Due Diligence handoff creating a workspace the
+ * moment a deal enters a diligence stage) cannot wait for it — this
+ * upserts the deal's company + core.deals rows immediately. Idempotent;
+ * same shapes and conflict targets as the full backfill.
+ */
+export async function ensureCoreDealProjection(
+  db: Sql,
+  dealId: string
+): Promise<void> {
+  await db`
+    INSERT INTO core.companies (
+      id, legacy_deal_id, name, normalized_name, vertical, stage, deal_stage,
+      city, state, lat, lng, owner_context, source, notes,
+      created_at, updated_at, search_vector
+    )
+    SELECT
+      'co_' || d.id, d.id, d.company_name, core.normalize_name(d.company_name),
+      d.industry,
+      CASE
+        WHEN d.stage = 'Closed Won' THEN 'portfolio'
+        WHEN d.stage IN ('Diligence', 'Negotiation', 'Closing') THEN 'diligence'
+        ELSE 'pipeline'
+      END,
+      d.stage, d.city, 'AZ', d.lat, d.lng, d.contact_name, 'legacy-deal',
+      d.notes, d.created_at, d.updated_at,
+      to_tsvector('english',
+        coalesce(d.company_name, '') || ' ' || coalesce(d.industry, '') ||
+        ' ' || coalesce(d.city, ''))
+    FROM deals d
+    WHERE d.id = ${dealId} AND d.company_name <> ''
+    ON CONFLICT (legacy_deal_id) WHERE legacy_deal_id IS NOT NULL
+    DO UPDATE SET stage = EXCLUDED.stage, deal_stage = EXCLUDED.deal_stage,
+      updated_at = now()`;
+
+  await db`
+    INSERT INTO core.deals (id, company_id, stage, updated_at)
+    SELECT d.id, 'co_' || d.id, d.stage, d.updated_at
+    FROM deals d
+    WHERE d.id = ${dealId}
+    ON CONFLICT (id) DO UPDATE SET stage = EXCLUDED.stage,
+      company_id = EXCLUDED.company_id, updated_at = now()`;
+}
+
+/**
  * Backfill top-up (added Oct 21, 2026, after the Neon recovery): the
  * one-time backfill can run while other writers (e.g. the outage-backlog
  * recovery import) are still creating rows in the legacy source tables.

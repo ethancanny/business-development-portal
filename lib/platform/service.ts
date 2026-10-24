@@ -109,6 +109,20 @@ export async function ensurePlatform(): Promise<void> {
   } catch (err) {
     console.error("[platform] bd investment-types migration failed (will retry)", err);
   }
+  // Due Diligence workspace backfill (Oct 24, 2026): deals that
+  // reached a diligence stage without a workspace (seeded, imported,
+  // or moved before the BD → DD handoff was wired) get one —
+  // marker-guarded inside lib/diligence/backfill.ts. Runs after the
+  // backfill top-up above so core.deals is as fresh as this boot can
+  // make it. Never breaks reads.
+  try {
+    const { runDdWorkspaceBackfillIfNeeded } = await import(
+      "../diligence/backfill"
+    );
+    await runDdWorkspaceBackfillIfNeeded();
+  } catch (err) {
+    console.error("[platform] dd workspace backfill failed (will retry)", err);
+  }
   // Event-driven push (Oct 21, 2026): keep the daily digest job
   // scheduled and drain due push jobs opportunistically on platform
   // activity — this is one of the queue's drain triggers (no polling
