@@ -361,7 +361,9 @@ function ContractDetail({
         throw new Error(
           data.error === "signer_not_approved_for_room"
             ? "A signer is not an approved party for this data room (U.S.-persons-only / restricted). Add them to the Directory or the room's domain allowlist first."
-            : (data.error ?? `HTTP ${res.status}`)
+            : data.error === "signable_pdf_unavailable"
+              ? "This version has no signable PDF. Re-upload the current version — a PDF companion is created automatically — then send again."
+              : (data.error ?? `HTTP ${res.status}`)
         );
       }
       setSendLinks(Array.isArray(data.links) ? data.links : []);

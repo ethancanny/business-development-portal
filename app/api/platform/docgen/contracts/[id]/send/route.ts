@@ -32,7 +32,9 @@ export async function POST(
           ? 404
           : err.error === "signer_not_approved_for_room"
             ? 403
-            : err.error === "already_sent" || err.error === "contract_executed"
+            : err.error === "already_sent" ||
+                err.error === "contract_executed" ||
+                err.error === "signable_pdf_unavailable"
               ? 409
               : 400;
       return NextResponse.json({ error: err.error }, { status });

@@ -1199,6 +1199,11 @@ export async function sendContractForSignature(
   if (!docId) throw new DocGenError("document_not_found");
   const doc = await getDocument(docId);
   if (!doc) throw new DocGenError("document_not_found");
+  if (doc.mime !== "application/pdf") {
+    // Envelopes sign a PDF; versions created before the redline PDF
+    // companion fix may not have one. Fail clean, never a raw 500.
+    throw new DocGenError("signable_pdf_unavailable");
+  }
 
   const provider = getContractEsignProvider();
   const result = await provider.sendForSignature({
@@ -1280,13 +1285,73 @@ export async function addRedlineVersion(
   }
   const text = extractText(input.bytes, input.mime, input.filename).text;
   const version = contract.currentVersion + 1;
+
+  // PDF companion (fix, Oct 24, 2026): the signing pipeline signs a
+  // PDF, so every version needs one — the first live verification
+  // failed at send time because a non-PDF redline left the version
+  // without a signable PDF and the envelope builder threw on the raw
+  // upload. PDF redlines are banner-stamped and used as-is; any other
+  // format is rendered from its extracted text through the same
+  // pipeline generation uses. Best-effort: a companion failure must
+  // not lose the redline itself (send then reports a clean error).
+  let pdfDocumentId: string | null = null;
+  try {
+    const isPdf =
+      input.mime === "application/pdf" || /\.pdf$/i.test(input.filename);
+    let pdfBuffer: Buffer;
+    if (isPdf) {
+      pdfBuffer = await stampDraftBanner(input.bytes);
+    } else {
+      const tpl = contract.templateId
+        ? await getTemplateById(contract.templateId).catch(() => null)
+        : null;
+      const pdfTemplate =
+        tpl ?? ({ name: contract.templateName } as DocgenTemplateRow);
+      const subjectName =
+        contract.companyName || contract.investorName || contract.templateName;
+      const todayLong = new Date().toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+      pdfBuffer = await stampDraftBanner(
+        buildSimplePdf(bodyToPdfInput(pdfTemplate, text, subjectName, todayLong))
+      );
+    }
+    const pdfKey = `uploads/redline-${newId()}.pdf`;
+    await provider.put(pdfKey, pdfBuffer);
+    const pdfReg = await registerUploadedDocument({
+      storageKey: pdfKey,
+      filename: `${input.filename.replace(/\.[^.]+$/, "")}.pdf`,
+      mime: "application/pdf",
+      sizeBytes: pdfBuffer.length,
+      contentHash: sha256Hex(pdfBuffer),
+      actor,
+      dealId: contract.dealId,
+      companyId: contract.companyId,
+      roomId: contract.roomId,
+      tags: ["contract", "redline", contract.templateKey],
+      note: "PDF companion of the redline upload (for signing)",
+    });
+    pdfDocumentId = pdfReg.document.id;
+    if (contract.investorPersonId) {
+      await updateDocument(
+        pdfDocumentId,
+        { personId: contract.investorPersonId },
+        actor
+      );
+    }
+  } catch (err) {
+    console.error("[docgen] redline PDF companion failed", err);
+  }
+
   const db = sql();
   await db`
     INSERT INTO docgen.contract_versions
       (id, contract_id, version, kind, document_id, pdf_document_id,
         note, text, created_by)
     VALUES (${newId()}, ${id}, ${version}, 'redline', ${reg.document.id},
-      NULL, ${(input.note ?? "Counterparty redline").slice(0, 500)},
+      ${pdfDocumentId}, ${(input.note ?? "Counterparty redline").slice(0, 500)},
       ${text.slice(0, MAX_VERSION_TEXT)}, ${actor})`;
   await db`
     UPDATE docgen.contracts SET current_version = ${version},
