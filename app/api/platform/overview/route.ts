@@ -41,8 +41,24 @@ export async function GET(req: NextRequest) {
     );
     activityPulse = null;
   }
+  // Flywheel (Investment Types Step 1, Oct 23, 2026): platform-company
+  // cash flow (Portfolio Monitoring's stored rollup) vs capital
+  // committed to closed early-stage investments — same additive,
+  // failure-isolated pattern. Null on error; the panel shows its
+  // honest empty state.
+  let flywheel: unknown = null;
+  try {
+    const { getFlywheel } = await import("@/lib/bd/service");
+    flywheel = await getFlywheel();
+  } catch (err) {
+    console.error(
+      "[overview] flywheel read failed",
+      err instanceof Error ? err.message : String(err)
+    );
+    flywheel = null;
+  }
   return NextResponse.json(
-    { ...data, earlyWarning, activityPulse },
+    { ...data, earlyWarning, activityPulse, flywheel },
     {
       headers: { "Cache-Control": "private, max-age=300" },
     }

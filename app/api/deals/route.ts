@@ -3,7 +3,8 @@ import { getDeals, saveDeals, newId, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { getAccessContext } from "@/lib/platform/permissions";
 import { geocodeCity } from "@/lib/geo";
-import { DEAL_STAGES, type Deal, type DealDrivers, type DealLink, type DealMetrics, type DealStructureInput } from "@/lib/types";
+import { ALL_DEAL_STAGES, type Deal, type DealDrivers, type DealLink, type DealMetrics, type DealStructureInput, type InvestmentTypeKey } from "@/lib/types";
+import { parseInvestmentType, parseSourcedFromType } from "@/lib/bd/service";
 
 const DRIVER_KEYS = ["concentration", "recurring", "ownerDependence", "growth", "margins", "management", "financials"] as const;
 
@@ -126,11 +127,54 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString();
   const city = String(body.city ?? "").trim();
   const geo = city ? await geocodeCity(city) : null;
+  // Investment Types (Step 1): the type comes from the request
+  // (default Platform LBO); the stage must belong to the type's
+  // configured list (bd.type_config via the bd service).
+  const investmentType: InvestmentTypeKey =
+    parseInvestmentType(body.investmentType) ?? "platform_lbo";
+  const parentDealId =
+    typeof body.parentDealId === "string" && body.parentDealId
+      ? body.parentDealId
+      : null;
+  if (investmentType === "add_on" && !parentDealId) {
+    return NextResponse.json(
+      {
+        error: "parent_required",
+        message: "An add-on must link to its parent platform deal.",
+      },
+      { status: 400 }
+    );
+  }
+  if (
+    parentDealId &&
+    !deals.some((d) => d.id === parentDealId)
+  ) {
+    return NextResponse.json(
+      { error: "parent_not_found", message: "Parent platform deal not found." },
+      { status: 400 }
+    );
+  }
+  const { stagesForType } = await import("@/lib/bd/service");
+  const typeStages = await stagesForType(investmentType);
+  const stage =
+    typeof body.stage === "string" && typeStages.includes(body.stage)
+      ? body.stage
+      : typeof body.stage === "string" &&
+          (ALL_DEAL_STAGES as readonly string[]).includes(body.stage)
+        ? body.stage
+        : (typeStages[0] ?? "Sourced");
   const deal: Deal = {
     id: newId(),
     companyName: String(body.companyName).trim(),
     industry: String(body.industry ?? "").trim(),
-    stage: DEAL_STAGES.includes(body.stage) ? body.stage : "Sourcing",
+    stage,
+    investmentType,
+    parentDealId,
+    sourcedFromType: parseSourcedFromType(body.sourcedFromType),
+    sourcedFromId:
+      typeof body.sourcedFromId === "string" && body.sourcedFromId
+        ? body.sourcedFromId
+        : null,
     dealValue: Number(body.dealValue) || 0,
     contactName: String(body.contactName ?? "").trim(),
     contactEmail: String(body.contactEmail ?? "").trim(),

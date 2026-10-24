@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDeals, saveDeals, getExecutives, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { geocodeCity } from "@/lib/geo";
-import { DEAL_STAGES, type Deal, type DealDrivers, type DealLink, type DealMetrics, type DealStructureInput } from "@/lib/types";
+import { ALL_DEAL_STAGES, stageForTypeChange, type Deal, type DealDrivers, type DealLink, type DealMetrics, type DealStructureInput, type InvestmentTypeKey } from "@/lib/types";
+import { parseInvestmentType, parseSourcedFromType, stagesForType } from "@/lib/bd/service";
 
 const DRIVER_KEYS = ["concentration", "recurring", "ownerDependence", "growth", "margins", "management", "financials"] as const;
 
@@ -122,7 +123,67 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   const prev = deals[idx];
-  const newStage = DEAL_STAGES.includes(body.stage) ? body.stage : prev.stage;
+  // Investment Types (Step 1): resolve the (possibly changed) type
+  // first, then the stage. A stage provided with the request wins when
+  // it is a known stage; on a TYPE CHANGE, a stage that does not exist
+  // in the new type's list is carried over via the crosswalk (shared
+  // fields and all metrics are preserved — only the stage label moves).
+  const prevType: InvestmentTypeKey = prev.investmentType ?? "platform_lbo";
+  const newType: InvestmentTypeKey =
+    body.investmentType !== undefined
+      ? (parseInvestmentType(body.investmentType) ?? prevType)
+      : prevType;
+  const typeChanged = newType !== prevType;
+  let newStage =
+    body.stage !== undefined &&
+    (ALL_DEAL_STAGES as readonly string[]).includes(body.stage)
+      ? (body.stage as string)
+      : prev.stage;
+  if (typeChanged) {
+    const targetStages = await stagesForType(newType);
+    if (!targetStages.includes(newStage)) {
+      newStage = stageForTypeChange(newStage, targetStages);
+    }
+  }
+  const newParentDealId =
+    body.parentDealId !== undefined
+      ? typeof body.parentDealId === "string" && body.parentDealId
+        ? body.parentDealId
+        : null
+      : (prev.parentDealId ?? null);
+  if (newType === "add_on") {
+    if (!newParentDealId) {
+      return NextResponse.json(
+        {
+          error: "parent_required",
+          message: "An add-on must link to its parent platform deal.",
+        },
+        { status: 400 }
+      );
+    }
+    if (
+      newParentDealId === prev.id ||
+      !deals.some((d) => d.id === newParentDealId)
+    ) {
+      return NextResponse.json(
+        {
+          error: "parent_not_found",
+          message: "Parent platform deal not found.",
+        },
+        { status: 400 }
+      );
+    }
+  }
+  const newSourcedFromType =
+    body.sourcedFromType !== undefined
+      ? parseSourcedFromType(body.sourcedFromType)
+      : (prev.sourcedFromType ?? null);
+  const newSourcedFromId =
+    body.sourcedFromId !== undefined
+      ? typeof body.sourcedFromId === "string" && body.sourcedFromId
+        ? body.sourcedFromId
+        : null
+      : (prev.sourcedFromId ?? null);
   const newOwner =
     body.owner !== undefined ? String(body.owner).trim() : prev.owner;
   const newOperatorIds =
@@ -147,6 +208,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     industry:
       body.industry !== undefined ? String(body.industry).trim() : prev.industry,
     stage: newStage,
+    investmentType: newType,
+    parentDealId: newParentDealId,
+    sourcedFromType: newSourcedFromType,
+    sourcedFromId: newSourcedFromId,
     dealValue:
       body.dealValue !== undefined ? Number(body.dealValue) || 0 : prev.dealValue,
     contactName:
@@ -208,6 +273,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     body.stage !== undefined &&
     newStage !== prev.stage &&
     newStage !== "Passed" &&
+    newStage !== "Sourced" &&
     newStage !== "Sourcing"
   ) {
     const { evaluateStageGates } = await import("@/lib/workflow/gates");
@@ -260,7 +326,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   const user = getSessionUser();
   const actor = user?.name ?? "Someone";
-  if (newStage === "Closed Won" && prev.stage !== "Closed Won") {
+  // "Closed" is the post-Step-1 name; "Closed Won" is honored for any
+  // pre-migration record that reaches this path unconverted.
+  const isClosedStage = (s: string) => s === "Closed" || s === "Closed Won";
+  if (isClosedStage(newStage) && !isClosedStage(prev.stage)) {
     // Phase 8/10: publish deal_closed (Portfolio Monitoring's immediate
     // onEvent path stays; the handoff inside the cascade is idempotent)
     // and enqueue the Phase 10 deal-close cascade — monitoring record,

@@ -1,7 +1,7 @@
 import { sql, newId, str, num, isoOrNull } from "../platform/db";
 import { getDeals } from "../db";
 import type { Deal } from "../types";
-import { DEAL_STAGES } from "../types";
+import { ALL_DEAL_STAGES } from "../types";
 import { ensureWorkflow, CONDITION_CATALOG } from "./schema";
 
 export { ensureWorkflow, CONDITION_CATALOG };
@@ -213,8 +213,10 @@ export async function listGateRules(): Promise<GateRuleRow[]> {
   const db = sql();
   const rows = await db`
     SELECT * FROM workflow.gate_rules ORDER BY target_stage ASC, sort ASC, condition_key ASC`;
+  // Display order across every type's stage list (Step 1: stage names
+  // are per-type now; ALL_DEAL_STAGES is the union incl. legacy names).
   const order = new Map<string, number>(
-    DEAL_STAGES.map((s, i) => [s, i] as [string, number])
+    ALL_DEAL_STAGES.map((s, i) => [s, i] as [string, number])
   );
   return rows
     .map((r) => rowToRule(r as Record<string, unknown>))

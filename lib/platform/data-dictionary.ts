@@ -13,6 +13,7 @@ import { sql, str } from "./db";
 export const PLATFORM_SCHEMAS = [
   "public",
   "core",
+  "bd",
   "directory",
   "dataroom",
   "financials",
@@ -28,6 +29,16 @@ export const PLATFORM_SCHEMAS = [
 /** Curated descriptions, keyed "schema.table". Anything not listed
  * here renders with an empty description — never an invented one. */
 export const TABLE_DESCRIPTIONS: Record<string, string> = {
+  "bd.type_config":
+    "Investment Types (Step 1): one row per investment type (Platform LBO, Add-on, Early Stage, Minority Growth) — its label, whether it is enabled, and its stage list. Edited in Settings → Investment types; Minority Growth ships disabled here, not in code.",
+  "bd.metric_definitions":
+    "The configurable catalog of type- and sector-specific deal fields: which type or sector pack a field belongs to, its data kind (money, multiple, %, number, text, list), order, and options. New fields are added here, never as columns on the deals table.",
+  "bd.deal_metrics":
+    "Structured per-deal metric values (deal, metric key, value, period, source) for every field in bd.metric_definitions — Platform LBO leverage/FCF yield/ROIC/DSCR, Add-on multiples and synergies, Early Stage ARR/burn/runway, and the Aerospace & Defense pack.",
+  "bd.sector_packs":
+    "Industry field packs (Aerospace & Defense seeded): a pack applies automatically to deals whose industry matches, adding its metric definitions on top of the deal's type fields.",
+  "bd.migration_reports":
+    "The persistent Investment Types Step 1 migration report: deals scanned, per-type counts, per-stage from→to counts under Ethan's approved mapping, and anything unmapped. Also served at /api/platform/investment-types/migration-report.",
   "core.companies":
     "The central company record. Every module links to a company by ID; a fact is stored once, here, and referenced elsewhere.",
   "core.people":
