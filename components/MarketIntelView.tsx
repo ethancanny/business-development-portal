@@ -1,11 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import dynamic from "next/dynamic";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import PageHero from "@/components/PageHero";
 import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import SizeProfileRow, { hasSizeProfile, SUBSECTOR_IDS_CSV } from "@/components/SizeProfileRows";
 import CompanyTargets from "@/components/CompanyTargets";
+import IndustryExplorer from "@/components/IndustryExplorer";
 import FitTargets from "@/components/FitTargets";
 import NewsIntel from "@/components/NewsIntel";
 import SectorChip from "@/components/SectorChip";
@@ -23,34 +38,6 @@ import type {
   MiSyncLog,
   MiWarnNotice,
 } from "@/lib/types";
-import { Skeleton } from "@/components/ui";
-
-/* Chart-bearing sections load on demand (Part 11 perf): the
- * Industries & Multiples explorer and the four focus-sector charts
- * are the page's recharts consumers — dynamic() keeps the recharts
- * chunk out of /market-intel's first-load graph (the default view
- * is Fit Targets). IndustryExplorer renders only on the multiples
- * tab; the sector charts render only inside its extras. */
-const IndustryExplorer = dynamic(() => import("@/components/IndustryExplorer"), {
-  ssr: false,
-  loading: () => <Skeleton className="h-96 w-full" />,
-});
-const DefenseContractsChart = dynamic(
-  () => import("@/components/MarketSectorCharts").then((m) => m.DefenseContractsChart),
-  { ssr: false, loading: () => <Skeleton className="h-64 w-full" /> }
-);
-const HealthcareEmploymentChart = dynamic(
-  () => import("@/components/MarketSectorCharts").then((m) => m.HealthcareEmploymentChart),
-  { ssr: false, loading: () => <Skeleton className="h-56 w-full" /> }
-);
-const ManufacturingEmploymentChart = dynamic(
-  () => import("@/components/MarketSectorCharts").then((m) => m.ManufacturingEmploymentChart),
-  { ssr: false, loading: () => <Skeleton className="h-56 w-full" /> }
-);
-const ConstructionEmploymentChart = dynamic(
-  () => import("@/components/MarketSectorCharts").then((m) => m.ConstructionEmploymentChart),
-  { ssr: false, loading: () => <Skeleton className="h-56 w-full" /> }
-);
 
 /* ---------------- helpers ---------------- */
 
@@ -355,8 +342,12 @@ export default function MarketIntelView({
   // Pull-to-refresh (mobile PWA).
   const { pull, refreshing } = usePullToRefresh(loadAll);
 
-  /* Chart colors/grid/tick moved with the charts into
-   * components/MarketSectorCharts.tsx (Part 11 perf split). */
+  const grid = dark ? "rgba(255,255,255,0.08)" : "#e2e8f0";
+  const tick = dark ? "rgba(255,255,255,0.55)" : "#64748b";
+  const gold = "#b8975a";
+  const blue = dark ? "#7aa2f7" : "#54708f";
+  const green = "#5e9c7f";
+  const orange = "#c47b4a";
 
   const fiveYearCutoff = useMemo(() => {
     const d = new Date();
@@ -1146,7 +1137,19 @@ export default function MarketIntelView({
 <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Defense Contracts — Arizona</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Monthly DoD contract obligations performed in AZ, $M · USASpending.gov. Cross-check: DoD&apos;s Defense Spending by State report counts $14.5B (FY2023) / $14.7B (FY2024) in AZ contract spending — USASpending obligations run ~5–15% higher on a different methodology, and single awards (Raytheon missile lots, Boeing Apache, TriWest TRICARE) move individual months by billions, so judge the trend on 12-month windows, not single months.</p>
-            <DefenseContractsChart data={defenseRows} dark={dark} />
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={defenseRows} margin={{ top: 5, right: 10, left: -5, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={50} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="AZ_DOD_CONTRACTS" name="All DoD ($M)" fill={blue} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="AZ_AEROSPACE_CONTRACTS" name="Aerospace NAICS 3364 ($M)" fill={gold} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
             {(() => {
               const fy25 = obs
                 .filter((o) => o.seriesId === "AZ_DOD_CONTRACTS" && o.obsDate >= "2024-10-01" && o.obsDate <= "2025-09-01")
@@ -1193,7 +1196,17 @@ export default function MarketIntelView({
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Healthcare Employment — AZ</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
-            <HealthcareEmploymentChart data={healthRows} dark={dark} />
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={healthRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="SMS04000006562000001" name="Healthcare" stroke={green} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
             </div>
           
@@ -1209,7 +1222,17 @@ export default function MarketIntelView({
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Manufacturing Employment — AZ</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
-            <ManufacturingEmploymentChart data={mfgRows} dark={dark} />
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={mfgRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="AZMFG" name="Manufacturing" stroke={gold} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
             </div>
           
@@ -1225,7 +1248,17 @@ export default function MarketIntelView({
           <div className={chartCard}>
             <h3 className="mb-1 text-sm font-semibold text-[#0d1f3c] dark:text-white">Construction Employment — AZ</h3>
             <p className="mb-3 text-xs text-slate-500 dark:text-white/40">Indexed to 100, monthly, FRED · 5-yr</p>
-            <ConstructionEmploymentChart data={consRows} dark={dark} />
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={consRows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickFormatter={shortDate} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11, fill: tick }} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: dark ? "#0d1f3c" : "#fff", border: `1px solid ${grid}`, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="AZCONS" name="Construction" stroke={orange} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
             </div>
           
