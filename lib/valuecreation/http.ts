@@ -120,5 +120,11 @@ export function initiativeInputFrom(
         ? (body.sourceRef as Record<string, unknown>)
         : undefined,
     sort: typeof body.sort === "number" ? body.sort : undefined,
+    kpiName: sStr(body.kpiName),
+    kpiBaseline: sNum(body.kpiBaseline),
+    kpiTarget: sNum(body.kpiTarget),
+    kpiUnit: sStr(body.kpiUnit),
+    actualSpend: sNum(body.actualSpend),
+    risks: sStr(body.risks),
   };
 }

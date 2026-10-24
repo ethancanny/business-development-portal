@@ -35,6 +35,19 @@ export const PLAYBOOK_CATEGORIES = [
   { key: "working_capital", label: "Working capital" },
   { key: "org_design", label: "Org design" },
   { key: "systems", label: "Systems" },
+  { key: "operations", label: "Operations" },
+  { key: "quality", label: "Quality & certifications" },
+  { key: "workforce", label: "Workforce" },
+] as const;
+
+/** Industry tag gating the A&D playbook set (company vertical match). */
+export const AD_INDUSTRY = "Aerospace & Defense";
+
+/** Default 100-day phase structure (plans.phases; editable per plan). */
+export const DEFAULT_PLAN_PHASES = [
+  { key: "stabilize", name: "Stabilize", fromDay: 0, toDay: 30 },
+  { key: "build", name: "Build", fromDay: 31, toDay: 60 },
+  { key: "execute", name: "Execute", fromDay: 61, toDay: 100 },
 ] as const;
 
 export const EXIT_AREAS = [
@@ -340,6 +353,330 @@ export const SYSTEM_PLAYBOOKS: Array<{
   },
 ];
 
+/**
+ * Aerospace & Defense system playbooks (VCP redesign §6) — seeded
+ * with industry = AD_INDUSTRY so the library surfaces them only for
+ * companies whose vertical matches. Templates only: seeding never
+ * creates initiatives.
+ */
+export const AD_SYSTEM_PLAYBOOKS: typeof SYSTEM_PLAYBOOKS = [
+  {
+    slug: "ad-quoting-pricing",
+    name: "Quoting & Pricing (A&D)",
+    category: "pricing",
+    description:
+      "Discipline for A&D quoting: accurate cost models, faster quote turnaround, and escalation protection on long-cycle programs.",
+    steps: [
+      {
+        title: "Audit quote win rate and turnaround",
+        description:
+          "Measure quote cycle time and win/loss by customer and part family; find where slow or mispriced quotes lose programs.",
+        typicalImpact: 30000,
+        effort: 2,
+        durationDays: 21,
+        confidence: 0.85,
+      },
+      {
+        title: "Rebuild machine and labor rate model",
+        description:
+          "Recompute burdened machine-hour and labor rates from actual utilization and overhead; reprice the rate card.",
+        typicalImpact: 95000,
+        effort: 3,
+        durationDays: 45,
+        confidence: 0.75,
+      },
+      {
+        title: "Add material escalation clauses",
+        description:
+          "Put index-linked escalation language into new quotes and LTAs so alloy and casting volatility stops coming out of margin.",
+        typicalImpact: 55000,
+        effort: 2,
+        durationDays: 30,
+        confidence: 0.8,
+      },
+      {
+        title: "Install quote review threshold",
+        description:
+          "Require margin review and sign-off for quotes above a set value or below a floor margin; track quote margin at award.",
+        typicalImpact: 40000,
+        effort: 2,
+        durationDays: 14,
+        confidence: 0.85,
+      },
+    ],
+  },
+  {
+    slug: "ad-machine-utilization-oee",
+    name: "Machine Utilization & OEE (A&D)",
+    category: "operations",
+    description:
+      "Raise effective capacity on bottleneck machines: OEE baseline, setup reduction, and maintenance discipline.",
+    steps: [
+      {
+        title: "Baseline OEE on bottleneck cells",
+        description:
+          "Instrument the constraint machines for availability, performance, and quality losses over four weeks.",
+        typicalImpact: 25000,
+        effort: 3,
+        durationDays: 30,
+        confidence: 0.85,
+      },
+      {
+        title: "Setup and changeover reduction (SMED)",
+        description:
+          "Externalize setup tasks and standardize tooling/fixturing on the highest-changeover part families.",
+        typicalImpact: 80000,
+        effort: 3,
+        durationDays: 45,
+        confidence: 0.75,
+      },
+      {
+        title: "Preventive maintenance cadence",
+        description:
+          "Move from breakdown response to scheduled PM with spares kits for critical components.",
+        typicalImpact: 45000,
+        effort: 3,
+        durationDays: 60,
+        confidence: 0.7,
+      },
+      {
+        title: "Capacity model and shift pattern review",
+        description:
+          "Model true capacity by cell against the backlog; adjust shift patterns before adding machines or headcount.",
+        typicalImpact: 60000,
+        effort: 2,
+        durationDays: 30,
+        confidence: 0.8,
+      },
+    ],
+  },
+  {
+    slug: "ad-scrap-rework-reduction",
+    name: "Scrap & Rework Reduction (A&D)",
+    category: "quality",
+    description:
+      "Attack the cost of poor quality: scrap Pareto, root cause on top defects, and first-article discipline.",
+    steps: [
+      {
+        title: "Scrap Pareto by part and defect",
+        description:
+          "Cost scrap and rework labor by part number and defect code for 90 days; rank the true cost of poor quality.",
+        typicalImpact: 20000,
+        effort: 2,
+        durationDays: 21,
+        confidence: 0.9,
+      },
+      {
+        title: "Root-cause and SPC on top defects",
+        description:
+          "Run structured root-cause on the top three defect modes and put SPC on the driving process characteristics.",
+        typicalImpact: 85000,
+        effort: 3,
+        durationDays: 60,
+        confidence: 0.75,
+      },
+      {
+        title: "First-article and in-process inspection discipline",
+        description:
+          "Tighten FAI and in-process checks so defects are caught at the operation, not at final inspection.",
+        typicalImpact: 50000,
+        effort: 3,
+        durationDays: 45,
+        confidence: 0.8,
+      },
+      {
+        title: "Rework containment and feedback loop",
+        description:
+          "Track rework hours by cause, review weekly with production and quality, and close the loop into work instructions.",
+        typicalImpact: 35000,
+        effort: 2,
+        durationDays: 30,
+        confidence: 0.85,
+      },
+    ],
+  },
+  {
+    slug: "ad-quality-systems-certifications",
+    name: "Quality Systems & Certifications (A&D)",
+    category: "quality",
+    description:
+      "Close AS9100 / customer quality gaps so certifications stop limiting which programs the company can win.",
+    steps: [
+      {
+        title: "AS9100 gap assessment",
+        description:
+          "Clause-by-clause gap assessment against AS9100 and top customer quality requirements (flow-downs, PPAP/FAI).",
+        typicalImpact: 15000,
+        effort: 3,
+        durationDays: 30,
+        confidence: 0.9,
+      },
+      {
+        title: "Documentation and internal audit cadence",
+        description:
+          "Bring procedures and records current; stand up a rolling internal audit schedule with findings tracked to closure.",
+        typicalImpact: 30000,
+        effort: 3,
+        durationDays: 60,
+        confidence: 0.8,
+      },
+      {
+        title: "Supplier quality flow-downs",
+        description:
+          "Push quality clauses, source inspection, and scorecards to critical suppliers; qualify alternates for weak links.",
+        typicalImpact: 40000,
+        effort: 3,
+        durationDays: 45,
+        confidence: 0.75,
+      },
+      {
+        title: "Certification audit and corrective actions",
+        description:
+          "Run the registrar/customer audit, close findings with verified corrective actions, and publish the certificate to sales.",
+        typicalImpact: 70000,
+        effort: 4,
+        durationDays: 60,
+        confidence: 0.7,
+      },
+    ],
+  },
+  {
+    slug: "ad-supplier-consolidation",
+    name: "Supplier Consolidation (A&D)",
+    category: "procurement",
+    description:
+      "Consolidate the A&D supply base without creating single-point risk on long-lead castings, forgings, and special processes.",
+    steps: [
+      {
+        title: "Spend and criticality map",
+        description:
+          "Map spend by supplier against part criticality and lead time; flag sole-source exposure on long-lead items.",
+        typicalImpact: 25000,
+        effort: 2,
+        durationDays: 21,
+        confidence: 0.9,
+      },
+      {
+        title: "Dual-source long-lead castings and forgings",
+        description:
+          "Qualify second sources for the highest-risk castings/forgings before consolidating anywhere else.",
+        typicalImpact: 45000,
+        effort: 4,
+        durationDays: 90,
+        confidence: 0.65,
+      },
+      {
+        title: "Renegotiate LTAs with top suppliers",
+        description:
+          "Use consolidated volume to renegotiate long-term agreements with pricing, capacity, and OTIF commitments.",
+        typicalImpact: 90000,
+        effort: 3,
+        durationDays: 60,
+        confidence: 0.75,
+      },
+      {
+        title: "Supplier scorecards and OTIF reviews",
+        description:
+          "Quarterly scorecards on quality and on-time delivery with corrective-action triggers for bottom performers.",
+        typicalImpact: 30000,
+        effort: 2,
+        durationDays: 30,
+        confidence: 0.85,
+      },
+    ],
+  },
+  {
+    slug: "ad-workforce-apprenticeship",
+    name: "Skilled Workforce & Apprenticeship (A&D)",
+    category: "workforce",
+    description:
+      "Build the machinist and inspector pipeline: skills mapping, apprenticeship partnerships, and cross-training for single-point roles.",
+    steps: [
+      {
+        title: "Skills matrix and critical-role map",
+        description:
+          "Map skills by employee and machine; identify single-point-of-failure roles and retirement exposure.",
+        typicalImpact: 20000,
+        effort: 2,
+        durationDays: 21,
+        confidence: 0.9,
+      },
+      {
+        title: "Launch apprenticeship pipeline",
+        description:
+          "Partner with local technical programs on a registered apprenticeship for machinists and quality inspectors.",
+        typicalImpact: 55000,
+        effort: 3,
+        durationDays: 90,
+        confidence: 0.7,
+      },
+      {
+        title: "Cross-train single-point roles",
+        description:
+          "Structured cross-training and documented work instructions so every critical operation has a qualified backup.",
+        typicalImpact: 40000,
+        effort: 3,
+        durationDays: 60,
+        confidence: 0.8,
+      },
+      {
+        title: "Retention and shift premium review",
+        description:
+          "Benchmark machinist pay against the local market; fix the gaps losing trained people to competitors.",
+        typicalImpact: 35000,
+        effort: 2,
+        durationDays: 30,
+        confidence: 0.8,
+      },
+    ],
+  },
+  {
+    slug: "ad-working-capital-progress-billing",
+    name: "Working Capital & Progress Billing (A&D)",
+    category: "working_capital",
+    description:
+      "Fix A&D cash conversion on long-cycle programs: progress billing alignment, WIP reduction, and long-lead material funding.",
+    steps: [
+      {
+        title: "Align billing milestones to cost curve",
+        description:
+          "Remap progress/milestone billings so cash comes in ahead of the cost curve on long-cycle jobs.",
+        typicalImpact: 60000,
+        effort: 2,
+        durationDays: 30,
+        confidence: 0.8,
+      },
+      {
+        title: "Long-lead material funding terms",
+        description:
+          "Negotiate customer funding or deposits for long-lead castings and material instead of carrying them on the revolver.",
+        typicalImpact: 50000,
+        effort: 3,
+        durationDays: 45,
+        confidence: 0.7,
+      },
+      {
+        title: "WIP and inventory reduction on long-cycle jobs",
+        description:
+          "Kit and release discipline to cut work-in-process dwell; review slow-moving program inventory monthly.",
+        typicalImpact: 45000,
+        effort: 3,
+        durationDays: 60,
+        confidence: 0.75,
+      },
+      {
+        title: "Program AR discipline",
+        description:
+          "Weekly review of program receivables, acceptance paperwork, and DD250/WAWF submission errors that delay payment.",
+        typicalImpact: 30000,
+        effort: 2,
+        durationDays: 21,
+        confidence: 0.85,
+      },
+    ],
+  },
+];
+
 let schemaReady: Promise<void> | null = null;
 
 export function ensureValueCreation(): Promise<void> {
@@ -561,6 +898,97 @@ export function ensureValueCreation(): Promise<void> {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`;
 
+      /* ---- VCP redesign (Oct 2026): plan baseline/actuals, 100-day
+         phases, initiative depth (KPI, milestones, comments, links),
+         and locked baseline snapshots. All idempotent. ---- */
+      await db`
+        ALTER TABLE valuecreation.plans
+          ADD COLUMN IF NOT EXISTS baseline_ebitda NUMERIC,
+          ADD COLUMN IF NOT EXISTS target_ebitda NUMERIC,
+          ADD COLUMN IF NOT EXISTS phases JSONB NOT NULL
+            DEFAULT '[{"key":"stabilize","name":"Stabilize","fromDay":0,"toDay":30},{"key":"build","name":"Build","fromDay":31,"toDay":60},{"key":"execute","name":"Execute","fromDay":61,"toDay":100}]'::jsonb`;
+      await db`
+        ALTER TABLE valuecreation.initiatives
+          ADD COLUMN IF NOT EXISTS kpi_name TEXT NOT NULL DEFAULT '',
+          ADD COLUMN IF NOT EXISTS kpi_baseline NUMERIC,
+          ADD COLUMN IF NOT EXISTS kpi_target NUMERIC,
+          ADD COLUMN IF NOT EXISTS kpi_unit TEXT NOT NULL DEFAULT '',
+          ADD COLUMN IF NOT EXISTS actual_spend NUMERIC,
+          ADD COLUMN IF NOT EXISTS risks TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE valuecreation.playbooks
+          ADD COLUMN IF NOT EXISTS industry TEXT NOT NULL DEFAULT ''`;
+
+      await db`
+        CREATE TABLE IF NOT EXISTS valuecreation.initiative_milestones (
+          id TEXT PRIMARY KEY,
+          initiative_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          due_date DATE,
+          done BOOLEAN NOT NULL DEFAULT false,
+          sort INT NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          deleted_at TIMESTAMPTZ
+        )`;
+      await db`
+        CREATE INDEX IF NOT EXISTS vc_milestones_initiative_idx
+        ON valuecreation.initiative_milestones (initiative_id)
+        WHERE deleted_at IS NULL`;
+
+      await db`
+        CREATE TABLE IF NOT EXISTS valuecreation.initiative_comments (
+          id TEXT PRIMARY KEY,
+          initiative_id TEXT NOT NULL,
+          author TEXT NOT NULL DEFAULT '',
+          body TEXT NOT NULL DEFAULT '',
+          mentions JSONB NOT NULL DEFAULT '[]'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          deleted_at TIMESTAMPTZ
+        )`;
+      await db`
+        CREATE INDEX IF NOT EXISTS vc_comments_initiative_idx
+        ON valuecreation.initiative_comments (initiative_id)
+        WHERE deleted_at IS NULL`;
+
+      await db`
+        CREATE TABLE IF NOT EXISTS valuecreation.initiative_links (
+          id TEXT PRIMARY KEY,
+          initiative_id TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'url',
+          ref_id TEXT,
+          label TEXT NOT NULL DEFAULT '',
+          url TEXT NOT NULL DEFAULT '',
+          created_by TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          deleted_at TIMESTAMPTZ
+        )`;
+      await db`
+        CREATE INDEX IF NOT EXISTS vc_links_initiative_idx
+        ON valuecreation.initiative_links (initiative_id)
+        WHERE deleted_at IS NULL`;
+
+      // Locked baseline snapshots (§8): append-only. Locking inserts a
+      // new version and supersedes the prior one; rows never mutate.
+      await db`
+        CREATE TABLE IF NOT EXISTS valuecreation.plan_baselines (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          version INT NOT NULL,
+          locked_by TEXT NOT NULL DEFAULT '',
+          locked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          note TEXT NOT NULL DEFAULT '',
+          baseline_ebitda NUMERIC,
+          target_ebitda NUMERIC,
+          totals JSONB NOT NULL DEFAULT '{}'::jsonb,
+          initiatives JSONB NOT NULL DEFAULT '[]'::jsonb,
+          superseded_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
+      await db`
+        CREATE INDEX IF NOT EXISTS vc_baselines_plan_idx
+        ON valuecreation.plan_baselines (plan_id, version DESC)`;
+
       // WS-B tables (scenarios / driver trees) — created here because
       // ensureValueCreation() is the module's single schema entry
       // point; WS-B's scenarios.ts / trees.ts document these shapes
@@ -619,14 +1047,25 @@ export function ensureValueCreation(): Promise<void> {
         CREATE INDEX IF NOT EXISTS vc_driver_nodes_tree_idx
         ON valuecreation.driver_nodes (tree_id) WHERE deleted_at IS NULL`;
 
-      // Seed the six system playbooks idempotently.
+      // Seed the system playbooks idempotently (general set + the
+      // industry-tagged A&D set).
       for (const pb of SYSTEM_PLAYBOOKS) {
         const id = `pbk_${pb.slug}`;
         await db`
           INSERT INTO valuecreation.playbooks
-            (id, slug, name, category, description, steps, is_system, created_by)
+            (id, slug, name, category, description, steps, is_system, created_by, industry)
           VALUES (${id}, ${pb.slug}, ${pb.name}, ${pb.category},
-            ${pb.description}, ${JSON.stringify(pb.steps)}::jsonb, true, 'system')
+            ${pb.description}, ${JSON.stringify(pb.steps)}::jsonb, true, 'system', '')
+          ON CONFLICT (slug) DO NOTHING`;
+      }
+      for (const pb of AD_SYSTEM_PLAYBOOKS) {
+        const id = `pbk_${pb.slug}`;
+        await db`
+          INSERT INTO valuecreation.playbooks
+            (id, slug, name, category, description, steps, is_system, created_by, industry)
+          VALUES (${id}, ${pb.slug}, ${pb.name}, ${pb.category},
+            ${pb.description}, ${JSON.stringify(pb.steps)}::jsonb, true, 'system',
+            ${AD_INDUSTRY})
           ON CONFLICT (slug) DO NOTHING`;
       }
     })().catch((err) => {

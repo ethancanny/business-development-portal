@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { authed, ok, readBody, serviceError } from "@/lib/valuecreation/http";
 import {
   deletePlan,
+  getCompanyVertical,
   getPlan,
   getPlanSummary,
   listInitiatives,
   updatePlan,
+  type PlanPhase,
 } from "@/lib/valuecreation/service";
 
-/** GET bundle {plan, summary, initiatives}. */
+/** GET bundle {plan, summary, initiatives, companyVertical}. */
 export async function GET(
   _req: NextRequest,
   { params }: { params: { planId: string } }
@@ -18,11 +20,12 @@ export async function GET(
   try {
     const plan = await getPlan(params.planId);
     if (!plan) return ok({ error: "plan_not_found" }, 404);
-    const [summary, initiatives] = await Promise.all([
+    const [summary, initiatives, companyVertical] = await Promise.all([
       getPlanSummary(params.planId),
       listInitiatives(params.planId),
+      getCompanyVertical(plan.companyId),
     ]);
-    return ok({ plan, summary, initiatives });
+    return ok({ plan, summary, initiatives, companyVertical });
   } catch (err) {
     return serviceError(err, "plan-bundle");
   }
@@ -48,6 +51,17 @@ export async function PATCH(
         thesis: typeof body.thesis === "string" ? body.thesis : undefined,
         incentiveNotes:
           typeof body.incentiveNotes === "string" ? body.incentiveNotes : undefined,
+        baselineEbitda:
+          typeof body.baselineEbitda === "number" || body.baselineEbitda === null
+            ? (body.baselineEbitda as number | null)
+            : undefined,
+        targetEbitda:
+          typeof body.targetEbitda === "number" || body.targetEbitda === null
+            ? (body.targetEbitda as number | null)
+            : undefined,
+        phases: Array.isArray(body.phases)
+          ? (body.phases as PlanPhase[])
+          : undefined,
       },
       gate.user.name
     );
