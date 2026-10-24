@@ -106,7 +106,7 @@ export default function CommunicationsHome() {
     <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
       <header>
         <h1 className="font-display text-3xl font-semibold text-navy-900 dark:text-white">
-          Communications
+          Reporting
         </h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-white/50">
           Reports assembled from live portal data, reviewed and approved
@@ -121,7 +121,7 @@ export default function CommunicationsHome() {
         {statusFailed && (
           <div className="card-surface p-4">
             <p className="text-sm text-red-700 dark:text-red-300">
-              Could not load the communications status.{" "}
+              Could not load the reporting status.{" "}
               <button type="button" className="font-semibold underline" onClick={() => void loadStatus()}>
                 Retry
               </button>
@@ -180,7 +180,7 @@ export default function CommunicationsHome() {
       </div>
 
       {/* Tabs */}
-      <div className="mt-6 flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="Communications sections">
+      <div className="mt-6 flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="Reporting sections">
         {TABS.map((t) => (
           <button
             key={t.key}

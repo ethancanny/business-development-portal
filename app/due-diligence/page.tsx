@@ -2,13 +2,16 @@
 
 /**
  * Due Diligence hub (navigation restructure, WS-C) — one page, three
- * sections behind a sticky section bar, each fed ONLY by its compact
- * summary endpoint under /api/platform/hubs/ (fetch on mount; the two
- * below-fold sections lazy-mount via the shared LazyMount):
+ * sections behind a sticky tab bar, each fed ONLY by its compact
+ * summary endpoint under /api/platform/hubs/ (fetch on mount):
  * - Diligence Workspaces → /api/platform/hubs/dd-workspaces
  * - Value Creation Plans → /api/platform/hubs/dd-plans (+ New plan
  *   dialog rendering the shared StartPlanForm)
  * - Data Rooms (compact) → /api/platform/hubs/dd-rooms
+ * Ethan, Oct 23, 2026: hub tab bars are true tabs — only the selected
+ * tab's section renders (so an unselected section never fetches);
+ * the tab restores from the URL hash (#dd-workspaces / #dd-plans /
+ * #dd-rooms).
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -16,7 +19,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
 import { CardSkeleton, EmptyState, ErrorState, SkeletonRows } from "@/components/ui";
-import LazyMount from "@/components/hubs/LazyMount";
 import StartPlanForm from "@/components/valuecreation/StartPlanForm";
 import { cardCls, fmtDateShort } from "@/components/diligence/types";
 import { fmtMoney, fmtMoneyCompact, fmtRelTime } from "@/lib/format";
@@ -511,22 +513,21 @@ const SECTIONS = [
 export default function DueDiligencePage() {
   const [active, setActive] = useState<string>(SECTIONS[0].id);
 
+  // Restore the tab from the URL hash on first mount (deep links).
   useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (e.isIntersecting) setActive(e.target.id);
-        }
-      },
-      { rootMargin: "-30% 0px -60% 0px" }
-    );
-    for (const s of SECTIONS) {
-      const el = document.getElementById(s.id);
-      if (el) obs.observe(el);
-    }
-    return () => obs.disconnect();
+    const h = window.location.hash.replace("#", "");
+    if (SECTIONS.some((s) => s.id === h)) setActive(h);
   }, []);
+
+  const select = (id: string) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    setActive(id);
+    try {
+      window.history.replaceState(null, "", "#" + id);
+    } catch {
+      /* hash sync is an enhancement — the tab still switches */
+    }
+  };
 
   return (
     <div>
@@ -536,16 +537,20 @@ export default function DueDiligencePage() {
         subtitle="Diligence workspaces, value creation plans, and data rooms — checklists, findings, 100-day plans, and closing"
       />
       <div className="mx-auto max-w-[1400px] px-4 sm:px-6">
-        {/* Sticky section bar */}
-        <div className="sticky top-[52px] z-20 -mx-4 bg-white/85 px-4 backdrop-blur dark:bg-[#0d1f3c]/85 sm:-mx-6 sm:px-6">
+        {/* Sticky tab bar */}
+        <div className="sticky top-14 z-20 -mx-4 bg-white/85 px-4 backdrop-blur dark:bg-[#0d1f3c]/85 sm:-mx-6 sm:px-6">
           <nav
             aria-label="Due Diligence sections"
+            role="tablist"
             className="flex gap-1.5 overflow-x-auto py-2.5"
           >
             {SECTIONS.map((s) => (
               <a
                 key={s.id}
                 href={`#${s.id}`}
+                onClick={select(s.id)}
+                role="tab"
+                aria-selected={active === s.id}
                 aria-current={active === s.id ? "true" : undefined}
                 className={`chip min-h-[44px] shrink-0 ${active === s.id ? "chip-active" : ""}`}
               >
@@ -555,20 +560,22 @@ export default function DueDiligencePage() {
           </nav>
         </div>
 
-        <div className="space-y-10 py-6">
-          <section id="dd-workspaces" className="scroll-mt-[120px]">
-            <WorkspacesSection />
-          </section>
-          <section id="dd-plans" className="scroll-mt-[120px]">
-            <LazyMount minHeight={220}>
+        <div className="py-6">
+          {active === "dd-workspaces" && (
+            <section id="dd-workspaces">
+              <WorkspacesSection />
+            </section>
+          )}
+          {active === "dd-plans" && (
+            <section id="dd-plans">
               <PlansSection />
-            </LazyMount>
-          </section>
-          <section id="dd-rooms" className="scroll-mt-[120px]">
-            <LazyMount minHeight={180}>
+            </section>
+          )}
+          {active === "dd-rooms" && (
+            <section id="dd-rooms">
               <RoomsSection />
-            </LazyMount>
-          </section>
+            </section>
+          )}
         </div>
       </div>
     </div>
