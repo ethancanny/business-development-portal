@@ -351,6 +351,35 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
   }
   if (newStage !== prev.stage) {
+    // BD → Due Diligence handoff (Oct 24, 2026): publish the stage
+    // change — deal_stage_changed has been a defined event type since
+    // Phase 1 but was never emitted by any write path — and ensure the
+    // diligence workspace when the move lands in (or past) diligence.
+    // The diligence module also listens for the event; the direct call
+    // covers processes where it has not loaded yet. Both are
+    // best-effort and idempotent — the stage move stands regardless.
+    try {
+      const { publishEvent } = await import("@/lib/platform/events");
+      await publishEvent("deal_stage_changed", {
+        entityKind: "deal",
+        entityId: updated.id,
+        payload: {
+          dealId: updated.id,
+          fromStage: prev.stage,
+          toStage: newStage,
+          investmentType: newType,
+        },
+        actor,
+      });
+      const { ensureWorkspaceForDeal } = await import(
+        "@/lib/diligence/service"
+      );
+      await ensureWorkspaceForDeal(updated.id, actor);
+    } catch {
+      /* handoff wiring is best-effort — the stage change stands */
+    }
+  }
+  if (newStage !== prev.stage) {
     await logActivity({
       type: "deal.stage",
       actor,

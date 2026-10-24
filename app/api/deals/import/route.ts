@@ -144,6 +144,9 @@ export async function POST(req: NextRequest) {
   }
   const now = new Date().toISOString();
   const metricWrites: Array<{ dealId: string; values: Record<string, unknown> }> = [];
+  /** Deals this import created or updated — the BD → DD handoff runs
+   * for exactly these after the save (Oct 24, 2026). */
+  const touchedIds: string[] = [];
 
   parsed.rows.forEach((row, i) => {
     const rowNo = i + 1;
@@ -265,6 +268,7 @@ export async function POST(req: NextRequest) {
       if (Object.keys(metricValues).length) {
         metricWrites.push({ dealId: existing.id, values: metricValues });
       }
+      touchedIds.push(existing.id);
       updated++;
       return;
     }
@@ -307,6 +311,7 @@ export async function POST(req: NextRequest) {
     if (Object.keys(metricValues).length) {
       metricWrites.push({ dealId: deal.id, values: metricValues });
     }
+    touchedIds.push(deal.id);
     created++;
   });
 
@@ -330,6 +335,20 @@ export async function POST(req: NextRequest) {
       dealName: null,
       execName: null,
     }).catch(() => undefined);
+    // BD → Due Diligence handoff (Oct 24, 2026): any imported deal
+    // landing in (or past) a diligence stage gets its workspace.
+    // Best-effort and idempotent per deal — the import stands
+    // regardless of any single handoff outcome.
+    try {
+      const { ensureWorkspaceForDeal } = await import(
+        "@/lib/diligence/service"
+      );
+      for (const dealId of touchedIds) {
+        await ensureWorkspaceForDeal(dealId, user.name);
+      }
+    } catch {
+      /* handoff wiring is best-effort — the import stands */
+    }
   }
 
   return NextResponse.json({ created, updated, skipped, errors });

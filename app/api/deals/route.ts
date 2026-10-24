@@ -211,5 +211,16 @@ export async function POST(req: NextRequest) {
     dealName: deal.companyName,
     execName: null,
   });
+  // BD → Due Diligence handoff (Oct 24, 2026): a deal created directly
+  // in (or past) a diligence stage gets its workspace immediately.
+  // Best-effort and idempotent — the create stands regardless.
+  try {
+    const { ensureWorkspaceForDeal } = await import(
+      "@/lib/diligence/service"
+    );
+    await ensureWorkspaceForDeal(deal.id, user.name);
+  } catch {
+    /* handoff wiring is best-effort — the create stands */
+  }
   return NextResponse.json(deal, { status: 201 });
 }
