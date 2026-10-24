@@ -5,7 +5,6 @@ import HospitalityFitSettings from "@/components/HospitalityFitSettings";
 import ChainFilterSettings from "@/components/ChainFilterSettings";
 import ManualSourcesSettings from "@/components/ManualSourcesSettings";
 import JobQueuePanel from "@/components/JobQueuePanel";
-import DuplicatesPanel from "@/components/DuplicatesPanel";
 import ValuationParamsSettings from "@/components/ValuationParamsSettings";
 import SettingsNav from "@/components/settings/SettingsNav";
 import StageGatesCard from "@/components/settings/StageGatesCard";
@@ -100,18 +99,6 @@ export default function SettingsPage() {
             handlers. Retry a failed job or run a queued one now.
           </p>
           <JobQueuePanel />
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
-          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
-            Duplicate detection &amp; merge
-          </h2>
-          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
-            Likely duplicate companies and people, scored by similarity.
-            Merging keeps the first record and folds the second into it —
-            every fact stays stored once, on the central record.
-          </p>
-          <DuplicatesPanel />
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">

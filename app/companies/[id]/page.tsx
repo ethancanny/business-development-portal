@@ -30,6 +30,7 @@ import GenerateReportButton from "@/components/comms/GenerateReportButton";
 import FinancialsSection from "@/components/FinancialsSection";
 import FinancialAnalysis from "@/components/FinancialAnalysis";
 import DocGenPanel from "@/components/docgen/DocGenPanel";
+import AddonsSection from "@/components/AddonsSection";
 
 interface CompanyDetail extends CompanyCard {
   source: string | null;
@@ -303,6 +304,8 @@ export default function CompanyProfilePage() {
           <FinancialAnalysis companyId={c.id} />
 
           <DocGenPanel companyId={c.id} />
+
+          <AddonsSection dealIds={linked.deals.map((d) => d.id)} />
 
           {/* Photo gallery */}
           <section className="card-surface p-5" aria-label="Photos">

@@ -77,6 +77,76 @@ interface OverviewPayload {
   cards: CompanyCard[];
   earlyWarning?: EarlyWarningItem[];
   activityPulse?: ActivityPulseData | null;
+  flywheel?: FlywheelData | null;
+}
+
+/** Flywheel (Investment Types Step 1): platform-company cash flow vs
+ *  capital committed to early-stage bets — served precomputed on the
+ *  overview payload by lib/bd/service.ts getFlywheel(). */
+export interface FlywheelData {
+  platformCashFlow: number | null;
+  platformCompanyCount: number;
+  earlyStageCommitted: number;
+  earlyStageCount: number;
+  followOnReserves: number;
+}
+
+function FlywheelBlock({ data }: { data: FlywheelData | null }) {
+  if (!data) return null;
+  const hasCash = data.platformCashFlow !== null;
+  const hasBets = data.earlyStageCount > 0;
+  return (
+    <section className="card-surface mb-4 p-4 sm:p-5" aria-label="Flywheel">
+      <h2 className="font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
+        Flywheel
+      </h2>
+      <p className="mb-3 mt-0.5 text-sm text-slate-500 dark:text-white/50">
+        Platform cash flow funds the early-stage bets sourced from the
+        portfolio and the market.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-label text-slate-500 dark:text-white/50">
+            Platform cash flow (TTM)
+          </p>
+          <p className="tnum mt-1 text-2xl font-semibold text-slate-800 dark:text-[#e8dfc8]">
+            {hasCash ? fmtMoney(data.platformCashFlow ?? 0) : "—"}
+          </p>
+          <p className="text-xs text-slate-400 dark:text-white/40">
+            {hasCash
+              ? `Across ${data.platformCompanyCount} portfolio ${data.platformCompanyCount === 1 ? "company" : "companies"} (Portfolio Monitoring)`
+              : "No portfolio cash-flow data yet — closed platforms feed this from Portfolio Monitoring."}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-label text-slate-500 dark:text-white/50">
+            Committed to early stage
+          </p>
+          <p className="tnum mt-1 text-2xl font-semibold text-slate-800 dark:text-[#e8dfc8]">
+            {hasBets ? fmtMoney(data.earlyStageCommitted) : "—"}
+          </p>
+          <p className="text-xs text-slate-400 dark:text-white/40">
+            {hasBets
+              ? `${data.earlyStageCount} closed early-stage ${data.earlyStageCount === 1 ? "deal" : "deals"}`
+              : "No closed early-stage deals yet."}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-label text-slate-500 dark:text-white/50">
+            Follow-on reserves
+          </p>
+          <p className="tnum mt-1 text-2xl font-semibold text-slate-800 dark:text-[#e8dfc8]">
+            {data.followOnReserves > 0
+              ? fmtMoney(data.followOnReserves)
+              : "—"}
+          </p>
+          <p className="text-xs text-slate-400 dark:text-white/40">
+            Reserved across closed early-stage positions.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 /** Activity pulse (Oct 23, 2026): triage counts + latest items from
@@ -812,6 +882,10 @@ export default function PlatformOverview() {
           data.activityPulse.counts
             ? data.activityPulse
             : null,
+        flywheel:
+          data.flywheel && typeof data.flywheel === "object"
+            ? data.flywheel
+            : null,
       });
       setLoadFailed(false);
     } catch {
@@ -963,6 +1037,8 @@ export default function PlatformOverview() {
           </div>
 
           <EarlyWarningBlock items={payload?.earlyWarning ?? []} />
+
+          <FlywheelBlock data={payload?.flywheel ?? null} />
 
           {customize && layout.hidden.length > 0 && (
             <div className="mb-4 flex flex-wrap items-center gap-2">
