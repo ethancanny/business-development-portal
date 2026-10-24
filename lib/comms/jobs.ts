@@ -1,6 +1,6 @@
 import { sql, str } from "../platform/db";
 import { ensureComms } from "./schema";
-import { generateReportNow } from "./service";
+import { generateReportNow, purgeExpiredDiscards } from "./service";
 import { runScheduleJob } from "./schedules";
 
 /**
@@ -50,6 +50,25 @@ export async function runCommsScheduleJob(
     console.error(
       "[comms:jobs] schedule run failed for schedule",
       scheduleId,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+}
+
+/**
+ * Discard-retention purge (Oct 23, 2026): permanently deletes reports
+ * that have sat in 'discarded' for over 30 days. Never throws — the
+ * job row carries the outcome.
+ */
+export async function runCommsPurgeDiscardedJob(): Promise<void> {
+  try {
+    const n = await purgeExpiredDiscards(30);
+    if (n > 0) {
+      console.log("[comms:jobs] purged expired discarded reports:", n);
+    }
+  } catch (err) {
+    console.error(
+      "[comms:jobs] discard purge failed",
       err instanceof Error ? err.message : String(err)
     );
   }

@@ -132,7 +132,7 @@ export default function ReportDetail({ reportId }: { reportId: string }) {
   ) => {
     if (busy) return;
     if (action === "delete" && !window.confirm("Delete this report?")) return;
-    if (action === "discard" && !window.confirm("Discard this report?")) return;
+    if (action === "discard" && !window.confirm("Discard this report? Discarded reports are permanently deleted after 30 days.")) return;
     setBusy(action);
     setError("");
     setNote("");

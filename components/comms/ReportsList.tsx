@@ -48,7 +48,6 @@ const STATUS_FILTERS = [
   { key: "approved", label: "Approved" },
   { key: "sent", label: "Sent" },
   { key: "discarded", label: "Discarded" },
-  { key: "failed", label: "Failed" },
 ];
 
 export default function ReportsList() {
