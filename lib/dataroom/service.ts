@@ -395,6 +395,23 @@ export async function createRoom(
   return { room, existed: false };
 }
 
+/** Stamp a room's storage provider + backing reference (Oct 23, 2026).
+ *  Called by the SharePoint provisioning pass (lib/storage/provision.ts)
+ *  when storage flips providers, so room records name the store that
+ *  actually holds their bytes. Idempotent. */
+export async function stampRoomStorage(
+  roomId: string,
+  provider: string,
+  providerRef: string
+): Promise<void> {
+  await ensureDataRoom();
+  const db = sql();
+  await db`
+    UPDATE dataroom.rooms
+    SET provider = ${provider}, provider_ref = ${providerRef}, updated_at = now()
+    WHERE id = ${roomId} AND deleted_at IS NULL`;
+}
+
 export async function updateRoom(
   id: string,
   patch: { name?: string; domainAllowlist?: string[]; status?: string },

@@ -12,10 +12,11 @@ export { localProvider } from "./local";
 
 /**
  * Active storage provider selection. Default is the interim `local`
- * provider; set env STORAGE_PROVIDER=sharepoint only AFTER Ethan has
- * completed the Entra Files/Sites consent (the sharepoint provider
- * reports setup-required — and refuses operations — until the Graph
- * driver is implemented on top of the consented scopes).
+ * provider; set env STORAGE_PROVIDER=sharepoint only AFTER the Entra
+ * Files/Sites consent is granted AND the portal has been reconnected
+ * AND the library is provisioned (Settings → Integrations). The
+ * SharePoint driver (lib/storage/sharepoint.ts) probes honestly and
+ * reports setup-required until all three hold.
  */
 export function getStorageProvider(): StorageProvider {
   const choice = (process.env.STORAGE_PROVIDER ?? "local").trim().toLowerCase();

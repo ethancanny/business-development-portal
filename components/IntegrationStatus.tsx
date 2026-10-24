@@ -41,6 +41,8 @@ export default function IntegrationStatus() {
   const [items, setItems] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [provisionBusy, setProvisionBusy] = useState(false);
+  const [provisionMsg, setProvisionMsg] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,6 +63,46 @@ export default function IntegrationStatus() {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  // SharePoint provisioning (Oct 23, 2026): creates the portal's
+  // document library on the "Canny Capital — Deals" site and stamps
+  // every data room to the SharePoint provider. Lives on the
+  // microsoft_sharepoint row below; the endpoint explains setup
+  // problems (no consent / no reconnect / site missing) itself.
+  const provisionSharePoint = useCallback(async () => {
+    setProvisionBusy(true);
+    setProvisionMsg("");
+    try {
+      const r = await fetch("/api/platform/storage/provision", {
+        method: "POST",
+      });
+      const d = (await r.json().catch(() => null)) as {
+        ok?: boolean;
+        report?: {
+          siteName: string;
+          driveName: string;
+          roomsStamped: number;
+          roomsTotal: number;
+        };
+        detail?: string;
+        error?: string;
+      } | null;
+      if (r.ok && d?.report) {
+        setProvisionMsg(
+          `Provisioned — site "${d.report.siteName}", library "${d.report.driveName}", ${d.report.roomsStamped} of ${d.report.roomsTotal} data rooms stamped to SharePoint.`
+        );
+        await load();
+      } else {
+        setProvisionMsg(
+          d?.detail || d?.error || `Provisioning failed (${r.status})`
+        );
+      }
+    } catch {
+      setProvisionMsg("Provisioning request failed — the portal API may be unavailable.");
+    } finally {
+      setProvisionBusy(false);
+    }
   }, [load]);
 
   if (loading) return <SkeletonRows rows={3} />;
@@ -106,6 +148,24 @@ export default function IntegrationStatus() {
                   <p className="mt-0.5 text-xs text-red-600 dark:text-red-300">
                     Last error: {it.lastError}
                   </p>
+                )}
+                {it.key === "microsoft_sharepoint" && (
+                  <div className="mt-2">
+                    <button
+                      onClick={provisionSharePoint}
+                      disabled={provisionBusy}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      {provisionBusy
+                        ? "Provisioning…"
+                        : "Provision SharePoint library"}
+                    </button>
+                    {provisionMsg && (
+                      <p className="mt-1.5 text-xs text-slate-500 dark:text-white/60">
+                        {provisionMsg}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </li>
