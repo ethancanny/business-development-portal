@@ -200,7 +200,7 @@ export default function TemplateEditor({ templateId }: { templateId: string }) {
         href="/communications"
         className="text-xs font-semibold uppercase tracking-wider text-gold-700 hover:underline dark:text-gold-400"
       >
-        ← Communications
+        ← Reporting
       </Link>
       <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
         <h2 className="font-display text-3xl font-semibold text-navy-900 dark:text-white">

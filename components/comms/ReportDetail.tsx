@@ -173,7 +173,7 @@ export default function ReportDetail({ reportId }: { reportId: string }) {
         href="/communications"
         className="text-xs font-semibold uppercase tracking-wider text-gold-700 hover:underline dark:text-gold-400"
       >
-        ← Communications
+        ← Reporting
       </Link>
 
       {/* Header + workflow */}
@@ -270,7 +270,7 @@ export default function ReportDetail({ reportId }: { reportId: string }) {
       {narrativeStatus === "setup_required" && (
         <p className="mt-4 rounded-xl bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
           AI narrative is not configured, so no narrative text was
-          generated. Configure the provider (see the Communications
+          generated. Configure the provider (see the Reporting
           status strip for the exact steps) or write the narrative
           manually below.
         </p>
@@ -505,7 +505,7 @@ function NarrativePanel({
       if (st === "ready") {
         setMsg("AI narrative generated and stored as a new version.");
       } else if (st === "setup_required") {
-        setMsg("AI is not configured — no text was generated. See the Communications status strip for setup steps, or write the narrative manually.");
+        setMsg("AI is not configured — no text was generated. See the Reporting status strip for setup steps, or write the narrative manually.");
       } else if (st === "blocked_disabled") {
         setMsg("AI narrative is disabled for this deal (document processing off) — no text was generated.");
       } else if (st === "error") {
