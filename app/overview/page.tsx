@@ -15,8 +15,7 @@ import type { OperatorCandidate } from "@/lib/candidates-db";
 import { fmtMoney, fmtMoneyCompact, dedupeSourceTokens } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, sectorIcon, stageColor } from "@/lib/sector-colors";
-import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
-import CompanyLogo from "@/components/CompanyLogo";
+import SectorChip, { SectorLegend } from "@/components/SectorChip";
 import LatestIntel from "@/components/LatestIntel";
 
 /** Fit-target sectors — all five focus sectors (Oct 14, 2026: the
@@ -362,36 +361,6 @@ export default function Overview() {
     const today = new Date().toISOString().slice(0, 10);
     return openTasks.filter((t) => t.dueDate && t.dueDate < today);
   }, [openTasks]);
-
-  const valueByStage = useMemo(
-    () =>
-      DEAL_STAGES.filter((s) => !TERMINAL_STAGES.includes(s)).map((stage) => ({
-        stage,
-        value: deals
-          .filter((d) => d.stage === stage)
-          .reduce((s, d) => s + (resolveDealValue(d, multiples, rates).value ?? 0), 0),
-        count: deals.filter((d) => d.stage === stage).length,
-      })),
-    [deals, multiples, rates]
-  );
-  const unclaimed = useMemo(
-    () => activeDeals.filter((d) => !d.owner),
-    [activeDeals]
-  );
-
-  // Pipeline card strip order: stage order first, then value desc.
-  const stripDeals = useMemo(() => {
-    const order = (s: string) =>
-      (DEAL_STAGES as readonly string[]).indexOf(s);
-    return [...scopedActiveDeals].sort((a, b) => {
-      const byStage = order(a.stage) - order(b.stage);
-      if (byStage !== 0) return byStage;
-      return (
-        (resolveDealValue(b, multiples, rates).value ?? 0) -
-        (resolveDealValue(a, multiples, rates).value ?? 0)
-      );
-    });
-  }, [scopedActiveDeals, multiples, rates]);
 
   // Deals with no logged touch in 30+ days (interactions fall back to last update).
   // Weekly summary windows (local time): this week = Monday 00:00 → now,
@@ -1452,84 +1421,6 @@ export default function Overview() {
             );
           })}
         </div>
-      </section>
-
-      {/* Pipeline card strip — replaces the by-stage bars: one card
-          per active deal (logo, stage, resolved value, days in
-          stage), with the per-stage count · value line the bars
-          carried kept above the strip. */}
-      <section className="mb-6">
-        <div className="mb-1 flex items-baseline justify-between gap-2">
-          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
-            Pipeline
-          </h2>
-          <Link
-            href="/pipeline"
-            className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
-          >
-            Open pipeline →
-          </Link>
-        </div>
-        <p className="tnum mb-3 text-xs text-slate-400 dark:text-white/40">
-          {valueByStage
-            .filter((s) => s.count > 0)
-            .map((s) => `${s.stage}: ${s.count} · ${fmtMoney(s.value)}`)
-            .join("  ·  ")}
-        </p>
-        {stripDeals.length > 0 ? (
-          <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2">
-            {stripDeals.map((d) => {
-              const v = resolveDealValue(d, multiples, rates).value;
-              const days = daysSince(d.updatedAt);
-              return (
-                <Link
-                  key={d.id}
-                  href="/pipeline"
-                  className="card-surface block w-[232px] shrink-0 snap-start p-4 transition hover:border-[#b8975a]/60"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <CompanyLogo
-                      name={d.companyName}
-                      sector={d.industry}
-                      size={30}
-                    />
-                    <p className="min-w-0 flex-1 truncate font-display text-lg font-semibold text-[#0d1f3c] dark:text-white">
-                      {d.companyName}
-                    </p>
-                  </div>
-                  <div className="mt-3">
-                    <StageChip stage={d.stage} />
-                  </div>
-                  <p className="tnum mt-2 font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
-                    {v === null ? "—" : fmtMoney(v)}
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
-                    {days === 0 ? "Updated today" : `${days}d in stage`}
-                  </p>
-                </Link>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-sm text-slate-400 dark:text-white/40">
-            No active deals right now.
-          </p>
-        )}
-        {unclaimed.length > 0 && (
-          <div className="mt-3 rounded-lg bg-[#b8975a]/10 px-3 py-2.5 dark:bg-[#b8975a]/15">
-            <p className="text-xs font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">
-              {unclaimed.length} unclaimed{" "}
-              {unclaimed.length === 1 ? "target" : "targets"}:{" "}
-              <span className="font-normal">
-                {unclaimed
-                  .slice(0, 3)
-                  .map((d) => d.companyName)
-                  .join(", ")}
-                {unclaimed.length > 3 && ` +${unclaimed.length - 3} more`}
-              </span>
-            </p>
-          </div>
-        )}
       </section>
 
       {/* Operators tile (restyled Wave 1: card surface + serif figures) */}
