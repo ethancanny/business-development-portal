@@ -192,6 +192,11 @@ export interface Deal {
   /** Per-deal override: FALSE = real name shows externally too.
    *  Absent/TRUE = codename applies externally when set. */
   codenameExternal?: boolean;
+  /** Company website as recorded on the deal (New investment form,
+   *  Oct 24, 2026). The identity system keeps the canonical
+   *  website/logo on core.companies; this is the BD record of it and
+   *  the domain the form offers logo fetch from. */
+  website?: string;
   /** Deal Identity enrichment (API-side, from the identity service):
    *  the core company this deal belongs to + its stored-logo version
    *  and accent, so list surfaces render the mark without extra reads. */
