@@ -5,8 +5,9 @@ import Link from "next/link";
 import type { Deal, Executive, MiMultiple } from "@/lib/types";
 import { fmtMoney, uniqueStrings } from "@/lib/format";
 import { dealFocusSector, estimateMultiple, resolveDealValue, type MarketRates } from "@/lib/valuation";
-import CompanyMark from "@/components/identity/CompanyMark";
-import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
+import CompanyLogo from "@/components/CompanyLogo";
+import SectorChip, { SectorLegend } from "@/components/SectorChip";
+import { StageMoveMenu } from "@/components/StageMove";
 import {
   TypeBadge,
   fmtMetricValue,
@@ -52,6 +53,7 @@ export default function DealTable({
   bd = null,
   holdView = false,
   allDeals = [],
+  onStageMoved,
 }: {
   deals: Deal[];
   execs: Executive[];
@@ -62,6 +64,8 @@ export default function DealTable({
   bd?: BdBootstrap | null;
   holdView?: boolean;
   allDeals?: Deal[];
+  /** Fired after a stage move through the row's Move-to-stage menu. */
+  onStageMoved?: () => void;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
@@ -166,10 +170,10 @@ export default function DealTable({
     sortKey: "companyName",
     cell: (d) => (
       <span className="flex items-center gap-2">
-        <CompanyMark
-          companyId={d.companyId ?? `co_${d.id}`}
+        <CompanyLogo
           name={d.companyName}
-          logoVersion={d.logoVersion ?? 0}
+          website={dealWebsite(d)}
+          sector={dealFocusSector(d.industry) ?? d.industry}
         />
         <span>
           <Link
@@ -206,7 +210,11 @@ export default function DealTable({
     id: "stage",
     label: "Stage",
     sortKey: "stage",
-    cell: (d) => <StageChip stage={d.stage} />,
+    // The chip IS the move control (Oct 24, 2026): click opens the
+    // deal's own type stage list; gates + override ride the deals PUT.
+    cell: (d) => (
+      <StageMoveMenu deal={d} bd={bd} onMoved={onStageMoved} />
+    ),
   };
   const valueCol: Col = {
     id: "value",
@@ -396,7 +404,7 @@ export default function DealTable({
       estCol, keyMetricCol, ownerCol, updatedCol,
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeFilter, holdView, bd, allDeals, multiples, rates]);
+  }, [typeFilter, holdView, bd, allDeals, multiples, rates, onStageMoved]);
 
   const thCls =
     "select-none whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-label text-slate-500 dark:text-white/50";
@@ -491,10 +499,10 @@ export default function DealTable({
           >
             <div className="flex items-start justify-between gap-3">
               <span className="flex min-w-0 items-center gap-2">
-                <CompanyMark
-                  companyId={d.companyId ?? `co_${d.id}`}
+                <CompanyLogo
                   name={d.companyName}
-                  logoVersion={d.logoVersion ?? 0}
+                  website={dealWebsite(d)}
+                  sector={dealFocusSector(d.industry) ?? d.industry}
                 />
                 <span className="min-w-0">
                   <Link
@@ -530,7 +538,7 @@ export default function DealTable({
               {d.industry && (
                 <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
               )}
-              <StageChip stage={d.stage} />
+              <StageMoveMenu deal={d} bd={bd} onMoved={onStageMoved} />
               <TypeBadge type={d.investmentType} />
             </div>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-white/50">

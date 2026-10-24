@@ -10,11 +10,15 @@ import {
   type MarketRates,
 } from "@/lib/valuation";
 import { agingColor, sectorColor } from "@/lib/sector-colors";
-import CompanyMark from "@/components/identity/CompanyMark";
+import CompanyLogo from "@/components/CompanyLogo";
 import PersonAvatar from "@/components/PersonAvatar";
 import SectorChip, { StageChip } from "@/components/SectorChip";
 import { dealWebsite } from "@/components/DealTable";
-import { TypeBadge } from "@/components/InvestmentTypeBits";
+import {
+  TypeBadge,
+  type BdBootstrap,
+} from "@/components/InvestmentTypeBits";
+import { StageMoveMenu } from "@/components/StageMove";
 import type { Pairing } from "@/components/PairingTable";
 
 /**
@@ -49,6 +53,8 @@ export function DealCardGrid({
   rates = {},
   onSelect,
   allDeals = [],
+  bd = null,
+  onStageMoved,
 }: {
   deals: Deal[];
   multiples?: MiMultiple[];
@@ -56,6 +62,10 @@ export function DealCardGrid({
   onSelect: (d: Deal) => void;
   /** Investment Types (Step 1): full pipeline for add-on parent labels. */
   allDeals?: Deal[];
+  /** bd bootstrap for per-type stage lists in the move menu. */
+  bd?: BdBootstrap | null;
+  /** Fired after a stage move through a card's Move-to-stage menu. */
+  onStageMoved?: () => void;
 }) {
   if (deals.length === 0) {
     return (
@@ -84,7 +94,7 @@ export function DealCardGrid({
               }}
             >
               <div className="relative z-10 flex h-full items-end p-3">
-                <CompanyMark companyId={d.companyId ?? `co_${d.id}`} name={d.companyName} logoVersion={d.logoVersion ?? 0} size={34} />
+                <CompanyLogo name={d.companyName} website={dealWebsite(d)} sector={sector} size={34} />
               </div>
             </div>
             <div className="p-4">
@@ -104,7 +114,7 @@ export function DealCardGrid({
                 ) : (
                   <span className="text-xs text-slate-400 dark:text-white/40">Industry —</span>
                 )}
-                <StageChip stage={d.stage} />
+                <StageMoveMenu deal={d} bd={bd} onMoved={onStageMoved} />
                 <TypeBadge type={d.investmentType} />
               </div>
               {d.investmentType === "add_on" && d.parentDealId && (
@@ -213,11 +223,15 @@ export function PairingCardGrid({
   multiples = [],
   rates = {},
   onSelectDeal,
+  bd = null,
+  onStageMoved,
 }: {
   pairings: Pairing[];
   multiples?: MiMultiple[];
   rates?: MarketRates;
   onSelectDeal: (d: Deal) => void;
+  bd?: BdBootstrap | null;
+  onStageMoved?: () => void;
 }) {
   if (pairings.length === 0) {
     return (
@@ -244,7 +258,7 @@ export function PairingCardGrid({
               }}
             >
               <div className="relative z-10 flex h-full items-end p-3">
-                <CompanyMark companyId={d.companyId ?? `co_${d.id}`} name={d.companyName} logoVersion={d.logoVersion ?? 0} size={30} />
+                <CompanyLogo name={d.companyName} website={dealWebsite(d)} sector={sector} size={30} />
               </div>
             </div>
             <div className="p-4">
@@ -253,7 +267,7 @@ export function PairingCardGrid({
               </h3>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {d.industry && <SectorChip sector={sector} />}
-                <StageChip stage={d.stage} />
+                <StageMoveMenu deal={d} bd={bd} onMoved={onStageMoved} />
               </div>
               <p className="tnum mt-2.5 text-base font-semibold text-slate-800 dark:text-[#e8dfc8]">
                 {rv.value === null ? "—" : fmtMoney(rv.value)}
