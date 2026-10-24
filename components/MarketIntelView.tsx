@@ -17,6 +17,7 @@ import {
   YAxis,
 } from "recharts";
 import PageHero from "@/components/PageHero";
+import SectionBoundary from "@/components/SectionBoundary";
 import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import SizeProfileRow, { hasSizeProfile, SUBSECTOR_IDS_CSV } from "@/components/SizeProfileRows";
 import CompanyTargets from "@/components/CompanyTargets";
@@ -41,9 +42,12 @@ import type {
 
 /* ---------------- helpers ---------------- */
 
-/** Stored rows ingested before RSS entity decoding may contain &amp; etc. */
-function decodeEntities(s: string): string {
-  return s
+/** Stored rows ingested before RSS entity decoding may contain &amp; etc.
+ * Coerces non-strings first (Ethan, Oct 23, 2026): a null field in any
+ * feed row degrades to empty text instead of throwing mid-render and
+ * taking the whole page down. */
+function decodeEntities(s: unknown): string {
+  return String(s ?? "")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
@@ -1362,7 +1366,9 @@ export default function MarketIntelView({
           )}
         </div>
 
-        <UpdatesStrip />
+        <SectionBoundary label="Updates">
+          <UpdatesStrip />
+        </SectionBoundary>
 
         {/* Major-event headlines */}
         {headlines.length > 0 && (
@@ -1440,7 +1446,9 @@ export default function MarketIntelView({
         {/* News & Intelligence (redesign Wave 2b): sits between Major
             Events and the tabbed panel; self-contained and defensive —
             it fetches its own feed and never blocks the page. */}
-        <NewsIntel />
+        <SectionBoundary label="News & Intelligence">
+          <NewsIntel />
+        </SectionBoundary>
 
         {/* Single tabbed panel (Ethan, Oct 14, 2026 restructure): Fit Targets | Industries & Multiples | Arizona Economic Data | Acquisitions & Filings — one panel under the Updates tiles, page ends after it. */}
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white/60 dark:border-white/10 dark:bg-[#132847]/30">
@@ -1461,7 +1469,11 @@ export default function MarketIntelView({
             </span>
           </div>
           <div className="p-3 sm:p-4">
-            {mainTab === "fit" && <FitTargets />}
+            {mainTab === "fit" && (
+              <SectionBoundary label="Fit Targets">
+                <FitTargets />
+              </SectionBoundary>
+            )}
             {mainTab === "multiples" && (
 <div className="rounded-2xl border border-[#b8975a]/40 bg-gradient-to-br from-[#e6edf6] via-white to-[#f7f1e3] p-3 shadow-sm dark:from-[#132847] dark:via-[#0d1f3c] dark:to-[#1a3358] sm:p-4">
           <IndustryExplorer
