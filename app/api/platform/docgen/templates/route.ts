@@ -7,13 +7,20 @@ import {
 } from "@/lib/docgen/templates";
 
 /** DocGen templates: list (GET) and create (POST). Bodies included —
- * the catalog is small and the template editor needs full text. */
-export async function GET() {
+ * the catalog is small and the template editor needs full text.
+ * Contract generation (Oct 24, 2026): GET accepts ?scope=deal|
+ * investor|general and ?status=draft|approved filters; rows carry
+ * version / status / approved-by / scope / source format. */
+export async function GET(req: NextRequest) {
   if (!getSessionUser()) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   await ensurePlatform();
-  const templates = await listTemplates();
+  const sp = req.nextUrl.searchParams;
+  const templates = await listTemplates({
+    scope: sp.get("scope") ?? undefined,
+    status: sp.get("status") ?? undefined,
+  });
   return NextResponse.json(
     { templates },
     { headers: { "Cache-Control": "private, max-age=60" } }
@@ -43,6 +50,7 @@ export async function POST(req: NextRequest) {
         description:
           typeof body.description === "string" ? body.description : undefined,
         body: tplBody,
+        scope: typeof body.scope === "string" ? body.scope : undefined,
       },
       user.name || user.email
     );
