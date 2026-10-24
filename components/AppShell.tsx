@@ -146,7 +146,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       <div
         className={`transition-[padding] duration-200 ${
-          collapsed ? "lg:pl-16" : "lg:pl-60"
+          collapsed ? "lg:pl-16" : "lg:pl-[17rem]"
         }`}
       >
         <TopBar onMenu={() => setDrawerOpen(true)} />

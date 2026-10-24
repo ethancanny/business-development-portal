@@ -4,13 +4,15 @@
  * Top bar (Navigation Restructure): rendered by AppShell at the top
  * of the padded content column — so it inherits the sidebar offset
  * and can never crowd or overlap the brand (the structural fix for
- * the old header crowding). Sticky, slim (~52px), surface background
+ * the old header crowding). Sticky, slim (56px), surface background
  * with a bottom border.
  *
  * Left: the mobile drawer button (<lg only; AppShell owns the drawer
  * state) + pathname-derived breadcrumbs. Right: Search (opens the
- * global search), the notification bell, Quick-add (the Fab's four
- * actions), and the user menu (name, theme toggle, log out).
+ * global search), a standalone day/night toggle (Ethan, Oct 23, 2026:
+ * on the top bar itself, NOT inside the user dropdown), the
+ * notification bell, Quick-add (the Fab's four actions), and the user
+ * menu (name, log out).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -127,7 +129,7 @@ export function crumbsForPath(pathname: string): Crumb[] {
           ]
         : [{ label: "Portfolio Monitoring" }];
     case "communications":
-      return [{ label: "Communications" }];
+      return [{ label: "Reporting" }];
     case "directory":
       return [{ label: "Directory" }];
     case "companies":
@@ -256,7 +258,7 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
     "flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-[#0d1f3c] dark:text-[#c8bfa8] dark:hover:bg-white/10 dark:hover:text-white";
 
   return (
-    <header className="sticky top-0 z-30 flex h-[52px] items-center gap-1.5 border-b border-slate-200 bg-white px-2 sm:gap-2 sm:px-4 dark:border-white/10 dark:bg-[#0d1f3c]">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-1.5 border-b border-slate-200 bg-white px-2 shadow-[0_10px_24px_-22px_rgba(13,31,60,0.55)] sm:gap-2 sm:px-4 dark:border-white/10 dark:bg-[#0d1f3c]">
       <button
         type="button"
         onClick={onMenu}
@@ -282,6 +284,22 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
           className={iconBtnCls}
         >
           <IconSearch className="h-5 w-5" />
+        </button>
+
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={
+            theme === "dark" ? "Switch to day mode" : "Switch to night mode"
+          }
+          title={theme === "dark" ? "Day mode" : "Night mode"}
+          className={iconBtnCls}
+        >
+          {theme === "dark" ? (
+            <IconSun className="h-5 w-5" />
+          ) : (
+            <IconMoon className="h-5 w-5" />
+          )}
         </button>
 
         <NotificationCenter />
@@ -355,25 +373,6 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
                   {userName}
                 </p>
               )}
-              <button
-                type="button"
-                role="menuitem"
-                onClick={toggle}
-                aria-label={
-                  theme === "dark" ? "Switch to day mode" : "Switch to night mode"
-                }
-                className="flex min-h-[44px] w-full items-center gap-2.5 px-3.5 text-left text-sm font-medium text-slate-700 transition hover:bg-[#f0f4fa] dark:text-[#e8dfc8] dark:hover:bg-white/5"
-              >
-                <span className="text-[#b8975a]">
-                  {theme === "dark" ? (
-                    <IconSun className="h-5 w-5" />
-                  ) : (
-                    <IconMoon className="h-5 w-5" />
-                  )}
-                </span>
-                {theme === "dark" ? "Day mode" : "Night mode"}
-              </button>
-              <div className="mx-3 my-1.5 border-t border-slate-100 dark:border-white/10" />
               <button
                 type="button"
                 role="menuitem"

@@ -63,8 +63,8 @@ export default function PageHero({ eyebrow, title, subtitle }: PageHeroProps) {
           </p>
         )}
         <h2
-          className={`mt-1 font-display font-semibold text-white ${
-            collapsed ? "text-xl" : "text-3xl sm:text-4xl"
+          className={`mt-1 font-sans font-bold text-white ${
+            collapsed ? "text-xl" : "text-2xl sm:text-3xl"
           }`}
         >
           {title}

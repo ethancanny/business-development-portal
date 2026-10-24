@@ -535,6 +535,55 @@ textarea:focus-visible,
   }
 }
 
+/* ============================================================
+   NIGHT-MODE CONSISTENCY PASS (Ethan, Oct 23, 2026): switching to
+   night mode left stray light surfaces and low-contrast controls —
+   components that never declared a dark variant kept light-theme
+   rendering. These rules are a floor only: token surfaces take the
+   navy surface token in dark mode, native form controls always sit
+   on navy with cream text (any dark: utility a component declares
+   for its text/border still composes), placeholders stay legible,
+   native select popups render dark, and Recharts SVG inherits the
+   dark palette instead of its light defaults. No light-mode rule
+   changes; no component logic is touched.
+   ============================================================ */
+.dark {
+  --surface: #12294d;
+  --ink: #e8dfc8;
+  scrollbar-color: rgba(184, 151, 90, 0.55) rgba(255, 255, 255, 0.06);
+}
+::selection {
+  background: rgba(184, 151, 90, 0.35);
+}
+.dark :where(input, select, textarea) {
+  background-color: #0d1f3c;
+  color: #e8dfc8;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: rgba(232, 223, 200, 0.45);
+}
+.dark select option {
+  background-color: #12294d;
+  color: #e8dfc8;
+}
+.dark .recharts-cartesian-axis-tick text {
+  fill: rgba(232, 223, 200, 0.72);
+}
+.dark .recharts-cartesian-grid line {
+  stroke: rgba(255, 255, 255, 0.08);
+}
+.dark .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #081426 !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #e8dfc8;
+}
+.dark .recharts-tooltip-item,
+.dark .recharts-tooltip-label {
+  color: #e8dfc8 !important;
+}
+
 /* Reduced motion (spec §7/§9): every animation and transition in
    the app collapses; smooth scrolling turns off. Component-level
    gates (count-up, pill slide) also check matchMedia in JS. */

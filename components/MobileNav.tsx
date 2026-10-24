@@ -122,7 +122,7 @@ const MORE_LINKS: {
   { href: "/due-diligence", label: "Due Diligence", Icon: IconDueDiligence },
   { href: "/investors-capital", label: "Investors & Capital", Icon: IconInvestors },
   { href: "/portfolio-monitoring", label: "Portfolio Monitoring", Icon: IconAnalytics },
-  { href: "/communications", label: "Communications", Icon: IconCommunications },
+  { href: "/communications", label: "Reporting", Icon: IconCommunications },
   { href: "/settings", label: "Settings", Icon: IconSettings },
   { href: "/settings/audit-trail", label: "Audit Trail", Icon: IconAuditTrail },
 ];

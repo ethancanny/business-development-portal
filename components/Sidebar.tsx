@@ -11,7 +11,7 @@
  *
  * Nav order is fixed by the restructure spec: Overview, Calendar,
  * Business Development, Due Diligence, Investors & Capital, Portfolio
- * Monitoring, Communications, Directory. Settings is NOT a nav item —
+ * Monitoring, Reporting, Directory. Settings is NOT a nav item —
  * it renders pinned at the bottom of the sidebar (and the drawer),
  * above the collapse toggle. Search lives in the TopBar, not here.
  * Value Creation and Data Rooms now live under the Due Diligence hub
@@ -91,7 +91,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/due-diligence", label: "Due Diligence", Icon: IconDueDiligence },
   { href: "/investors-capital", label: "Investors & Capital", Icon: IconInvestors },
   { href: "/portfolio-monitoring", label: "Portfolio Monitoring", Icon: IconAnalytics },
-  { href: "/communications", label: "Communications", Icon: IconCommunications },
+  { href: "/communications", label: "Reporting", Icon: IconCommunications },
   { href: "/directory", label: "Directory", Icon: IconDirectory },
 ];
 
@@ -189,7 +189,9 @@ function NavLink({
           active ? "text-[#d4b37a]" : "text-[#c8bfa8]/70"
         }`}
       />
-      {!collapsed && <span className="truncate">{item.label}</span>}
+      {!collapsed && (
+        <span className="min-w-0 flex-1 leading-snug">{item.label}</span>
+      )}
       {collapsed && <span className="sr-only">{item.label}</span>}
     </Link>
   );
@@ -278,8 +280,8 @@ export default function Sidebar({
 }) {
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-40 hidden h-screen flex-col bg-[#0d1f3c] text-[#e8dfc8] transition-[width] duration-200 lg:flex ${
-        collapsed ? "w-16" : "w-60"
+      className={`fixed inset-y-0 left-0 z-40 hidden h-screen flex-col bg-[linear-gradient(180deg,#11294e_0%,#0d1f3c_52%,#081426_100%)] text-[#e8dfc8] shadow-[12px_0_32px_-24px_rgba(8,20,38,0.8)] transition-[width] duration-200 lg:flex ${
+        collapsed ? "w-16" : "w-[17rem]"
       }`}
     >
       <SidebarBrand collapsed={collapsed} />

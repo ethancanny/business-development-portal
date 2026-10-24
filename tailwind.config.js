@@ -7,23 +7,31 @@ module.exports = {
   ],
   theme: {
     extend: {
-      // Premium redesign (Oct 14, 2026): Cormorant Garamond for display
-      // (page titles, card headings, key numbers), Inter for UI/body.
-      // Loaded via next/font/google in app/layout.tsx and exposed as
-      // CSS variables so the stacks survive font-display swaps.
+      // Typography (Ethan, Oct 23, 2026): restored to the portal's
+      // ORIGINAL font from its first build — Tailwind's default
+      // system sans stack (the initial tailwind.config extended
+      // nothing). Both font-sans and font-display map to it, so the
+      // Cormorant/Inter redesign faces are retired everywhere,
+      // including the font-display utilities, without touching any
+      // component markup.
       fontFamily: {
         display: [
-          "var(--font-display)",
-          "Cormorant Garamond",
-          "Georgia",
-          "serif",
-        ],
-        sans: [
-          "var(--font-sans)",
-          "Inter",
           "ui-sans-serif",
           "system-ui",
           "sans-serif",
+          '"Apple Color Emoji"',
+          '"Segoe UI Emoji"',
+          '"Segoe UI Symbol"',
+          '"Noto Color Emoji"',
+        ],
+        sans: [
+          "ui-sans-serif",
+          "system-ui",
+          "sans-serif",
+          '"Apple Color Emoji"',
+          '"Segoe UI Emoji"',
+          '"Segoe UI Symbol"',
+          '"Noto Color Emoji"',
         ],
       },
       // Design tokens (Oct 17, 2026) — mirrors of the CSS custom

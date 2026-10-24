@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Cormorant_Garamond, Inter } from "next/font/google";
 import "./globals.css";
 import ThemeProvider, { ThemeInitScript } from "@/components/ThemeProvider";
 import PwaShell from "@/components/PwaShell";
@@ -10,20 +9,11 @@ import PageTransition from "@/components/PageTransition";
 import Toast from "@/components/Toast";
 import AppShell from "@/components/AppShell";
 
-// Premium redesign (Oct 14, 2026): serif display + clean sans, loaded
-// once at the root and shared via CSS variables (see tailwind.config).
-const fontDisplay = Cormorant_Garamond({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-  variable: "--font-display",
-  display: "swap",
-});
-const fontSans = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-sans",
-  display: "swap",
-});
+// Typography (Ethan, Oct 23, 2026): restored to the portal's ORIGINAL
+// font treatment from its first build — Tailwind's default system
+// sans stack, no webfont loading. tailwind.config.js maps both
+// font-sans and font-display to that stack, so every surface renders
+// in the original face again.
 
 export const metadata: Metadata = {
   title: "Canny Capital Portal | Canny Capital Partners",
@@ -79,7 +69,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`dark ${fontDisplay.variable} ${fontSans.variable}`}>
+    <html lang="en" className="dark">
       <head>
         <ThemeInitScript />
         {SPLASH_LINKS.map((s) => (
