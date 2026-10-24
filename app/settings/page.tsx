@@ -29,6 +29,10 @@ export default function SettingsPage() {
       />
       <SettingsNav />
       <div className="mx-auto flex max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-6">
+        <h3 className="px-1 -mb-2 mt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/40">
+          Account &amp; security
+        </h3>
+
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Notifications
@@ -39,6 +43,21 @@ export default function SettingsPage() {
           </p>
           <PushSettings />
         </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Security &amp; devices
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            Passkeys for sign-in and unlock, the idle auto-lock, and the
+            devices that use your account.
+          </p>
+          <SecuritySettings />
+        </section>
+
+        <h3 className="px-1 -mb-2 mt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/40">
+          Sourcing &amp; fit rules
+        </h3>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
@@ -80,27 +99,9 @@ export default function SettingsPage() {
           <ManualSourcesSettings />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
-          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
-            Security &amp; devices
-          </h2>
-          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
-            Passkeys for sign-in and unlock, the idle auto-lock, and the
-            devices that use your account.
-          </p>
-          <SecuritySettings />
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
-          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
-            Background jobs
-          </h2>
-          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
-            Queued and recent background work — syncs, ingests, and event
-            handlers. Retry a failed job or run a queued one now.
-          </p>
-          <JobQueuePanel />
-        </section>
+        <h3 className="px-1 -mb-2 mt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/40">
+          Deal workflow
+        </h3>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
@@ -134,8 +135,8 @@ export default function SettingsPage() {
           <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
             Send generated documents (LOIs, NDAs, consents) and reports
             for signature through the portal&apos;s own in-house
-            signing module — certificate, consent disclosure, default
-            expiry, and recent envelopes.
+            signing module — certificate, consent disclosure, and the
+            signing defaults.
           </p>
           <EsignSettingsCard />
         </section>
@@ -152,6 +153,21 @@ export default function SettingsPage() {
             that apply extra fields by industry.
           </p>
           <InvestmentTypesSettings />
+        </section>
+
+        <h3 className="px-1 -mb-2 mt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/40">
+          System
+        </h3>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Background jobs
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            Queued and recent background work — syncs, ingests, and event
+            handlers. Retry a failed job or run a queued one now.
+          </p>
+          <JobQueuePanel />
         </section>
       </div>
     </div>

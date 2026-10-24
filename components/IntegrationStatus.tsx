@@ -105,6 +105,39 @@ export default function IntegrationStatus() {
     }
   }, [load]);
 
+  // Rows grouped under labeled subheads (Ethan's Settings organization
+  // pass, Oct 24, 2026). API order is preserved within each group;
+  // unrecognized keys collect under Platform.
+  const GROUPS: Array<{ label: string; match: (key: string) => boolean }> = [
+    {
+      label: "Microsoft 365",
+      match: (k) => k === "microsoft_calendar" || k === "microsoft_sharepoint",
+    },
+    {
+      label: "Documents & storage",
+      match: (k) => k === "document_storage" || k === "azure_docint",
+    },
+    { label: "Market data", match: (k) => k === "mi" || k.startsWith("mi:") },
+    {
+      label: "Accounting",
+      match: (k) => k === "accounting" || k.startsWith("accounting:"),
+    },
+    {
+      label: "Reporting",
+      match: (k) => k === "comms" || k.startsWith("comms_"),
+    },
+  ];
+  const grouped = [
+    ...GROUPS.map((g) => ({
+      label: g.label,
+      rows: items.filter((it) => g.match(it.key)),
+    })),
+    {
+      label: "Platform",
+      rows: items.filter((it) => !GROUPS.some((g) => g.match(it.key))),
+    },
+  ].filter((g) => g.rows.length > 0);
+
   if (loading) return <SkeletonRows rows={3} />;
   if (error) {
     return <ErrorState title="Couldn't load integrations" message={error} onRetry={load} />;
@@ -122,8 +155,14 @@ export default function IntegrationStatus() {
           No integrations are registered yet.
         </p>
       ) : (
-        <ul className="divide-y divide-slate-100 dark:divide-white/5">
-          {items.map((it) => (
+        <div className="space-y-6">
+          {grouped.map((g) => (
+            <div key={g.label}>
+              <h3 className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/40">
+                {g.label}
+              </h3>
+              <ul className="divide-y divide-slate-100 dark:divide-white/5">
+                {g.rows.map((it) => (
             <li key={it.key} className="flex items-start gap-3 py-3">
               <span
                 aria-hidden
@@ -168,9 +207,12 @@ export default function IntegrationStatus() {
                   </div>
                 )}
               </div>
-            </li>
+                </li>
+                ))}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
