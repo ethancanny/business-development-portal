@@ -15,10 +15,58 @@ import { fmtMoney, uniqueStrings } from "@/lib/format";
 import { dealFocusSector, resolveDealValue } from "@/lib/valuation";
 import DealsDataTools from "@/components/DealsDataTools";
 import UnifiedTasks from "@/components/UnifiedTasks";
+import {
+  CapitalStacksPanel,
+  type PlatformSummary,
+} from "@/components/PlatformOverview";
 import CompanyLogo from "@/components/CompanyLogo";
 import PersonAvatar from "@/components/PersonAvatar";
 import SectorChip from "@/components/SectorChip";
 import { dealWebsite } from "@/components/DealTable";
+
+/** Capital stacks (moved here from the Overview, Ethan, Oct 23, 2026):
+ * self-fetches the platform summary and renders the same stacks panel
+ * the Overview widget carried. A failed fetch hides the section — the
+ * pipeline itself is unaffected. */
+function CapitalStacksSection() {
+  const [summary, setSummary] = useState<PlatformSummary | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/platform/overview")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("http"))))
+      .then((d: { summary?: PlatformSummary }) => {
+        if (live) setSummary(d?.summary ?? null);
+      })
+      .catch(() => {
+        if (live) setFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (failed) return null;
+  return (
+    <section className="mt-10" aria-label="Capital stacks">
+      <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+        Capital stacks
+      </h2>
+      <p className="mb-4 mt-0.5 text-sm text-slate-500 dark:text-white/50">
+        How each active deal is structured — debt, equity, seller note,
+        and rollover.
+      </p>
+      <div className="card-surface p-4 sm:p-5">
+        {summary ? (
+          <CapitalStacksPanel summary={summary} />
+        ) : (
+          <p className="text-xs text-slate-400 dark:text-white/30">
+            Loading capital stacks…
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
 
 export default function PipelineView({
   embedded = false,
@@ -490,6 +538,8 @@ export default function PipelineView({
             )}
           </div>
         )}
+
+        <CapitalStacksSection />
 
         {/* Tasks & Follow-ups (Ethan, Oct 23, 2026): the Business
             Development hub no longer carries a separate Tasks tab —

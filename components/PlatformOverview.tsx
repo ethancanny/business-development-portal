@@ -80,12 +80,11 @@ interface OverviewPayload {
 
 /* ---------------- Widget layout (localStorage-persisted) ---------------- */
 
-type WidgetId = "funnel" | "heatmap" | "capital" | "attention" | "map" | "rag";
+type WidgetId = "funnel" | "heatmap" | "attention" | "map" | "rag";
 
 const WIDGET_DEFS: { id: WidgetId; title: string }[] = [
   { id: "funnel", title: "Pipeline funnel" },
   { id: "heatmap", title: "Deal heat map" },
-  { id: "capital", title: "Capital stacks" },
   { id: "attention", title: "Needs attention" },
   { id: "map", title: "Arizona footprint" },
   { id: "rag", title: "Portfolio RAG" },
@@ -183,7 +182,6 @@ function WidgetShell({
 }
 
 function FunnelWidget({ summary }: { summary: PlatformSummary }) {
-  const [view, setView] = useState<"funnel" | "kanban">("funnel");
   const entries = Object.entries(summary.dealsByStage ?? {});
   const max = Math.max(1, ...entries.map(([, n]) => n));
   if (entries.length === 0) {
@@ -194,61 +192,29 @@ function FunnelWidget({ summary }: { summary: PlatformSummary }) {
   return (
     <div>
       <div className="mb-3 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setView("funnel")}
-          className={`chip ${view === "funnel" ? "chip-active" : ""}`}
-        >
-          Funnel
-        </button>
-        <button
-          type="button"
-          onClick={() => setView("kanban")}
-          className={`chip ${view === "kanban" ? "chip-active" : ""}`}
-        >
-          Kanban
-        </button>
         <Link href="/pipeline" className="ml-auto text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]">
           Open pipeline →
         </Link>
       </div>
-      {view === "funnel" ? (
-        <ul className="space-y-2.5">
-          {entries.map(([stage, count]) => (
-            <li key={stage}>
-              <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
-                <span className="font-medium text-slate-700 dark:text-white/80">{stage}</span>
-                <span className="tnum font-semibold text-[#0d1f3c] dark:text-white">{count}</span>
-              </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${Math.max(4, (count / max) * 100)}%`,
-                    background: barGradient(stageColor(stage)),
-                  }}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {entries.map(([stage, count]) => (
-            <div
-              key={stage}
-              className="min-w-[6.5rem] flex-1 rounded-lg bg-slate-50 p-2.5 text-center dark:bg-white/5"
-            >
-              <p className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-caption" title={stage}>
-                {stage}
-              </p>
-              <p className="tnum mt-1 font-display text-2xl font-semibold text-navy-900 dark:text-white">
-                {count}
-              </p>
+      <ul className="space-y-2.5">
+        {entries.map(([stage, count]) => (
+          <li key={stage}>
+            <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
+              <span className="font-medium text-slate-700 dark:text-white/80">{stage}</span>
+              <span className="tnum font-semibold text-[#0d1f3c] dark:text-white">{count}</span>
             </div>
-          ))}
-        </div>
-      )}
+            <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${Math.max(4, (count / max) * 100)}%`,
+                  background: barGradient(stageColor(stage)),
+                }}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -351,7 +317,7 @@ const STACK_SEGMENTS = [
   { key: "rollover", label: "Rollover", color: "#dcc79b" },
 ] as const;
 
-function CapitalWidget({ summary }: { summary: PlatformSummary }) {
+export function CapitalStacksPanel({ summary }: { summary: PlatformSummary }) {
   const stacks = (summary.capitalStacks ?? []).slice(0, 8);
   if (stacks.length === 0) {
     return (
@@ -767,8 +733,6 @@ export default function PlatformOverview() {
         return <FunnelWidget summary={summary} />;
       case "heatmap":
         return <HeatmapWidget summary={summary} />;
-      case "capital":
-        return <CapitalWidget summary={summary} />;
       case "attention":
         return <AttentionWidget summary={summary} />;
       case "map":
