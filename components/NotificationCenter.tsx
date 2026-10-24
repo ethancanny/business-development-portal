@@ -116,11 +116,13 @@ export default function NotificationCenter() {
 
   const markRead = async (item: NotificationItem) => {
     if (item.read) return;
+    // Clearing REMOVES the row from the list (the endpoint returns
+    // unread items only, so a refetch agrees) — stamping it "read"
+    // and leaving it rendered dimmed is what used to make the list
+    // impossible to empty.
     setItems((prev) =>
-      prev.map((i) =>
-        i.id === item.id && i.source === item.source
-          ? { ...i, read: true }
-          : i
+      prev.filter(
+        (i) => !(i.id === item.id && i.source === item.source)
       )
     );
     setUnreadCount((n) => Math.max(0, n - 1));
@@ -136,7 +138,7 @@ export default function NotificationCenter() {
   };
 
   const markAllRead = async () => {
-    setItems((prev) => prev.map((i) => ({ ...i, read: true })));
+    setItems([]);
     setUnreadCount(0);
     try {
       await fetch("/api/platform/notifications", {

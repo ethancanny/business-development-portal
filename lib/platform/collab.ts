@@ -30,8 +30,13 @@ import { getDealFlow, getTasks } from "../db";
  *    it just has no deliverable inbox row yet.
  *
  * Notifications merge (notification center):
- *  - Platform notifications: core.notifications rows addressed to the
- *    session user (user_email = their email, or '' = all internal).
+ *  - Platform notifications: UNREAD core.notifications rows addressed
+ *    to the session user (user_email = their email, or '' = all
+ *    internal). The center is an inbox, not a history: clearing an
+ *    item stamps read_at and the row leaves the list for good
+ *    (Ethan, Oct 24, 2026 — clearing must be able to reach an EMPTY
+ *    list; a dismissal stays gone). Read rows remain in the table
+ *    as history but are never re-listed.
  *  - Activity notifications: UNREAD deal_flow items (status "new",
  *    readAt null) — the exact set lib/badge.ts counts. They are
  *    presented read=false, link to /activity, and are NOT marked read
@@ -428,10 +433,13 @@ export async function listNotifications(
   const db = sql();
   const email = userEmail.trim().toLowerCase();
   const lim = Math.min(50, Math.max(1, limit || 50));
+  // Unread only — see the header note. Returning read rows here is
+  // what made the center impossible to empty: clearing stamped
+  // read_at, but the rows kept rendering (dimmed) forever.
   const rows = await db`
     SELECT id, kind, title, body, href, read_at, created_at
     FROM core.notifications
-    WHERE user_email = ${email} OR user_email = ''
+    WHERE (user_email = ${email} OR user_email = '') AND read_at IS NULL
     ORDER BY created_at DESC
     LIMIT ${lim}`;
   const platform: NotificationItem[] = rows.map((r) => {

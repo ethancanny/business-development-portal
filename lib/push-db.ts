@@ -81,6 +81,22 @@ async function ensure(): Promise<void> {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (item_kind, item_id, orig_key)
   )`;
+  // Badge dismissals (Ethan, Oct 24, 2026): "Mark all read" in the
+  // notification center must be able to bring the app badge to zero,
+  // but the badge's follow-up component is derived live from open
+  // tasks — there was nothing durable to clear. A row here records
+  // that one item (kind + id) was dismissed in one specific state
+  // (state_key). Same state-keying idea as reminder_snoozes: when the
+  // item's state changes materially (a follow-up's due date moves,
+  // or it escalates from due-today to overdue) its state_key changes
+  // and the dismissal simply no longer matches — it counts again.
+  await q`CREATE TABLE IF NOT EXISTS badge_dismissals (
+    item_kind TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    state_key TEXT NOT NULL,
+    dismissed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (item_kind, item_id, state_key)
+  )`;
   ensured = true;
 }
 
@@ -530,4 +546,37 @@ export async function markReminderSnoozeFired(
   const q = sql();
   await q`UPDATE reminder_snoozes SET fired = true
     WHERE item_kind = ${itemKind} AND item_id = ${itemId} AND orig_key = ${origKey}`;
+}
+
+/* ---------------- Badge dismissals (clear-to-empty) ---------------- */
+
+/** Record that one badge-counted item was dismissed in the given
+ * state. Idempotent: re-dismissing the same state is a no-op. */
+export async function dismissBadgeItem(
+  itemKind: string,
+  itemId: string,
+  stateKey: string
+): Promise<void> {
+  await ensure();
+  const q = sql();
+  await q`INSERT INTO badge_dismissals (item_kind, item_id, state_key)
+    VALUES (${itemKind}, ${itemId}, ${stateKey})
+    ON CONFLICT (item_kind, item_id, state_key) DO NOTHING`;
+}
+
+/** All dismissals for one item kind, as a set of "itemId|stateKey"
+ * strings — the exact lookup shape lib/badge.ts filters with. */
+export async function getBadgeDismissals(
+  itemKind: string
+): Promise<Set<string>> {
+  await ensure();
+  const q = sql();
+  const rows = await q`SELECT item_id, state_key FROM badge_dismissals
+    WHERE item_kind = ${itemKind}`;
+  const out = new Set<string>();
+  for (const r of rows) {
+    const rec = r as Record<string, unknown>;
+    out.add(`${str(rec.item_id)}|${str(rec.state_key)}`);
+  }
+  return out;
 }

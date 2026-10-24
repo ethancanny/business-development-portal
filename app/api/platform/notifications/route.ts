@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getDealFlow, saveDealFlow } from "@/lib/db";
+import { dismissCurrentlyDueFollowups } from "@/lib/badge";
 import { pushBadgeUpdate } from "@/lib/push";
 import { ensurePlatform } from "@/lib/platform/service";
 import {
@@ -62,7 +63,22 @@ export async function POST(req: NextRequest) {
   if (body.all === true) {
     const platform = await markAllNotificationsRead(user.email);
     const activity = await stampActivity(null);
-    return NextResponse.json({ ok: true, marked: platform + activity });
+    // The badge also counts open follow-ups due today/overdue, which
+    // neither store above touches — dismiss the ones counted right
+    // now (durably, per due state; see lib/badge) so "clear" can
+    // actually reach an empty list AND a zero badge, then push the
+    // refreshed badge so other devices drop it too.
+    const dismissedFollowups = await dismissCurrentlyDueFollowups().catch(
+      () => 0
+    );
+    if (dismissedFollowups > 0) {
+      pushBadgeUpdate(user.email).catch(() => undefined);
+    }
+    return NextResponse.json({
+      ok: true,
+      marked: platform + activity,
+      dismissedFollowups,
+    });
   }
   const id = String(body.id ?? "").trim();
   if (!id) {
