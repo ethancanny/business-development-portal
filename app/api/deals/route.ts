@@ -106,24 +106,7 @@ export async function GET() {
   if (ctx.companyIds !== null) {
     return NextResponse.json({ error: "internal_only" }, { status: 403 });
   }
-  const deals = await getDeals();
-  // Deal Identity enrichment: company link + logo version + accent
-  // for mark rendering in table / Kanban / card surfaces.
-  try {
-    const { identitySummariesForDeals } = await import("@/lib/identity/service");
-    const summaries = await identitySummariesForDeals(deals.map((d) => d.id));
-    for (const d of deals) {
-      const s = summaries.get(d.id);
-      if (s) {
-        d.companyId = s.companyId;
-        d.logoVersion = s.logoVersion;
-        d.accentColor = s.accentColor;
-      }
-    }
-  } catch {
-    /* identity enrichment is decorative — deals still serve */
-  }
-  return NextResponse.json(deals);
+  return NextResponse.json(await getDeals());
 }
 
 export async function POST(req: NextRequest) {
@@ -192,6 +175,19 @@ export async function POST(req: NextRequest) {
       typeof body.sourcedFromId === "string" && body.sourcedFromId
         ? body.sourcedFromId
         : null,
+    // Deal identity + New investment form (Oct 24, 2026): codename
+    // (identity system's fields — same trim/length rule as its PATCH
+    // route) and the company website recorded on the deal.
+    codename:
+      typeof body.codename === "string"
+        ? body.codename.trim().slice(0, 80)
+        : "",
+    codenameExternal:
+      typeof body.codenameExternal === "boolean"
+        ? body.codenameExternal
+        : true,
+    website:
+      typeof body.website === "string" ? body.website.trim().slice(0, 300) : "",
     dealValue: Number(body.dealValue) || 0,
     contactName: String(body.contactName ?? "").trim(),
     contactEmail: String(body.contactEmail ?? "").trim(),

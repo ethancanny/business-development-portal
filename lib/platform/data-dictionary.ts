@@ -32,9 +32,9 @@ export const TABLE_DESCRIPTIONS: Record<string, string> = {
   "bd.type_config":
     "Investment Types (Step 1): one row per investment type (Platform LBO, Add-on, Early Stage, Minority Growth) — its label, whether it is enabled, and its stage list. Edited in Settings → Investment types; Minority Growth ships disabled here, not in code.",
   "bd.metric_definitions":
-    "The configurable catalog of type- and sector-specific deal fields: which type or sector pack a field belongs to, its data kind (money, multiple, %, number, text, list), order, and options. New fields are added here, never as columns on the deals table.",
+    "The configurable catalog of type- and sector-specific deal fields: which type or sector pack a field belongs to, its data kind (money, multiple, %, number, text, list), order, and options. New fields are added here, never as columns on the deals table. The config JSONB also carries the field's New investment form section (config.section — lbo_metrics, addon_metrics, round, traction, team_market, investors_es, es_basics, sector_pack), assigned by the bd-form-sections-v1 migration and editable in Settings, so the type-first form renders its sections from this catalog.",
   "bd.deal_metrics":
-    "Structured per-deal metric values (deal, metric key, value, period, source) for every field in bd.metric_definitions — Platform LBO leverage/FCF yield/ROIC/DSCR, Add-on multiples and synergies, Early Stage ARR/burn/runway, and the Aerospace & Defense pack.",
+    "Structured per-deal metric values (deal, metric key, value, period, source) for every field in bd.metric_definitions — Platform LBO leverage/FCF yield/ROIC/DSCR, Add-on purchase multiple and cost/revenue synergies, Early Stage round terms (stage, pre-money, cap, discount, check size, ownership), ARR/MRR, growth, burn, runway, customers, founders and investor fields, and the Aerospace & Defense pack (incl. TRL, SBIR/STTR phase, IP & data rights, export control for early-stage deals).",
   "bd.sector_packs":
     "Industry field packs (Aerospace & Defense seeded): a pack applies automatically to deals whose industry matches, adding its metric definitions on top of the deal's type fields.",
   "bd.migration_reports":

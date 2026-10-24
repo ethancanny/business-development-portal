@@ -109,18 +109,6 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const deals = await getDeals();
   const deal = deals.find((d) => d.id === params.id);
   if (!deal) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  try {
-    const { identitySummariesForDeals } = await import("@/lib/identity/service");
-    const summaries = await identitySummariesForDeals([deal.id]);
-    const s = summaries.get(deal.id);
-    if (s) {
-      deal.companyId = s.companyId;
-      deal.logoVersion = s.logoVersion;
-      deal.accentColor = s.accentColor;
-    }
-  } catch {
-    /* decorative enrichment */
-  }
   return NextResponse.json(deal);
 }
 
@@ -196,6 +184,25 @@ export async function PUT(req: NextRequest, { params }: Params) {
         ? body.sourcedFromId
         : null
       : (prev.sourcedFromId ?? null);
+  // Deal identity + New investment form (Oct 24, 2026): codename and
+  // website follow the same preserve-on-absent rule as every other
+  // field here — an edit that doesn't mention them never clears them.
+  const newCodename =
+    body.codename !== undefined
+      ? typeof body.codename === "string"
+        ? body.codename.trim().slice(0, 80)
+        : ""
+      : (prev.codename ?? "");
+  const newCodenameExternal =
+    body.codenameExternal !== undefined
+      ? body.codenameExternal !== false
+      : prev.codenameExternal !== false;
+  const newWebsite =
+    body.website !== undefined
+      ? typeof body.website === "string"
+        ? body.website.trim().slice(0, 300)
+        : ""
+      : (prev.website ?? "");
   const newOwner =
     body.owner !== undefined ? String(body.owner).trim() : prev.owner;
   const newOperatorIds =
@@ -224,6 +231,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
     parentDealId: newParentDealId,
     sourcedFromType: newSourcedFromType,
     sourcedFromId: newSourcedFromId,
+    codename: newCodename,
+    codenameExternal: newCodenameExternal,
+    website: newWebsite,
     dealValue:
       body.dealValue !== undefined ? Number(body.dealValue) || 0 : prev.dealValue,
     contactName:

@@ -115,6 +115,18 @@ export async function ensurePlatform(): Promise<void> {
   } catch (err) {
     console.error("[platform] bd investment-types migration failed (will retry)", err);
   }
+  // New investment form (Oct 24, 2026): one-time form-section
+  // assignment on bd.metric_definitions — marker-guarded inside
+  // lib/bd/form-migration.ts. Runs after the Step 1 migration so the
+  // definition catalog exists. Never breaks reads.
+  try {
+    const { runFormSectionsMigrationIfNeeded } = await import(
+      "../bd/form-migration"
+    );
+    await runFormSectionsMigrationIfNeeded();
+  } catch (err) {
+    console.error("[platform] bd form-sections migration failed (will retry)", err);
+  }
   // Due Diligence workspace backfill (Oct 24, 2026): deals that
   // reached a diligence stage without a workspace (seeded, imported,
   // or moved before the BD → DD handoff was wired) get one —
