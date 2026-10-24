@@ -64,7 +64,14 @@ export async function POST(
         error: err instanceof Error ? err.message : String(err),
         code: code ?? undefined,
       },
-      { status: code === "domain_not_allowed" ? 422 : 400 }
+      {
+        status:
+          code === "domain_not_allowed"
+            ? 422
+            : code === "guest_not_approved"
+              ? 403
+              : 400,
+      }
     );
   }
 }

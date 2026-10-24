@@ -23,6 +23,12 @@ export interface RoomRow {
   provider: string;
   status: string;
   domainAllowlist: string[];
+  /** Export-control safeguards (Step 1, Oct 23, 2026). */
+  usPersonsOnly: boolean;
+  restrictedAccess: boolean;
+  /** The linked deal's industry (or company's vertical) — drives the
+   * A&D upload warning and sector-pack surfaces. */
+  industry: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -98,6 +104,9 @@ function rowToRoom(r: Record<string, unknown>): RoomRow {
     provider: str(r.provider) || "local",
     status: str(r.status) || "active",
     domainAllowlist: parseAllowlist(r.domain_allowlist),
+    usPersonsOnly: Boolean(r.us_persons_only),
+    restrictedAccess: Boolean(r.restricted_access),
+    industry: str(r.industry),
     createdBy: str(r.created_by),
     createdAt: isoOrNull(r.created_at) ?? "",
     updatedAt: isoOrNull(r.updated_at) ?? "",
@@ -252,8 +261,10 @@ export async function saveTemplate(
 
 const ROOM_COLS = `
   r.id, r.deal_id, r.company_id, r.name, r.provider, r.status,
-  r.domain_allowlist, r.created_by, r.created_at, r.updated_at,
-  coalesce(ld.company_name, co.name, '') AS deal_name`;
+  r.domain_allowlist, r.us_persons_only, r.restricted_access,
+  r.created_by, r.created_at, r.updated_at,
+  coalesce(ld.company_name, co.name, '') AS deal_name,
+  coalesce(ld.industry, co.vertical, '') AS industry`;
 
 const ROOM_FROM = `
   FROM dataroom.rooms r
@@ -414,7 +425,13 @@ export async function stampRoomStorage(
 
 export async function updateRoom(
   id: string,
-  patch: { name?: string; domainAllowlist?: string[]; status?: string },
+  patch: {
+    name?: string;
+    domainAllowlist?: string[];
+    status?: string;
+    usPersonsOnly?: boolean;
+    restrictedAccess?: boolean;
+  },
   actor: string
 ): Promise<RoomRow | null> {
   await ensureDataRoom();
@@ -432,15 +449,26 @@ export async function updateRoom(
     patch.status === "archived" || patch.status === "active"
       ? patch.status
       : room.status;
+  const usPersonsOnly =
+    typeof patch.usPersonsOnly === "boolean"
+      ? patch.usPersonsOnly
+      : room.usPersonsOnly;
+  const restrictedAccess =
+    typeof patch.restrictedAccess === "boolean"
+      ? patch.restrictedAccess
+      : room.restrictedAccess;
   await db`
     UPDATE dataroom.rooms
     SET name = ${name}, domain_allowlist = ${JSON.stringify(allow)}::jsonb,
-        status = ${status}, updated_at = now()
+        status = ${status}, us_persons_only = ${usPersonsOnly},
+        restricted_access = ${restrictedAccess}, updated_at = now()
     WHERE id = ${id}`;
   await writeAudit("data_room", id, actor, "update", {
     name,
     status,
     domainAllowlist: allow,
+    usPersonsOnly,
+    restrictedAccess,
   });
   return getRoom(id);
 }

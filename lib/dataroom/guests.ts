@@ -104,6 +104,35 @@ export async function createGuest(
       throw err;
     }
   }
+  // Restricted access (export-control safeguard, Step 1, Oct 23, 2026):
+  // on a restricted room, guest invites are limited to APPROVED
+  // parties — a Directory person with that email, a platform login
+  // (core.user_roles), or an email on the room's domain allowlist.
+  // Anyone else is refused before a token exists.
+  if (room.restrictedAccess) {
+    const db = sql();
+    const domain = emailDomain(email);
+    let approved = room.domainAllowlist.includes(domain);
+    if (!approved) {
+      const people = await db`
+        SELECT id FROM core.people
+        WHERE lower(email) = ${email} AND deleted_at IS NULL LIMIT 1`;
+      approved = people.length > 0;
+    }
+    if (!approved) {
+      const roles = await db`
+        SELECT email FROM core.user_roles
+        WHERE lower(email) = ${email} LIMIT 1`;
+      approved = roles.length > 0;
+    }
+    if (!approved) {
+      const err = new Error(
+        `${email} is not an approved party for this restricted room. Add them to the Directory (or the room's domain allowlist) before inviting.`
+      ) as Error & { code?: string };
+      err.code = "guest_not_approved";
+      throw err;
+    }
+  }
   let expiresAt: Date;
   if (input.expiresAt) {
     expiresAt = new Date(input.expiresAt);

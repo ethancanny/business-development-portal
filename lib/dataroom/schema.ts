@@ -161,6 +161,15 @@ export function ensureDataRoomSchema(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS dataroom_rooms_company_idx
         ON dataroom.rooms (company_id)`;
+      // Export-control safeguards (Investment Types Step 1, Oct 23,
+      // 2026): U.S.-persons-only flag + restricted access (guest
+      // invites limited to approved parties) on every room.
+      await db`
+        ALTER TABLE dataroom.rooms
+        ADD COLUMN IF NOT EXISTS us_persons_only BOOLEAN NOT NULL DEFAULT false`;
+      await db`
+        ALTER TABLE dataroom.rooms
+        ADD COLUMN IF NOT EXISTS restricted_access BOOLEAN NOT NULL DEFAULT false`;
 
       await db`
         CREATE TABLE IF NOT EXISTS dataroom.folders (

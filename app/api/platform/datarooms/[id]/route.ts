@@ -3,7 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import { ensurePlatform } from "@/lib/platform/service";
 import { ensureDataRoom } from "@/lib/dataroom/schema";
 import { getRoom, getRoomIndex, updateRoom } from "@/lib/dataroom/service";
-import { listGuests } from "@/lib/dataroom/guests";
+import { listGuests, logAccess } from "@/lib/dataroom/guests";
 import { getStorageStatus } from "@/lib/storage";
 
 /** Room detail: room + folder/document index + checklist + completeness
@@ -12,7 +12,8 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  if (!getSessionUser()) {
+  const user = getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   await ensurePlatform();
@@ -20,6 +21,23 @@ export async function GET(
   const index = await getRoomIndex(params.id);
   if (!index) {
     return NextResponse.json({ error: "Room not found" }, { status: 404 });
+  }
+  // Export-control safeguard (Step 1): every access to a FLAGGED room
+  // (U.S.-persons-only or restricted) is written to the room access
+  // log — internal views included, not just guest traffic.
+  if (index.room.usPersonsOnly || index.room.restrictedAccess) {
+    await logAccess({
+      roomId: params.id,
+      actor: user.name || user.email,
+      actorKind: "internal",
+      action: "room_view",
+      detail: [
+        index.room.usPersonsOnly ? "us_persons_only" : "",
+        index.room.restrictedAccess ? "restricted" : "",
+      ]
+        .filter(Boolean)
+        .join("+"),
+    });
   }
   const guests = await listGuests(params.id);
   const provider = await getStorageStatus();
@@ -62,6 +80,14 @@ export async function PATCH(
           ? body.domainAllowlist.map((d) => String(d))
           : undefined,
         status: typeof body.status === "string" ? body.status : undefined,
+        usPersonsOnly:
+          typeof body.usPersonsOnly === "boolean"
+            ? body.usPersonsOnly
+            : undefined,
+        restrictedAccess:
+          typeof body.restrictedAccess === "boolean"
+            ? body.restrictedAccess
+            : undefined,
       },
       user.name || user.email
     );
