@@ -30,6 +30,7 @@ export default function InvestmentTypesSettings() {
   const [busyKey, setBusyKey] = useState("");
   const [note, setNote] = useState("");
   const [stageDrafts, setStageDrafts] = useState<Record<string, string>>({});
+  const [sectionDrafts, setSectionDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetch("/api/platform/investment-types/bootstrap")
@@ -120,7 +121,6 @@ export default function InvestmentTypesSettings() {
       { kind: "definition", key: d.key, enabled: !d.enabled },
       `${d.label} ${!d.enabled ? "enabled" : "disabled"}.`
     );
-  const [sectionDrafts, setSectionDrafts] = useState<Record<string, string>>({});
   const saveSection = (d: BdMetricDefinition) => {
     const section = (sectionDrafts[d.key] ?? d.config.section ?? "").trim();
     void put(
