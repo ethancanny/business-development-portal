@@ -413,6 +413,9 @@ export async function ensureDocgen(): Promise<void> {
 /* ------------------------------- CRUD ------------------------------- */
 
 function rowToTemplate(r: Record<string, unknown>): DocgenTemplateRow {
+  const scopeRaw = str(r.scope);
+  const statusRaw = str(r.status);
+  const formatRaw = str(r.source_format);
   return {
     id: str(r.id),
     key: str(r.key),
@@ -422,18 +425,37 @@ function rowToTemplate(r: Record<string, unknown>): DocgenTemplateRow {
     createdBy: str(r.created_by),
     createdAt: isoOrNull(r.created_at) ?? "",
     updatedAt: isoOrNull(r.updated_at) ?? "",
+    version: Number(r.version ?? 1) || 1,
+    status: statusRaw === "approved" ? "approved" : "draft",
+    approvedBy: str(r.approved_by),
+    approvedNote: str(r.approved_note),
+    approvedAt: isoOrNull(r.approved_at),
+    scope:
+      scopeRaw === "investor" || scopeRaw === "general" ? scopeRaw : "deal",
+    sourceFormat: formatRaw === "docx" ? "docx" : "text",
+    docxStorageKey: r.docx_storage_key ? str(r.docx_storage_key) : null,
+    docxFilename: str(r.docx_filename),
   };
 }
 
 const TPL_COLS = `
-  id, key, name, description, body, created_by, created_at, updated_at`;
+  id, key, name, description, body, created_by, created_at, updated_at,
+  version, status, approved_by, approved_note, approved_at, scope,
+  source_format, docx_storage_key, docx_filename`;
 
-export async function listTemplates(): Promise<DocgenTemplateRow[]> {
+export async function listTemplates(opts?: {
+  scope?: string;
+  status?: string;
+}): Promise<DocgenTemplateRow[]> {
   await ensureDocgen();
   const db = sql();
+  const scope = (opts?.scope ?? "").trim();
+  const status = (opts?.status ?? "").trim();
   const rows = await db`
     SELECT ${db.unsafe(TPL_COLS)} FROM docgen.templates
     WHERE deleted_at IS NULL
+      AND (${scope} = '' OR scope = ${scope} OR scope = 'general')
+      AND (${status} = '' OR status = ${status})
     ORDER BY created_at ASC`;
   const items = rows.map((r) => rowToTemplate(r as Record<string, unknown>));
   logUsage("docgen_templates_list", items.length, JSON.stringify(items).length);
@@ -484,7 +506,13 @@ export function slugifyKey(name: string): string {
 }
 
 export async function createTemplate(
-  input: { key?: string; name: string; description?: string; body: string },
+  input: {
+    key?: string;
+    name: string;
+    description?: string;
+    body: string;
+    scope?: string;
+  },
   actor: string
 ): Promise<DocgenTemplateRow> {
   await ensureDocgen();
@@ -497,18 +525,28 @@ export async function createTemplate(
   if (!key) key = slugifyKey(name);
   const existing = await getTemplateByKey(key);
   if (existing) throw new Error("key_conflict");
+  const scope =
+    input.scope === "investor" || input.scope === "general"
+      ? input.scope
+      : "deal";
   const id = newId();
   const rows = await db`
-    INSERT INTO docgen.templates (id, key, name, description, body, created_by)
+    INSERT INTO docgen.templates (id, key, name, description, body, created_by, scope)
     VALUES (${id}, ${key}, ${name},
-      ${(input.description ?? "").trim().slice(0, 500)}, ${body}, ${actor})
+      ${(input.description ?? "").trim().slice(0, 500)}, ${body}, ${actor},
+      ${scope})
     RETURNING ${db.unsafe(TPL_COLS)}`;
   return rowToTemplate(rows[0] as Record<string, unknown>);
 }
 
 export async function updateTemplate(
   id: string,
-  patch: { name?: string; description?: string; body?: string },
+  patch: {
+    name?: string;
+    description?: string;
+    body?: string;
+    scope?: string;
+  },
   actor: string
 ): Promise<DocgenTemplateRow | null> {
   await ensureDocgen();
@@ -524,16 +562,171 @@ export async function updateTemplate(
       : current.description;
   const body = patch.body !== undefined ? patch.body : current.body;
   if (!String(body).trim()) throw new Error("body_required");
+  const scope =
+    patch.scope === "investor" || patch.scope === "general" || patch.scope === "deal"
+      ? patch.scope
+      : current.scope;
+  // Contract-generation rule (Oct 24, 2026): approval applies to a
+  // version. Any content edit bumps the version and returns the
+  // template to draft — it must be re-approved before it can generate
+  // again. Pure metadata edits (name/description/scope) keep state.
+  const contentChanged = body !== current.body;
+  const db = sql();
+  const rows = contentChanged
+    ? await db`
+        UPDATE docgen.templates SET
+          name = ${name}, description = ${description}, body = ${body},
+          scope = ${scope}, version = version + 1, status = 'draft',
+          approved_by = '', approved_note = '', approved_at = NULL,
+          updated_at = now()
+        WHERE id = ${id} AND deleted_at IS NULL
+        RETURNING ${db.unsafe(TPL_COLS)}`
+    : await db`
+        UPDATE docgen.templates SET
+          name = ${name}, description = ${description}, body = ${body},
+          scope = ${scope}, updated_at = now()
+        WHERE id = ${id} AND deleted_at IS NULL
+        RETURNING ${db.unsafe(TPL_COLS)}`;
+  return rows.length
+    ? rowToTemplate(rows[0] as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * Approve a template version for generation. An "approved by" note is
+ * required (Ethan's spec): who approved it, recorded verbatim.
+ */
+export async function approveTemplate(
+  id: string,
+  input: { approvedBy: string; note?: string }
+): Promise<DocgenTemplateRow | null> {
+  await ensureDocgen();
+  const approvedBy = (input.approvedBy ?? "").trim().slice(0, 200);
+  if (!approvedBy) throw new Error("approved_by_required");
+  const current = await getTemplateById(id);
+  if (!current) return null;
+  if (current.sourceFormat === "text" && !current.body.trim()) {
+    throw new Error("body_required");
+  }
+  if (current.sourceFormat === "docx" && !current.docxStorageKey) {
+    throw new Error("docx_file_required");
+  }
   const db = sql();
   const rows = await db`
     UPDATE docgen.templates SET
-      name = ${name}, description = ${description}, body = ${body},
+      status = 'approved', approved_by = ${approvedBy},
+      approved_note = ${(input.note ?? "").trim().slice(0, 500)},
+      approved_at = now(), updated_at = now()
+    WHERE id = ${id} AND deleted_at IS NULL
+    RETURNING ${db.unsafe(TPL_COLS)}`;
+  return rows.length
+    ? rowToTemplate(rows[0] as Record<string, unknown>)
+    : null;
+}
+
+/** Return a template to draft (clears the approval record). */
+export async function unapproveTemplate(
+  id: string
+): Promise<DocgenTemplateRow | null> {
+  await ensureDocgen();
+  const db = sql();
+  const rows = await db`
+    UPDATE docgen.templates SET
+      status = 'draft', approved_by = '', approved_note = '',
+      approved_at = NULL, updated_at = now()
+    WHERE id = ${id} AND deleted_at IS NULL
+    RETURNING ${db.unsafe(TPL_COLS)}`;
+  return rows.length
+    ? rowToTemplate(rows[0] as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * Attach an uploaded .docx template file. Uploading a file is a
+ * content change: version bumps and the template returns to draft.
+ */
+export async function setTemplateDocx(
+  id: string,
+  input: { storageKey: string; filename: string }
+): Promise<DocgenTemplateRow | null> {
+  await ensureDocgen();
+  const current = await getTemplateById(id);
+  if (!current) return null;
+  const db = sql();
+  const rows = await db`
+    UPDATE docgen.templates SET
+      source_format = 'docx', docx_storage_key = ${input.storageKey},
+      docx_filename = ${input.filename.slice(0, 200)},
+      version = version + 1, status = 'draft',
+      approved_by = '', approved_note = '', approved_at = NULL,
       updated_at = now()
     WHERE id = ${id} AND deleted_at IS NULL
     RETURNING ${db.unsafe(TPL_COLS)}`;
   return rows.length
     ? rowToTemplate(rows[0] as Record<string, unknown>)
     : null;
+}
+
+/* --------------------- merge-field catalog --------------------- */
+
+/** Human labels + grouping for every merge field the engine knows.
+ * The drafting review screen renders one row per field actually used
+ * by the chosen template. */
+export const FIELD_CATALOG: Record<
+  string,
+  { label: string; group: string }
+> = {
+  "deal.companyName": { label: "Company name (deal)", group: "Deal" },
+  "deal.industry": { label: "Industry", group: "Deal" },
+  "deal.city": { label: "City", group: "Deal" },
+  "deal.stage": { label: "Deal stage", group: "Deal" },
+  "deal.contactName": { label: "Deal contact name", group: "Deal" },
+  "deal.contactEmail": { label: "Deal contact email", group: "Deal" },
+  "deal.broker": { label: "Broker / intermediary", group: "Deal" },
+  "deal.owner": { label: "Deal owner", group: "Deal" },
+  "deal.askingPrice": { label: "Asking price", group: "Deal terms" },
+  "deal.dealValue": { label: "Enterprise value", group: "Deal terms" },
+  "deal.revenue": { label: "Revenue (deal record)", group: "Deal terms" },
+  "deal.ebitda": { label: "EBITDA (deal record)", group: "Deal terms" },
+  "company.name": { label: "Company name", group: "Company" },
+  "company.city": { label: "Company city", group: "Company" },
+  "fin.latestRevenue": { label: "Latest revenue (financials)", group: "Financials" },
+  "fin.latestEbitda": { label: "Latest EBITDA (financials)", group: "Financials" },
+  "fin.latestPeriodEnd": { label: "Latest period end", group: "Financials" },
+  "counterparty.name": { label: "Counterparty name", group: "Counterparty" },
+  "counterparty.title": { label: "Counterparty title", group: "Counterparty" },
+  "counterparty.company": { label: "Counterparty company", group: "Counterparty" },
+  "counterparty.email": { label: "Counterparty email", group: "Counterparty" },
+  "counterparty.phone": { label: "Counterparty phone", group: "Counterparty" },
+  "counterparty.address": { label: "Counterparty address", group: "Counterparty" },
+  "investor.name": { label: "Investor name", group: "Investor" },
+  "investor.entity": { label: "Investor entity / firm", group: "Investor" },
+  "investor.contactName": { label: "Investor contact name", group: "Investor" },
+  "investor.title": { label: "Investor contact title", group: "Investor" },
+  "investor.email": { label: "Investor email", group: "Investor" },
+  "investor.address": { label: "Investor address", group: "Investor" },
+  "investor.commitment": { label: "Commitment amount", group: "Investor" },
+  "firm.name": { label: "Firm name", group: "Firm" },
+  "firm.legalName": { label: "Firm legal name", group: "Firm" },
+  "firm.address": { label: "Firm address", group: "Firm" },
+  "date.today": { label: "Today's date", group: "Dates" },
+  "date.year": { label: "Current year", group: "Dates" },
+};
+
+/** Unique {{merge.fields}} used by a template body, in first-use order. */
+export function extractTemplateFields(body: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = /\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body ?? "")) !== null) {
+    const f = m[1];
+    if (!seen.has(f)) {
+      seen.add(f);
+      out.push(f);
+    }
+  }
+  return out;
 }
 
 export async function softDeleteTemplate(id: string): Promise<boolean> {

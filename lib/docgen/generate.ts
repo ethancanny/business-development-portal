@@ -20,7 +20,7 @@ import {
   signatureFieldRects,
   SIG_DOCGEN_HEADER_LINES,
 } from "../signing/pdf";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
 import type {
   DocgenGenerationRow,
   DocgenSignatureBlock,
@@ -84,15 +84,82 @@ export const MERGE_FIELDS = [
   "fin.latestRevenue",
   "fin.latestEbitda",
   "fin.latestPeriodEnd",
+  "counterparty.name",
+  "counterparty.title",
+  "counterparty.company",
+  "counterparty.email",
+  "counterparty.phone",
+  "counterparty.address",
+  "investor.name",
+  "investor.entity",
+  "investor.contactName",
+  "investor.title",
+  "investor.email",
+  "investor.address",
+  "investor.commitment",
   "firm.name",
+  "firm.legalName",
+  "firm.address",
   "date.today",
   "date.year",
 ] as const;
 
 const FIRM_NAME = "Canny Capital Partners";
 
+/** Firm identity for contract generation (Ethan's spec, Oct 24,
+ * 2026): the legal entity + agreements address used on the firm side
+ * of every generated contract. */
+export const FIRM_LEGAL_NAME = "Canny Capital Partners, LLC";
+export const FIRM_ADDRESS = "1920 N. 125th Ln, Avondale, AZ 85392";
+
+/** The guardrail banner carried by every generated document. */
+export const DRAFT_BANNER = "Draft for attorney review.";
+
+/**
+ * Stamp the guardrail banner at the top of the PDF's first page.
+ * Applied to every generated PDF (legacy docgen + contract flow) so
+ * no generated document circulates without it. Best-effort: a stamp
+ * failure logs and returns the original bytes rather than failing
+ * generation.
+ */
+export async function stampDraftBanner(pdf: Buffer): Promise<Buffer> {
+  try {
+    const doc = await PDFDocument.load(pdf);
+    const pages = doc.getPages();
+    if (!pages.length) return pdf;
+    const font = await doc.embedFont("Helvetica-Bold");
+    const page = pages[0];
+    const { width, height } = page.getSize();
+    const text = "DRAFT FOR ATTORNEY REVIEW";
+    const size = 10;
+    const tw = font.widthOfTextAtSize(text, size);
+    page.drawRectangle({
+      x: 0,
+      y: height - 26,
+      width,
+      height: 26,
+      color: rgb(0.72, 0.16, 0.13),
+    });
+    page.drawText(text, {
+      x: Math.max(0, (width - tw) / 2),
+      y: height - 18,
+      size,
+      font,
+      color: rgb(1, 1, 1),
+    });
+    const out = await doc.save();
+    return Buffer.from(out);
+  } catch (err) {
+    console.error(
+      "[docgen] banner stamp failed",
+      err instanceof Error ? err.message : String(err)
+    );
+    return pdf;
+  }
+}
+
 /** $X,XXX,XXX or null when the figure is absent / zero / non-finite. */
-function moneyOrNull(v: number | null | undefined): string | null {
+export function moneyOrNull(v: number | null | undefined): string | null {
   if (v === null || v === undefined || !isFinite(v) || v === 0) return null;
   const r = Math.round(v);
   const s = Math.abs(r).toLocaleString("en-US", {
@@ -101,19 +168,21 @@ function moneyOrNull(v: number | null | undefined): string | null {
   return r < 0 ? `-$${s}` : `$${s}`;
 }
 
-function textOrNull(v: string | null | undefined): string | null {
+export function textOrNull(v: string | null | undefined): string | null {
   const s = (v ?? "").trim();
   return s ? s : null;
 }
 
-interface BuiltContext {
+export interface BuiltContext {
   context: Record<string, string | null>;
   companyId: string | null;
   companyName: string;
   dealId: string;
 }
 
-async function buildContext(dealId: string): Promise<BuiltContext> {
+/** Deal-anchored merge context (exported for the contract-generation
+ * flow, which layers counterparty / investor values on top). */
+export async function buildContext(dealId: string): Promise<BuiltContext> {
   const deals = await getDeals();
   const deal = deals.find((d) => d.id === dealId);
   if (!deal) throw new DocGenError("deal_not_found");
@@ -201,7 +270,25 @@ async function buildContext(dealId: string): Promise<BuiltContext> {
     "fin.latestRevenue": finRevenue,
     "fin.latestEbitda": finEbitda,
     "fin.latestPeriodEnd": finPeriodEnd,
+    // Counterparty / investor fields resolve to null in the plain
+    // deal context — the contract flow fills them from the Directory
+    // (and the drafting review screen can override every value).
+    "counterparty.name": textOrNull(deal.contactName),
+    "counterparty.title": null,
+    "counterparty.company": textOrNull(deal.companyName),
+    "counterparty.email": textOrNull(deal.contactEmail),
+    "counterparty.phone": null,
+    "counterparty.address": null,
+    "investor.name": null,
+    "investor.entity": null,
+    "investor.contactName": null,
+    "investor.title": null,
+    "investor.email": null,
+    "investor.address": null,
+    "investor.commitment": null,
     "firm.name": FIRM_NAME,
+    "firm.legalName": FIRM_LEGAL_NAME,
+    "firm.address": FIRM_ADDRESS,
     "date.today": todayLong,
     "date.year": year,
   };
@@ -267,7 +354,7 @@ function wrapLine(line: string, width = 100): string[] {
   return out;
 }
 
-function bodyToPdfInput(
+export function bodyToPdfInput(
   template: DocgenTemplateRow,
   rendered: string,
   companyName: string,
@@ -331,6 +418,12 @@ export async function generateDocument(input: {
   else if (input.templateKey)
     template = await getTemplateByKey(input.templateKey.trim());
   if (!template) throw new DocGenError("template_not_found");
+  // Contract-generation rule (Oct 24, 2026): ONLY approved templates
+  // can generate documents — enforced here so every generation path
+  // (legacy panel, contract flow) shares the gate.
+  if (template.status !== "approved") {
+    throw new DocGenError("template_not_approved");
+  }
 
   const built = await buildContext(dealId);
   const { text, unresolvedFields } = renderBody(template.body, built.context);
@@ -356,7 +449,8 @@ export async function generateDocument(input: {
       )
     );
   }
-  const buffer = buildSimplePdf(pdfInput);
+  const rawBuffer = buildSimplePdf(pdfInput);
+  const buffer = await stampDraftBanner(rawBuffer);
   let signatureBlocks: DocgenSignatureBlock[] | null = null;
   if (signerRoles && signerRoles.length) {
     const pageCount = (await PDFDocument.load(buffer)).getPageCount();
