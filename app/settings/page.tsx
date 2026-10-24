@@ -9,6 +9,7 @@ import ValuationParamsSettings from "@/components/ValuationParamsSettings";
 import SettingsNav from "@/components/settings/SettingsNav";
 import StageGatesCard from "@/components/settings/StageGatesCard";
 import EsignSettingsCard from "@/components/docgen/EsignSettingsCard";
+import InvestmentTypesSettings from "@/components/settings/InvestmentTypesSettings";
 
 /**
  * Settings — General (CRM Phase 2, Oct 2026; restructured with the
@@ -137,6 +138,20 @@ export default function SettingsPage() {
             expiry, and recent envelopes.
           </p>
           <EsignSettingsCard />
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Investment types
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            The Investments pipeline&apos;s deal types (Platform LBO,
+            Add-on, Early Stage — Minority Growth is defined but off
+            until enabled here), each type&apos;s stage list, the
+            structured metric fields deals carry, and the sector packs
+            that apply extra fields by industry.
+          </p>
+          <InvestmentTypesSettings />
         </section>
       </div>
     </div>
