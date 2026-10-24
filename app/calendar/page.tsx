@@ -900,8 +900,8 @@ export default function CalendarPage() {
               </p>
               <p className="text-xs text-slate-500 dark:text-white/60">
                 One sign-in, and events you create or edit here land in Outlook instantly —
-                and Outlook changes appear here in seconds. Calendar-only permission; no
-                mail access.
+                and Outlook changes appear here in seconds. The sign-in also refreshes
+                the portal's mail and file permissions.
               </p>
             </div>
             <a

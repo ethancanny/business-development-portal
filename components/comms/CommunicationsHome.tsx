@@ -1,15 +1,15 @@
 "use client";
 
 /**
- * CommunicationsHome — Part 12 landing: an honest status strip (AI
- * provider + email transport, rendered EXACTLY as /status reports —
- * including setup steps when a provider is setup_required) over the
- * Reports | Templates | Schedules tabs.
+ * CommunicationsHome — Part 12 landing: the Reports | Templates |
+ * Schedules tabs. (The AI/email setup-requirement cards that used to
+ * sit above the tabs were removed at Ethan's direction, Oct 23, 2026
+ * — provider state still lives in the send/generate paths and in
+ * Settings -> Integrations; the /status counts line remains.)
  */
 
 import { useCallback, useEffect, useState } from "react";
 import PageHero from "@/components/PageHero";
-import { SkeletonRows } from "@/components/ui";
 import ReportsList from "@/components/comms/ReportsList";
 import TemplatesList from "@/components/comms/TemplatesList";
 import SchedulesPanel from "@/components/comms/SchedulesPanel";
@@ -28,52 +28,16 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "schedules", label: "Schedules" },
 ];
 
-function StatusCard({
-  title,
-  stateLabel,
-  stateClass,
-  detail,
-  setupSteps,
-}: {
-  title: string;
-  stateLabel: string;
-  stateClass: string;
-  detail?: string;
-  setupSteps?: string[];
-}) {
-  return (
-    <div className="card-surface p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="micro-label">{title}</p>
-        <span className={`badge ${stateClass}`}>{stateLabel}</span>
-      </div>
-      {detail && (
-        <p className="mt-2 text-sm text-slate-600 dark:text-white/70">{detail}</p>
-      )}
-      {setupSteps && setupSteps.length > 0 && (
-        <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-amber-800 dark:text-amber-200">
-          {setupSteps.map((s, i) => (
-            <li key={i}>{s}</li>
-          ))}
-        </ol>
-      )}
-    </div>
-  );
-}
-
 export default function CommunicationsHome() {
   const [tab, setTab] = useState<TabKey>("reports");
   const [status, setStatus] = useState<CommsStatus | null>(null);
-  const [statusFailed, setStatusFailed] = useState(false);
 
   const loadStatus = useCallback(async () => {
     try {
       const data = await api<CommsStatus & Rec>(`${COMMS_API}/status`);
       setStatus(data);
-      setStatusFailed(false);
     } catch {
       setStatus(null);
-      setStatusFailed(true);
     }
   }, []);
 
@@ -99,8 +63,6 @@ export default function CommunicationsHome() {
     }
   };
 
-  const ai = status?.ai;
-  const email = status?.email;
   const counts = status?.counts ?? {};
 
   return (
@@ -113,59 +75,8 @@ export default function CommunicationsHome() {
       />
       <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
 
-      {/* Status strip — states rendered exactly as the API reports. */}
+      {/* Counts line (the setup-requirement cards were removed). */}
       <div className="mt-5">
-        {!status && !statusFailed && <SkeletonRows rows={2} />}
-        {statusFailed && (
-          <div className="card-surface p-4">
-            <p className="text-sm text-red-700 dark:text-red-300">
-              Could not load the reporting status.{" "}
-              <button type="button" className="font-semibold underline" onClick={() => void loadStatus()}>
-                Retry
-              </button>
-            </p>
-          </div>
-        )}
-        {status && (
-          <div className="grid gap-4 md:grid-cols-2">
-            <StatusCard
-              title="AI narrative"
-              stateLabel={
-                ai?.configured
-                  ? `Configured${ai.provider ? ` · ${ai.provider}` : ""}`
-                  : "Setup required"
-              }
-              stateClass={ai?.configured ? "badge-fit" : "badge-warn"}
-              detail={ai?.detail}
-              setupSteps={ai && !ai.configured ? ai.setupSteps : undefined}
-            />
-            <StatusCard
-              title="Email transport"
-              stateLabel={
-                !email
-                  ? "Unknown"
-                  : !email.connected
-                    ? "Not connected"
-                    : email.mailSend === "available"
-                      ? "Mail.Send available"
-                      : email.mailSend === "setup_required"
-                        ? "Mail.Send setup required"
-                        : "Mail.Send unknown"
-              }
-              stateClass={
-                email?.connected && email.mailSend === "available"
-                  ? "badge-fit"
-                  : "badge-warn"
-              }
-              detail={email?.detail}
-              setupSteps={
-                email && email.mailSend === "setup_required"
-                  ? email.setupSteps
-                  : undefined
-              }
-            />
-          </div>
-        )}
         {status && Object.keys(counts).length > 0 && (
           <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400 dark:text-white/40">
             {Object.entries(counts).map(([k, v]) => (
