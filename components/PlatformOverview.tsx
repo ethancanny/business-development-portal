@@ -76,11 +76,34 @@ interface OverviewPayload {
   summary: PlatformSummary;
   cards: CompanyCard[];
   earlyWarning?: EarlyWarningItem[];
+  activityPulse?: ActivityPulseData | null;
+}
+
+/** Activity pulse (Oct 23, 2026): triage counts + latest items from
+ *  GET /api/platform/overview's activityPulse field — the BD hub's
+ *  BdActivitySummary shape (lib/hubs/bd.ts), mirrored here like the
+ *  other API contracts in this file. "Waiting for triage" = status
+ *  'new' AND read_at IS NULL, the app-badge predicate. */
+export interface ActivityPulseItem {
+  id: string;
+  kind: string;
+  title: string;
+  createdAt: string;
+  isNew: boolean;
+}
+
+export interface ActivityPulseData {
+  counts: {
+    businessesForSale: number;
+    operatorsAvailable: number;
+    marketNotes: number;
+  };
+  items: ActivityPulseItem[];
 }
 
 /* ---------------- Widget layout (localStorage-persisted) ---------------- */
 
-type WidgetId = "funnel" | "heatmap" | "attention" | "map" | "rag";
+type WidgetId = "funnel" | "heatmap" | "attention" | "map" | "rag" | "pulse";
 
 const WIDGET_DEFS: { id: WidgetId; title: string }[] = [
   { id: "funnel", title: "Pipeline funnel" },
@@ -88,6 +111,7 @@ const WIDGET_DEFS: { id: WidgetId; title: string }[] = [
   { id: "attention", title: "Needs attention" },
   { id: "map", title: "Arizona footprint" },
   { id: "rag", title: "Portfolio RAG" },
+  { id: "pulse", title: "Activity pulse" },
 ];
 const WIDGET_STORAGE_KEY = "ccp-overview-widgets";
 
@@ -539,6 +563,104 @@ function RagWidget({
   );
 }
 
+/* ---------------- Activity pulse (Oct 23, 2026) ----------------
+ * The 6th widget, chosen by Ethan to fill the slot Capital Stacks
+ * vacated: how much Activity triage is waiting, by kind, with the
+ * newest items. Data arrives on the overview payload — no fetch,
+ * no recompute here. */
+
+function pulseKindLabel(kind: string): string {
+  switch (kind) {
+    case "business_for_sale":
+      return "For sale";
+    case "operator_available":
+      return "Operator";
+    case "market_note":
+      return "Note";
+    default:
+      return kind;
+  }
+}
+
+function PulseWidget({ pulse }: { pulse: ActivityPulseData | null | undefined }) {
+  if (!pulse) {
+    return (
+      <EmptyState
+        title="Activity pulse unavailable"
+        message="Triage counts couldn't be loaded — the Activity feed itself is unaffected."
+      />
+    );
+  }
+  const rows = [
+    ["Businesses for sale", pulse.counts.businessesForSale],
+    ["Operators available", pulse.counts.operatorsAvailable],
+    ["Market notes", pulse.counts.marketNotes],
+  ] as const;
+  const total = rows.reduce((sum, [, n]) => sum + (n ?? 0), 0);
+  if (total === 0) {
+    return (
+      <EmptyState
+        title="All caught up"
+        message="Nothing is waiting for triage in the Activity feed."
+      />
+    );
+  }
+  return (
+    <div>
+      <p className="tnum font-display text-4xl font-semibold text-[#0d1f3c] dark:text-white">
+        {total}
+        <span className="ml-2 align-middle text-sm font-normal text-slate-500 dark:text-white/50">
+          waiting for triage
+        </span>
+      </p>
+      <ul className="mt-3 space-y-1.5">
+        {rows.map(([label, n]) => (
+          <li
+            key={label}
+            className="flex items-baseline justify-between gap-2 text-sm"
+          >
+            <span className="text-slate-600 dark:text-white/70">{label}</span>
+            <span className="tnum font-semibold text-[#0d1f3c] dark:text-white">
+              {n}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {pulse.items.length > 0 && (
+        <ul className="mt-3 divide-y divide-slate-100 border-t border-slate-100 dark:divide-white/5 dark:border-white/10">
+          {pulse.items.slice(0, 3).map((it) => (
+            <li key={it.id} className="py-1.5 first:pt-2 last:pb-0">
+              <Link
+                href="/activity"
+                className="flex items-center gap-2 text-sm text-slate-800 hover:text-gold-700 dark:text-white/90 dark:hover:text-gold-400"
+              >
+                {it.isNew && (
+                  <span
+                    aria-hidden
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#b8975a]"
+                  />
+                )}
+                <span className="min-w-0 truncate">{it.title}</span>
+                <span className="ml-auto shrink-0 text-xs text-caption">
+                  {pulseKindLabel(it.kind)} · {fmtRelTime(it.createdAt)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-3">
+        <Link
+          href="/activity"
+          className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+        >
+          Open Activity →
+        </Link>
+      </p>
+    </div>
+  );
+}
+
 /* ---------------- Early warning (Phase 9) ----------------
  * Rendered exactly as served by GET /api/platform/overview's
  * earlyWarning array — no recompute, no client scoring. */
@@ -684,6 +806,12 @@ export default function PlatformOverview() {
         summary: data.summary,
         cards: Array.isArray(data.cards) ? data.cards : [],
         earlyWarning: Array.isArray(data.earlyWarning) ? data.earlyWarning : [],
+        activityPulse:
+          data.activityPulse &&
+          typeof data.activityPulse === "object" &&
+          data.activityPulse.counts
+            ? data.activityPulse
+            : null,
       });
       setLoadFailed(false);
     } catch {
@@ -739,6 +867,8 @@ export default function PlatformOverview() {
         return <ArizonaWidget cards={allCards} />;
       case "rag":
         return <RagWidget summary={summary} cards={allCards} />;
+      case "pulse":
+        return <PulseWidget pulse={payload?.activityPulse} />;
     }
   };
 

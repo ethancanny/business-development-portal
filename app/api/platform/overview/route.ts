@@ -26,8 +26,23 @@ export async function GET(req: NextRequest) {
     );
     earlyWarning = null;
   }
+  // Activity pulse (Oct 23, 2026): live triage counts + latest items
+  // from the deal-flow store, same additive pattern as earlyWarning.
+  // The predicate (status 'new' AND never read) is the BD hub's own
+  // (lib/hubs/bd.ts) — the widget can never disagree with the badge.
+  let activityPulse: unknown = null;
+  try {
+    const { getBdActivitySummary } = await import("@/lib/hubs/bd");
+    activityPulse = await getBdActivitySummary();
+  } catch (err) {
+    console.error(
+      "[overview] activity pulse read failed",
+      err instanceof Error ? err.message : String(err)
+    );
+    activityPulse = null;
+  }
   return NextResponse.json(
-    { ...data, earlyWarning },
+    { ...data, earlyWarning, activityPulse },
     {
       headers: { "Cache-Control": "private, max-age=300" },
     }
