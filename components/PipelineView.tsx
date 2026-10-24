@@ -24,8 +24,9 @@ import {
   CapitalStacksPanel,
   type PlatformSummary,
 } from "@/components/PlatformOverview";
-import CompanyMark from "@/components/identity/CompanyMark";
+import CompanyLogo from "@/components/CompanyLogo";
 import PersonAvatar from "@/components/PersonAvatar";
+import { StageMoveMenu } from "@/components/StageMove";
 import SectorChip from "@/components/SectorChip";
 import { dealWebsite } from "@/components/DealTable";
 
@@ -244,6 +245,26 @@ export default function PipelineView({
     [pairings, search, ownerFilter, stageFilter]
   );
 
+  /** Kanban columns: the active stage list PLUS any stage a visible
+   * deal actually sits in. The "All" list is the Platform LBO set
+   * (Step 1), so an Early Stage deal in Intro / Partner Meeting /
+   * Term Sheet matched no column and vanished from the board — no
+   * card, and no way to move it (Oct 24, 2026). Extra columns appear
+   * only when such a deal is actually in view. */
+  const kanbanStages: readonly string[] = useMemo(() => {
+    const list = [...activeStages];
+    if (tab === "deals" || tab === "paired") {
+      for (const d of filteredDeals) {
+        if (!list.includes(d.stage)) list.push(d.stage);
+      }
+      for (const p of filteredPairings) {
+        if (!list.includes(p.deal.stage)) list.push(p.deal.stage);
+      }
+    }
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStages, filteredDeals, filteredPairings, tab]);
+
   const unpairedDeals = useMemo(
     () => deals.filter((d) => !(d.operatorIds ?? []).length),
     [deals]
@@ -257,6 +278,13 @@ export default function PipelineView({
     setDealModal(null);
     setExecModal(null);
     load();
+  };
+
+  // Stage moves from the row/card/Kanban Move-to-stage menus: the move
+  // itself already succeeded server-side; refetch so every surface
+  // (columns, counts, stage filter) agrees without a page reload.
+  const handleStageMoved = () => {
+    void load();
   };
 
   // The one Value shown everywhere: stated price (structure sum →
@@ -429,6 +457,7 @@ export default function PipelineView({
               bd={bd}
               holdView={holdView}
               allDeals={deals}
+              onStageMoved={handleStageMoved}
             />
           ) : view === "cards" ? (
             <DealCardGrid
@@ -437,10 +466,12 @@ export default function PipelineView({
               rates={{ prime: primeRate, sba: sbaRate }}
               onSelect={(d) => setDealModal({ deal: d })}
               allDeals={deals}
+              bd={bd}
+              onStageMoved={handleStageMoved}
             />
           ) : (
           <KanbanBoard<Deal>
-            stages={activeStages}
+            stages={kanbanStages}
             items={filteredDeals}
             getId={(d) => d.id}
             getStage={(d) => d.stage}
@@ -449,10 +480,10 @@ export default function PipelineView({
             renderCard={(d) => (
               <div>
                 <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                  <CompanyMark
-                    companyId={d.companyId ?? `co_${d.id}`}
+                  <CompanyLogo
                     name={d.companyName}
-                    logoVersion={d.logoVersion ?? 0}
+                    website={dealWebsite(d)}
+                    sector={dealFocusSector(d.industry) ?? d.industry}
                     size={20}
                   />
                   {d.companyName}
@@ -494,6 +525,9 @@ export default function PipelineView({
                       Unclaimed
                     </span>
                   )}
+                </div>
+                <div className="mt-2.5 border-t border-slate-100 pt-2 dark:border-white/10">
+                  <StageMoveMenu deal={d} bd={bd} onMoved={handleStageMoved} />
                 </div>
               </div>
             )}
@@ -572,10 +606,12 @@ export default function PipelineView({
                 multiples={multiples}
                 rates={{ prime: primeRate, sba: sbaRate }}
                 onSelectDeal={(d) => setDealModal({ deal: d })}
+                bd={bd}
+                onStageMoved={handleStageMoved}
               />
             ) : (
               <KanbanBoard<Pairing>
-                stages={activeStages}
+                stages={kanbanStages}
                 items={filteredPairings}
                 getId={(x) => `${x.deal.id}-${x.operator.id}`}
                 getStage={(x) => x.deal.stage}
@@ -584,10 +620,10 @@ export default function PipelineView({
                 renderCard={({ deal: d, operator: op, isMatch }) => (
                   <div>
                     <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                      <CompanyMark
-                        companyId={d.companyId ?? `co_${d.id}`}
+                      <CompanyLogo
                         name={d.companyName}
-                        logoVersion={d.logoVersion ?? 0}
+                        website={dealWebsite(d)}
+                        sector={dealFocusSector(d.industry) ?? d.industry}
                         size={20}
                       />
                       {d.companyName}
@@ -612,6 +648,9 @@ export default function PipelineView({
                           ✓ industry match
                         </span>
                       )}
+                    </div>
+                    <div className="mt-2.5 border-t border-slate-100 pt-2 dark:border-white/10">
+                      <StageMoveMenu deal={d} bd={bd} onMoved={handleStageMoved} />
                     </div>
                   </div>
                 )}

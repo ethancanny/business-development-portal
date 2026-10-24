@@ -18,13 +18,11 @@ import { fmtDate, fmtMoney, uniqueStrings } from "@/lib/format";
 import PageHero from "@/components/PageHero";
 import type { MiMultiple } from "@/lib/types";
 import { dealFocusSector, resolveDealValue, type MarketRates } from "@/lib/valuation";
-import SectorChip, { StageChip } from "@/components/SectorChip";
+import SectorChip from "@/components/SectorChip";
 import DealRecordHeader from "@/components/DealRecordHeader";
+import { StageStepper } from "@/components/StageMove";
 import DealTimeline from "@/components/DealTimeline";
 import { GenerateDocumentButton } from "@/components/docgen/GenerateDocument";
-import DealBanner from "@/components/identity/DealBanner";
-import RecordRecent from "@/components/identity/RecordRecent";
-import CodenameEditor from "@/components/identity/CodenameEditor";
 
 export default function DealDetailPage() {
   const params = useParams();
@@ -103,13 +101,6 @@ export default function DealDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Deal Identity: the browser tab carries the company name.
-  useEffect(() => {
-    if (deal?.companyName) {
-      document.title = `${deal.companyName} · Canny Capital Partners`;
-    }
-  }, [deal?.companyName]);
-
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -136,8 +127,6 @@ export default function DealDetailPage() {
 
   return (
     <>
-      <RecordRecent companyId={deal.companyId} dealId={deal.id} />
-      <DealBanner companyId={deal.companyId} dealId={deal.id} />
       <PageHero
         eyebrow="Acquisition target"
         title={deal.companyName}
@@ -159,23 +148,10 @@ export default function DealDetailPage() {
           <DealRecordHeader deal={deal} multiples={multiples} rates={rates} />
         </div>
 
-        {/* Deal Identity: codename + external-rule toggle. */}
-        <div className="mt-3">
-          <CodenameEditor
-            dealId={deal.id}
-            codename={deal.codename}
-            codenameExternal={deal.codenameExternal}
-            onSaved={(codename, codenameExternal) =>
-              setDeal((d) => (d ? { ...d, codename, codenameExternal } : d))
-            }
-          />
-        </div>
-
         {/* Dossier header */}
         <div className="mt-3 rounded-xl border border-slate-200 bg-white p-6 dark:border-white/10 dark:bg-[#132847]">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2">
-              <StageChip stage={deal.stage} />
               {deal.industry && (
                 <SectorChip sector={dealFocusSector(deal.industry) ?? deal.industry} />
               )}
@@ -248,6 +224,16 @@ export default function DealDetailPage() {
               </div>
             </div>
           </div>
+
+        {/* Stage control (Oct 24, 2026): the deal's own type stage
+            list as a stepper in the header — one click moves the deal
+            through the gated deals PUT (gates + logged override +
+            stage-change cascades all fire server-side). Before this,
+            the stage was display-only on this page and could only be
+            changed from a select buried in the edit form. */}
+        <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
+          <StageStepper deal={deal} onMoved={() => { void load(); }} />
+        </div>
 
         {(deal.revenue != null ||
           deal.ebitda != null ||
