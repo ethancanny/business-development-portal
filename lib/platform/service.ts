@@ -453,7 +453,7 @@ export async function getIntegrations(): Promise<IntegrationStatus[]> {
           ? "ok"
           : raw === "skipped"
             ? "skipped"
-            : raw === "error" && job.endsWith("-xcheck")
+            : raw === "check" || (raw === "error" && job.endsWith("-xcheck"))
               ? "check"
               : raw === "error"
                 ? "error"

@@ -2422,7 +2422,7 @@ export async function getEntities(status?: string): Promise<MiEntity[]> {
 
 /* ---------------- Sync log ---------------- */
 
-export async function logSync(job: string, status: "ok" | "error" | "skipped", added: number, message: string): Promise<void> {
+export async function logSync(job: string, status: "ok" | "error" | "skipped" | "check", added: number, message: string): Promise<void> {
   await ensureSchema();
   await sql()`INSERT INTO mi_sync_log (id, job, status, added, message) VALUES (${newId()}, ${job}, ${status}, ${added}, ${message})`;
 }

@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
   }
 
   const reject = async (reason: string) => {
-    await logSync("intel-news-summary", "error", 0, `rejected summary for ${id}: ${reason}`.slice(0, 500)).catch(() => undefined);
+    await logSync("intel-news-summary", "check", 0, `rejected summary for ${id}: ${reason}`.slice(0, 500)).catch(() => undefined);
     return NextResponse.json({ error: `Summary rejected: ${reason}` }, { status: 400 });
   };
 
