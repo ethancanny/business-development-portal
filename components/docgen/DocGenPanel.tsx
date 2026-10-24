@@ -24,6 +24,8 @@ interface DocgenTemplate {
   key: string;
   name: string;
   description: string;
+  status: string;
+  scope: string;
 }
 
 interface DealOption {
@@ -95,7 +97,12 @@ export default function DocGenPanel({ companyId }: { companyId: string }) {
       const tplData = (await tplRes.json()) as {
         templates?: DocgenTemplate[];
       };
-      const tpls = Array.isArray(tplData.templates) ? tplData.templates : [];
+      // Oct 24, 2026 (Contract generation): generation is
+      // approved-templates-only — this panel lists only templates
+      // Ethan has approved in Settings → Templates.
+      const tpls = (
+        Array.isArray(tplData.templates) ? tplData.templates : []
+      ).filter((t) => t.status === "approved");
       setTemplates(tpls);
       setTemplateId((cur) => cur || tpls[0]?.id || "");
 
@@ -180,7 +187,9 @@ export default function DocGenPanel({ companyId }: { companyId: string }) {
         setGenError(
           code === "template_not_found"
             ? "That template could not be found — it may have been deleted. Reload and try again."
-            : code === "deal_not_found"
+            : code === "template_not_approved"
+              ? "That template is not approved — only approved templates generate documents. Approve it in Settings → Templates."
+              : code === "deal_not_found"
               ? "That deal could not be found in the pipeline."
               : `Generation failed (${code}).`
         );
@@ -216,8 +225,8 @@ export default function DocGenPanel({ companyId }: { companyId: string }) {
         />
       ) : templates.length === 0 ? (
         <EmptyState
-          title="No templates yet"
-          message="Document templates (LOI, IOI, NDA, CIM outline, closing checklist, board consent) will appear here once available."
+          title="No approved templates"
+          message="Only approved templates can generate documents. Templates are managed and approved in Settings → Templates."
         />
       ) : deals.length === 0 ? (
         <EmptyState

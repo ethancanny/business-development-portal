@@ -12,6 +12,7 @@ import { usePathname } from "next/navigation";
 const ITEMS: { href: string; label: string }[] = [
   { href: "/settings", label: "General" },
   { href: "/settings/integrations", label: "Integrations" },
+  { href: "/settings/templates", label: "Templates" },
   { href: "/settings/users-roles", label: "Users & Roles" },
   { href: "/settings/data-explorer", label: "Data Explorer" },
   { href: "/settings/audit-trail", label: "Audit Trail" },

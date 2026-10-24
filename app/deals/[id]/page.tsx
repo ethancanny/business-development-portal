@@ -21,6 +21,7 @@ import { dealFocusSector, resolveDealValue, type MarketRates } from "@/lib/valua
 import SectorChip, { StageChip } from "@/components/SectorChip";
 import DealRecordHeader from "@/components/DealRecordHeader";
 import DealTimeline from "@/components/DealTimeline";
+import { GenerateDocumentButton } from "@/components/docgen/GenerateDocument";
 
 export default function DealDetailPage() {
   const params = useParams();
@@ -214,6 +215,13 @@ export default function DealDetailPage() {
               >
                 Edit account
               </button>
+              <div className="mt-2">
+                <GenerateDocumentButton
+                  scope="deal"
+                  dealId={deal.id}
+                  className="rounded-lg border border-[#0d1f3c] px-4 py-2 text-sm font-semibold text-[#0d1f3c] hover:bg-slate-50 dark:border-[#b8975a] dark:text-[#e8dfc8] dark:hover:bg-white/5"
+                />
+              </div>
             </div>
           </div>
 

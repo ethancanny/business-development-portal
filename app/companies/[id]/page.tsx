@@ -30,6 +30,7 @@ import GenerateReportButton from "@/components/comms/GenerateReportButton";
 import FinancialsSection from "@/components/FinancialsSection";
 import FinancialAnalysis from "@/components/FinancialAnalysis";
 import DocGenPanel from "@/components/docgen/DocGenPanel";
+import ContractsPanel from "@/components/docgen/ContractsPanel";
 import AddonsSection from "@/components/AddonsSection";
 
 interface CompanyDetail extends CompanyCard {
@@ -304,6 +305,8 @@ export default function CompanyProfilePage() {
           <FinancialAnalysis companyId={c.id} />
 
           <DocGenPanel companyId={c.id} />
+
+          <ContractsPanel companyId={c.id} />
 
           <AddonsSection dealIds={linked.deals.map((d) => d.id)} />
 
