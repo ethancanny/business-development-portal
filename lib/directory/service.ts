@@ -28,19 +28,34 @@ export function normalizeEntityKind(raw: unknown): DirectoryEntityKind | null {
   return null;
 }
 
+/** Type tags as displayed everywhere downstream. Legacy "lp" tags
+ * fold into "investor" (Ethan, Oct 23, 2026: the Directory only uses
+ * "Investor"), and duplicates collapse. */
+function normalizeTypes(tags: string[]): string[] {
+  const out: string[] = [];
+  for (const t of tags) {
+    const id = t === "lp" ? "investor" : t;
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
 function parseTypes(v: unknown): string[] {
-  if (Array.isArray(v)) return v.map((t) => String(t)).filter(Boolean);
+  if (Array.isArray(v))
+    return normalizeTypes(v.map((t) => String(t)).filter(Boolean));
   if (typeof v === "string") {
     const s = v.trim();
     if (!s) return [];
     if (s.startsWith("{") && s.endsWith("}")) {
-      return s
-        .slice(1, -1)
-        .split(",")
-        .map((t) => t.trim().replace(/^"|"$/g, ""))
-        .filter(Boolean);
+      return normalizeTypes(
+        s
+          .slice(1, -1)
+          .split(",")
+          .map((t) => t.trim().replace(/^"|"$/g, ""))
+          .filter(Boolean)
+      );
     }
-    return [s];
+    return normalizeTypes([s]);
   }
   return [];
 }
@@ -132,7 +147,7 @@ export async function listDirectory(
         AND (${typeParam} = '' OR EXISTS (
           SELECT 1 FROM directory.type_tags ft
           WHERE ft.entity_kind = 'person' AND ft.entity_id = p.id
-            AND ft.type = ${typeParam}))
+            AND (ft.type = ${typeParam} OR (${typeParam} = 'investor' AND ft.type = 'lp'))))
         AND (${q} = '' OR p.normalized_name ILIKE ${like}
           OR p.name ILIKE ${like} OR p.email ILIKE ${like}
           OR p.search_vector @@ plainto_tsquery('english', ${q}))
@@ -153,7 +168,7 @@ export async function listDirectory(
         AND (${typeParam} = '' OR EXISTS (
           SELECT 1 FROM directory.type_tags ft
           WHERE ft.entity_kind = 'organization' AND ft.entity_id = o.id
-            AND ft.type = ${typeParam}))
+            AND (ft.type = ${typeParam} OR (${typeParam} = 'investor' AND ft.type = 'lp'))))
         AND (${q} = '' OR o.normalized_name ILIKE ${like}
           OR o.name ILIKE ${like} OR o.website ILIKE ${like})
     ) u
@@ -188,7 +203,7 @@ export async function listDirectory(
           AND (${typeParam} = '' OR EXISTS (
             SELECT 1 FROM directory.type_tags ft
             WHERE ft.entity_kind = 'person' AND ft.entity_id = p.id
-              AND ft.type = ${typeParam}))
+              AND (ft.type = ${typeParam} OR (${typeParam} = 'investor' AND ft.type = 'lp'))))
           AND (${q} = '' OR p.normalized_name ILIKE ${like}
             OR p.name ILIKE ${like} OR p.email ILIKE ${like}
             OR p.search_vector @@ plainto_tsquery('english', ${q})))
@@ -199,7 +214,7 @@ export async function listDirectory(
           AND (${typeParam} = '' OR EXISTS (
             SELECT 1 FROM directory.type_tags ft
             WHERE ft.entity_kind = 'organization' AND ft.entity_id = o.id
-              AND ft.type = ${typeParam}))
+              AND (ft.type = ${typeParam} OR (${typeParam} = 'investor' AND ft.type = 'lp'))))
           AND (${q} = '' OR o.normalized_name ILIKE ${like}
             OR o.name ILIKE ${like} OR o.website ILIKE ${like}))
     ) AS n`;

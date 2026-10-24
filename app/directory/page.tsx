@@ -26,6 +26,7 @@ import PageHero from "@/components/PageHero";
 import { CardSkeleton, EmptyState, ErrorState, SavedViewChips } from "@/components/ui";
 import DirectoryGrid, {
   DIRECTORY_TYPES,
+  DirectoryTable,
   type DirectoryItem,
   type DirectoryKind,
 } from "@/components/DirectoryUnified";
@@ -287,6 +288,25 @@ export default function Directory() {
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  // View switch (Ethan, Oct 23, 2026): Table is the default; Kanban is
+  // the card grid. The choice persists for the session.
+  const [view, setView] = useState<"table" | "kanban">("table");
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem("ccp-dir-view");
+      if (saved === "kanban" || saved === "table") setView(saved);
+    } catch {
+      /* storage unavailable — table default stands */
+    }
+  }, []);
+  const selectView = (v: "table" | "kanban") => {
+    setView(v);
+    try {
+      window.sessionStorage.setItem("ccp-dir-view", v);
+    } catch {
+      /* storage unavailable — view still switches */
+    }
+  };
 
   // Deep link: ?q= is read once on mount; after the first result set
   // for that query lands, the matching record auto-opens (old-page
@@ -453,6 +473,24 @@ export default function Directory() {
               activeId={typeFilter}
               onSelect={(id) => setTypeFilter(id)}
             />
+            <span className="ml-auto flex shrink-0 gap-1.5" role="group" aria-label="Directory view">
+              <button
+                type="button"
+                onClick={() => selectView("table")}
+                aria-pressed={view === "table"}
+                className={`chip ${view === "table" ? "chip-active" : ""}`}
+              >
+                Table
+              </button>
+              <button
+                type="button"
+                onClick={() => selectView("kanban")}
+                aria-pressed={view === "kanban"}
+                className={`chip ${view === "kanban" ? "chip-active" : ""}`}
+              >
+                Kanban
+              </button>
+            </span>
           </div>
         </div>
 
@@ -500,11 +538,19 @@ export default function Directory() {
                 Showing {items.length} of {total} contact{total === 1 ? "" : "s"}
                 {q.trim() ? ` for “${q.trim()}”` : ""}
               </p>
-              <DirectoryGrid
-                items={items}
-                selectedId={selected ? selected.id : null}
-                onSelect={openRecord}
-              />
+              {view === "table" ? (
+                <DirectoryTable
+                  items={items}
+                  selectedId={selected ? selected.id : null}
+                  onSelect={openRecord}
+                />
+              ) : (
+                <DirectoryGrid
+                  items={items}
+                  selectedId={selected ? selected.id : null}
+                  onSelect={openRecord}
+                />
+              )}
               {items.length < total && (
                 <div className="mt-6 text-center">
                   <button
