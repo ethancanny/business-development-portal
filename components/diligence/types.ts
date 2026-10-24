@@ -14,6 +14,13 @@ export interface DealContext {
   stage: string;
   /** Claimed-by partner (added server-side for the DD hub cards). */
   owner?: string;
+  /** Redesign header facts (from the deals table, server-side). */
+  investmentType?: string;
+  industry?: string;
+  askingPrice?: number | null;
+  dealValue?: number | null;
+  ebitda?: number | null;
+  revenue?: number | null;
 }
 
 export interface WorkspaceRow {
@@ -23,6 +30,10 @@ export interface WorkspaceRow {
   status: string;
   notes: string;
   createdBy: string;
+  /** Key dates (redesign): LOI signed, exclusivity expiry, target close. */
+  loiDate?: string | null;
+  exclusivityExpiry?: string | null;
+  targetCloseDate?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -36,6 +47,9 @@ export interface ChecklistItem {
   status: string;
   dueDate: string | null;
   notes: string;
+  /** Redesign additions. */
+  priority: string; // low | normal | high
+  description: string;
   dataroomChecklistItemId: string | null;
   dataroomDocumentId: string | null;
   sort: number;
@@ -82,6 +96,10 @@ export interface Finding {
   redFlagId: string | null;
   decidedBy: string | null;
   decidedAt: string | null;
+  /** Redesign additions: dollar impact, owner, checklist link. */
+  impactAmount: number | null;
+  owner: string;
+  checklistItemId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -173,6 +191,8 @@ export interface WorkspaceCounts {
   checklistDone: number;
   requestsOutstanding: number;
   findingsProposed: number;
+  findingsOpenBySeverity: { high: number; medium: number; low: number };
+  findingsImpactTotal: number;
   redFlagsOpen: number;
   redFlagsCandidate: number;
   closingOpen: number;
@@ -204,11 +224,135 @@ export interface DealIndexItem {
   roomId: string | null;
 }
 
+/**
+ * Slim bundle handed to tabs by the redesigned shell: identity +
+ * counts only. Section data is fetched per tab (load only what's
+ * viewed); the full server bundle remains available at
+ * GET /api/platform/diligence/workspaces/[id] for other consumers.
+ */
+export interface WorkspaceSlim {
+  workspace: WorkspaceRow;
+  deal: DealContext | null;
+  room: { id: string; name: string } | null;
+  counts: WorkspaceCounts;
+}
+
+/** GET /api/platform/diligence/workspaces/[id]/summary */
+export interface WorkspaceSummary {
+  workspace: WorkspaceRow;
+  deal: DealContext | null;
+  room: { id: string; name: string } | null;
+  counts: WorkspaceCounts & {
+    checklistPct: number;
+    findingsOpen: number;
+  };
+  workstreams: Array<{
+    workstream: string;
+    total: number;
+    done: number;
+    pct: number;
+  }>;
+  needsAttention: {
+    overdueItems: Array<{
+      id: string;
+      title: string;
+      workstream: string;
+      owner: string;
+      dueDate: string | null;
+      daysOverdue: number;
+    }>;
+    agingRequests: Array<{
+      id: string;
+      label: string;
+      lastRequestedAt: string | null;
+      createdAt: string;
+      daysOutstanding: number;
+    }>;
+    highFindings: Array<{
+      id: string;
+      title: string;
+      severity: string;
+      status: string;
+      impactAmount: number | null;
+    }>;
+  };
+  keyDates: {
+    loiDate: string | null;
+    exclusivityExpiry: string | null;
+    targetCloseDate: string | null;
+    startedOn: string;
+    daysInDiligence: number;
+  };
+  dataroom: {
+    roomId: string;
+    roomName: string;
+    total: number;
+    satisfied: number;
+    pct: number;
+  } | null;
+  bridge: {
+    reportedEbitda: number | null;
+    adjustedEbitda: number | null;
+    items: Array<{ label: string; amount: number }>;
+  } | null;
+  activity: Array<{
+    id: string;
+    actor: string;
+    kind: string;
+    message: string;
+    source: string;
+    createdAt: string;
+  }>;
+  team: string[];
+}
+
 /** Props every workspace tab receives from the shell. */
 export interface TabProps {
   workspaceId: string;
-  bundle: WorkspaceBundle;
+  bundle: WorkspaceSlim;
   reload: () => Promise<void>;
+  /** Cross-tab navigation with an optional filter intent (tile clicks). */
+  navigate?: (section: SectionKey, intent?: NavIntent) => void;
+  /** One-shot filter intent handed over by a summary-tile click. */
+  intent?: NavIntent | null;
+}
+
+/** Section keys across the grouped navigation (Batch C). */
+export type SectionKey =
+  | "overview"
+  | "checklist"
+  | "requests"
+  | "qa"
+  | "qoe"
+  | "analysis"
+  | "tax"
+  | "contracts"
+  | "licenses"
+  | "site-visits"
+  | "bpmn"
+  | "scorecard"
+  | "findings"
+  | "red-flags"
+  | "risk"
+  | "docint"
+  | "records"
+  | "closing"
+  | "memo";
+
+export interface NavIntent {
+  /** Checklist: "attention" = overdue/issue toggle. */
+  checklist?: "attention";
+  /** Findings: severity filter. */
+  findingsSeverity?: "high" | "medium" | "low";
+  /** Red flags: status filter. */
+  redFlagsStatus?: "candidate" | "open";
+}
+
+/** Statuses that count a checklist item as done (redesign set). */
+export const CHECKLIST_DONE = ["complete", "na"];
+
+export function isChecklistDone(status: string): boolean {
+  return CHECKLIST_DONE.includes(status);
 }
 
 /* ------------------------------ constants ------------------------------ */
@@ -225,14 +369,26 @@ export const WORKSTREAMS: Array<{ key: string; label: string }> = [
   { key: "it", label: "IT / Systems" },
 ];
 
+/**
+ * Redesigned 7-value status set (Oct 2026). Legacy values were
+ * remapped server-side by the marker-guarded migration
+ * `dd-checklist-status-v2`: in_progress → in_review,
+ * reviewed → in_review, approved → complete, waived → na.
+ */
 export const CHECKLIST_STATUSES: Array<{ key: string; label: string }> = [
   { key: "not_started", label: "Not started" },
-  { key: "in_progress", label: "In progress" },
+  { key: "requested", label: "Requested" },
   { key: "received", label: "Received" },
-  { key: "reviewed", label: "Reviewed" },
-  { key: "approved", label: "Approved" },
-  { key: "waived", label: "Waived" },
+  { key: "in_review", label: "In review" },
+  { key: "issue", label: "Issue noted" },
+  { key: "complete", label: "Complete" },
   { key: "na", label: "N/A" },
+];
+
+export const CHECKLIST_PRIORITIES: Array<{ key: string; label: string }> = [
+  { key: "low", label: "Low" },
+  { key: "normal", label: "Normal" },
+  { key: "high", label: "High" },
 ];
 
 export const TERM_TYPES: Array<{ key: string; label: string }> = [
@@ -242,6 +398,9 @@ export const TERM_TYPES: Array<{ key: string; label: string }> = [
   { key: "price_adjustment", label: "Price adjustment" },
   { key: "escrow", label: "Escrow" },
   { key: "representation", label: "Representation / warranty" },
+  { key: "indemnity", label: "Indemnity" },
+  { key: "closing_condition", label: "Closing condition" },
+  { key: "walk_away", label: "Walk-away" },
   { key: "other", label: "Other" },
 ];
 
