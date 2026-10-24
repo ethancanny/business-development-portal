@@ -427,7 +427,7 @@ export async function getIntegrations(): Promise<IntegrationStatus[]> {
       SELECT DISTINCT ON (job) job, status, message, ran_at
       FROM mi_sync_log
       ORDER BY job, ran_at DESC
-      LIMIT 25`;
+      LIMIT 100`;
     const lastOk = await db`
       SELECT job, max(ran_at) AS last_ok FROM mi_sync_log
       WHERE status = 'ok' GROUP BY job`;
@@ -436,17 +436,71 @@ export async function getIntegrations(): Promise<IntegrationStatus[]> {
       const rec = r as Record<string, unknown>;
       okByJob.set(str(rec.job), isoOrNull(rec.last_ok));
     }
+    // Per-dataset rows nest under ONE Market Intel rollup (Ethan's
+    // organization pass, Oct 24, 2026) — at 25+ datasets the flat list
+    // flooded the Integrations page. Statuses are honest: a staleness-
+    // guard skip is "skipped", not an error, and a tripped cross-
+    // reference verdict on a *-xcheck job is "check" (amber) — the
+    // check doing its job — while real ingest failures stay "error".
+    const children: IntegrationStatus[] = [];
     for (const r of latest) {
       const rec = r as Record<string, unknown>;
       const job = str(rec.job);
-      const status = str(rec.status);
-      out.push({
+      const raw = str(rec.status);
+      const message = str(rec.message);
+      const mapped: IntegrationStatus["status"] =
+        raw === "ok"
+          ? "ok"
+          : raw === "skipped"
+            ? "skipped"
+            : raw === "error" && job.endsWith("-xcheck")
+              ? "check"
+              : raw === "error"
+                ? "error"
+                : "unknown";
+      children.push({
         key: `mi:${job}`,
-        name: `Market Intel · ${job}`,
-        status: status === "ok" ? "ok" : "error",
+        name: job,
+        status: mapped,
         lastSuccessAt: okByJob.get(job) ?? null,
-        lastError: status === "ok" ? null : str(rec.message) || status,
-        detail: `Last run ${isoOrNull(rec.ran_at) ?? "unknown"} — ${status}`,
+        lastError:
+          mapped === "error" || mapped === "check"
+            ? message || raw
+            : null,
+        detail:
+          mapped === "skipped"
+            ? `Last run ${isoOrNull(rec.ran_at) ?? "unknown"} — skipped: ${message || "not due"}`
+            : `Last run ${isoOrNull(rec.ran_at) ?? "unknown"} — ${raw}`,
+      });
+    }
+    if (children.length) {
+      const count = (st: string) =>
+        children.filter((c) => c.status === st).length;
+      const rollupStatus: IntegrationStatus["status"] = count("error")
+        ? "error"
+        : count("check")
+          ? "check"
+          : count("ok")
+            ? "ok"
+            : "skipped";
+      const parts = [`${children.length} datasets`];
+      if (count("ok")) parts.push(`${count("ok")} ok`);
+      if (count("check")) parts.push(`${count("check")} check`);
+      if (count("error")) parts.push(`${count("error")} errors`);
+      if (count("skipped")) parts.push(`${count("skipped")} skipped`);
+      const lastOk = children
+        .map((c) => c.lastSuccessAt)
+        .filter((v): v is string => !!v)
+        .sort()
+        .at(-1);
+      out.push({
+        key: "mi",
+        name: "Market Intel data",
+        status: rollupStatus,
+        lastSuccessAt: lastOk ?? null,
+        lastError: null,
+        detail: `${parts.join(" · ")} — expand for per-dataset status and cross-check verdicts`,
+        children,
       });
     }
     if (!latest.length) {

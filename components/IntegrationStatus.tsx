@@ -6,7 +6,7 @@
  * DB down) renders a clean error state with Retry — never a crash.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { ErrorState, SkeletonRows } from "@/components/ui";
 
 interface Integration {
@@ -16,6 +16,7 @@ interface Integration {
   lastSuccessAt?: string | null;
   lastError?: string | null;
   detail?: string | null;
+  children?: Integration[];
 }
 
 function fmtWhen(iso?: string | null): string {
@@ -34,13 +35,22 @@ function fmtWhen(iso?: string | null): string {
 function dotClass(status: string): string {
   if (status === "ok") return "bg-emerald-500";
   if (status === "error") return "bg-red-500";
+  if (status === "check") return "bg-amber-500";
+  if (status === "skipped") return "bg-slate-300 dark:bg-white/25";
   return "bg-slate-400";
+}
+
+function errorTextClass(status: string): string {
+  return status === "check"
+    ? "text-amber-700 dark:text-amber-300"
+    : "text-red-600 dark:text-red-300";
 }
 
 export default function IntegrationStatus() {
   const [items, setItems] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [provisionBusy, setProvisionBusy] = useState(false);
   const [provisionMsg, setProvisionMsg] = useState("");
 
@@ -162,8 +172,16 @@ export default function IntegrationStatus() {
                 {g.label}
               </h3>
               <ul className="divide-y divide-slate-100 dark:divide-white/5">
-                {g.rows.map((it) => (
-            <li key={it.key} className="flex items-start gap-3 py-3">
+                {g.rows.map((it) => {
+                  const kids = it.children ?? [];
+                  const hasKids = kids.length > 0;
+                  const hasAlert = kids.some(
+                    (c) => c.status === "error" || c.status === "check"
+                  );
+                  const open = expanded[it.key] ?? hasAlert;
+                  return (
+                  <Fragment key={it.key}>
+            <li className="flex items-start gap-3 py-3">
               <span
                 aria-hidden
                 className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${dotClass(it.status)}`}
@@ -184,9 +202,20 @@ export default function IntegrationStatus() {
                   Last success: {fmtWhen(it.lastSuccessAt)}
                 </p>
                 {it.lastError && (
-                  <p className="mt-0.5 text-xs text-red-600 dark:text-red-300">
-                    Last error: {it.lastError}
+                  <p className={`mt-0.5 text-xs ${errorTextClass(it.status)}`}>
+                    {it.status === "check" ? "Check" : "Last error"}: {it.lastError}
                   </p>
+                )}
+                {hasKids && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpanded((prev) => ({ ...prev, [it.key]: !open }))
+                    }
+                    className="mt-2 text-xs font-semibold text-[#0d1f3c] underline decoration-[#b8975a] decoration-2 underline-offset-2 dark:text-white"
+                  >
+                    {open ? "Hide datasets" : `Show ${kids.length} datasets`}
+                  </button>
                 )}
                 {it.key === "microsoft_sharepoint" && (
                   <div className="mt-2">
@@ -208,7 +237,44 @@ export default function IntegrationStatus() {
                 )}
               </div>
                 </li>
-                ))}
+            {hasKids && open && (
+              <li className="pb-2">
+                <ul className="ml-2 divide-y divide-slate-100 border-l border-slate-200 pl-4 dark:divide-white/5 dark:border-white/10">
+                  {kids.map((c) => (
+                    <li key={c.key} className="flex items-start gap-3 py-2.5">
+                      <span
+                        aria-hidden
+                        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotClass(c.status)}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="flex flex-wrap items-baseline gap-x-2 text-sm font-medium text-[#0d1f3c] dark:text-white">
+                          {c.name}
+                          <span className="text-xs font-medium capitalize text-slate-400 dark:text-white/40">
+                            {c.status}
+                          </span>
+                        </p>
+                        {c.detail && (
+                          <p className="mt-0.5 text-xs text-slate-500 dark:text-white/60">
+                            {c.detail}
+                          </p>
+                        )}
+                        <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+                          Last success: {fmtWhen(c.lastSuccessAt)}
+                        </p>
+                        {c.lastError && (
+                          <p className={`mt-0.5 text-xs ${errorTextClass(c.status)}`}>
+                            {c.status === "check" ? "Check" : "Last error"}: {c.lastError}
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            )}
+                  </Fragment>
+                  );
+                })}
               </ul>
             </div>
           ))}

@@ -96,10 +96,18 @@ export interface JobRow {
 export interface IntegrationStatus {
   key: string;
   name: string;
-  status: "ok" | "error" | "unknown";
+  /**
+   * ok — healthy; error — a real failure; check — a cross-reference
+   * verdict that needs attention (amber, not red); skipped — the run
+   * deliberately did not execute (e.g. staleness guard); unknown —
+   * not configured / never verified.
+   */
+  status: "ok" | "error" | "unknown" | "check" | "skipped";
   lastSuccessAt: string | null;
   lastError: string | null;
   detail: string;
+  /** Nested rows (Market Intel per-dataset detail under its rollup). */
+  children?: IntegrationStatus[];
 }
 
 export interface DuplicatePair {
