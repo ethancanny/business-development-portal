@@ -89,6 +89,39 @@ export default function RolesPanel() {
     }
   };
 
+  const removeUser = async (email: string) => {
+    if (
+      !window.confirm(
+        `Remove ${email}? Their stored role is deleted and they fall back to the domain default (internal for @cannycapitalpartners.com).`
+      )
+    ) {
+      return;
+    }
+    setSavingEmail(email);
+    setError("");
+    try {
+      const res = await fetch("/api/platform/settings/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        users?: UserRoleRow[];
+        error?: string;
+      };
+      if (!res.ok) {
+        setError(data.error || "Could not remove the user.");
+        void load();
+        return;
+      }
+      if (Array.isArray(data.users)) setUsers(data.users);
+    } catch {
+      setError("Could not remove the user.");
+    } finally {
+      setSavingEmail("");
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-3" aria-busy="true">
@@ -117,7 +150,8 @@ export default function RolesPanel() {
               <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400 dark:border-white/10 dark:text-white/40">
                 <th scope="col" className="py-2 pr-3 font-semibold">Email</th>
                 <th scope="col" className="py-2 pr-3 font-semibold">Role</th>
-                <th scope="col" className="py-2 font-semibold">Scope</th>
+                <th scope="col" className="py-2 pr-3 font-semibold">Scope</th>
+                <th scope="col" className="py-2 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-white/5">
@@ -146,8 +180,18 @@ export default function RolesPanel() {
                       ))}
                     </select>
                   </td>
-                  <td className="max-w-[280px] truncate py-2.5 text-xs text-slate-500 dark:text-white/50" title={scopeLabel(u.scope)}>
+                  <td className="max-w-[280px] truncate py-2.5 pr-3 text-xs text-slate-500 dark:text-white/50" title={scopeLabel(u.scope)}>
                     {scopeLabel(u.scope)}
+                  </td>
+                  <td className="py-2.5">
+                    <button
+                      type="button"
+                      disabled={savingEmail === u.email}
+                      onClick={() => void removeUser(u.email)}
+                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-red-300 hover:text-red-700 disabled:opacity-50 dark:border-white/15 dark:text-white/70 dark:hover:border-red-500/40 dark:hover:text-red-300"
+                    >
+                      Remove
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -157,7 +201,9 @@ export default function RolesPanel() {
       )}
       <p className="mt-3 text-xs text-slate-400 dark:text-white/40">
         Roles come from core.user_roles. The last remaining admin cannot
-        be demoted — promote someone else first.
+        be demoted or removed — promote someone else first. Removing a
+        user deletes their stored role; they fall back to the domain
+        default rather than being locked out.
       </p>
     </div>
   );

@@ -253,3 +253,34 @@ export async function setUserRole(email: string, role: Role): Promise<void> {
     ON CONFLICT (email) DO UPDATE
       SET role = EXCLUDED.role, updated_at = now()`;
 }
+
+/**
+ * Remove a user's stored role row entirely (Settings → Users & Roles,
+ * added Oct 24, 2026 at Ethan's direction — previously roles could be
+ * changed but never removed). The person falls back to the code-level
+ * default (admin for ethan@cannycapitalpartners.com, internal for the
+ * firm domain). Removing the last STORED admin is refused with
+ * LastAdminError, mirroring setUserRole; the fallback admin's own row
+ * may be removed safely because the fallback restores admin.
+ */
+export async function removeUserRole(email: string): Promise<void> {
+  const e = (email ?? "").trim().toLowerCase();
+  if (!e) throw new Error("email is required");
+  const db = sql();
+  const rows = await db`
+    SELECT role FROM core.user_roles WHERE email = ${e}`;
+  if (!rows.length) return;
+  const storedRole = String(
+    (rows[0] as Record<string, unknown>).role ?? ""
+  );
+  if (storedRole === "admin" && e !== "ethan@cannycapitalpartners.com") {
+    const others = await db`
+      SELECT COUNT(*)::int AS n FROM core.user_roles
+      WHERE role = 'admin' AND email <> ${e}`;
+    const otherAdmins = Number(
+      (others[0] as Record<string, unknown> | undefined)?.n ?? 0
+    );
+    if (otherAdmins === 0) throw new LastAdminError();
+  }
+  await db`DELETE FROM core.user_roles WHERE email = ${e}`;
+}

@@ -4,6 +4,7 @@ import { ensurePlatform } from "@/lib/platform/service";
 import {
   getUserRole,
   listUserRoles,
+  removeUserRole,
   setUserRole,
   LastAdminError,
   type Role,
@@ -66,6 +67,39 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to set role" },
+      { status: 400 }
+    );
+  }
+  const users = await listUserRoles();
+  return NextResponse.json({ ok: true, users });
+}
+
+/**
+ * DELETE {email} — remove the stored role row (the user falls back to
+ * the domain default). Admin-gated like the rest of this route; the
+ * last stored admin is protected by removeUserRole's LastAdminError.
+ */
+export async function DELETE(req: NextRequest) {
+  const gate = await requireAdmin();
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === 401 ? "Unauthorized" : "Forbidden" },
+      { status: gate.error }
+    );
+  }
+  const body = (await req.json().catch(() => ({}))) as { email?: unknown };
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  if (!email) {
+    return NextResponse.json({ error: "email is required" }, { status: 400 });
+  }
+  try {
+    await removeUserRole(email);
+  } catch (err) {
+    if (err instanceof LastAdminError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to remove user" },
       { status: 400 }
     );
   }
