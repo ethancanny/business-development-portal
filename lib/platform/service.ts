@@ -1,5 +1,6 @@
 import { ensureSchema as ensureLegacySchema } from "../db-postgres";
 import { ensurePlatformSchema, sql, str, num, isoOrNull } from "./db";
+import { ensureIdentitySchema } from "../identity/schema";
 import {
   repairNormalizedNames,
   runBackfillOnce,
@@ -49,6 +50,11 @@ export async function ensurePlatform(): Promise<void> {
         console.error("[platform] legacy schema ensure failed", err);
       });
       await ensurePlatformSchema();
+      // Deal Identity columns ride on core.companies/organizations;
+      // they must exist before any company read selects them.
+      await ensureIdentitySchema().catch((err) => {
+        console.error("[platform] identity schema ensure failed", err);
+      });
     })().catch((err) => {
       platformReady = null;
       throw err;
@@ -181,6 +187,11 @@ function rowToCard(r: Record<string, unknown>): CompanyCard {
         : null,
     logoUrl: str(r.logo_url),
     heroUrl: str(r.hero_url),
+    logoVersion: num(r.logo_version),
+    logoSource: str(r.logo_source),
+    accentColor: str(r.accent_color),
+    accentSuggested: str(r.accent_suggested),
+    website: str(r.website),
   };
 }
 
@@ -198,6 +209,8 @@ export async function listCompanies(
     SELECT c.id, c.name, c.vertical, c.stage, c.deal_stage, c.city, c.state,
       c.lat, c.lng, c.thesis_fit, c.owner_context, c.next_action, c.rag,
       c.logo_url, c.hero_url, c.updated_at,
+      c.logo_version, c.logo_source, c.accent_color, c.accent_suggested,
+      c.website,
       (SELECT max(a.created_at) FROM core.activity_log a
         WHERE a.entity_id = c.id) AS last_act
     FROM core.companies c
@@ -239,6 +252,8 @@ export async function getCompanyDetail(id: string): Promise<CompanyDetail | null
       SELECT c.id, c.name, c.vertical, c.stage, c.deal_stage, c.city, c.state,
         c.lat, c.lng, c.thesis_fit, c.owner_context, c.next_action, c.rag,
         c.logo_url, c.hero_url, c.gallery, c.notes, c.source,
+        c.logo_version, c.logo_source, c.logo_mime, c.logo_updated_at,
+        c.accent_color, c.accent_suggested, c.website,
         c.legacy_deal_id, c.legacy_mi_id, c.created_at, c.updated_at,
         (SELECT max(a.created_at) FROM core.activity_log a
           WHERE a.entity_id = c.id) AS last_act
@@ -259,6 +274,8 @@ export async function getCompanyDetail(id: string): Promise<CompanyDetail | null
       source: str(rec.source),
       gallery,
       notes: str(rec.notes),
+      logoMime: str(rec.logo_mime),
+      logoUpdatedAt: isoOrNull(rec.logo_updated_at),
       legacyDealId,
       legacyMiId: rec.legacy_mi_id ? str(rec.legacy_mi_id) : null,
       createdAt: isoOrNull(rec.created_at) ?? "",

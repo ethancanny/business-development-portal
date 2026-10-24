@@ -17,6 +17,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { EmptyState, SkeletonRows } from "@/components/ui";
 import { fmtRelTime } from "@/lib/format";
+import CompanyMark from "@/components/identity/CompanyMark";
+import { accentForSurface } from "@/lib/identity/shared";
 
 export type CompanyStageGroup = "pipeline" | "diligence" | "portfolio";
 export type RagStatus = "green" | "amber" | "red";
@@ -38,6 +40,13 @@ export interface CompanyCard {
   rag: RagStatus | null;
   logoUrl: string | null;
   heroUrl: string | null;
+  /** Deal Identity (Oct 24, 2026) — optional: older cached payloads
+   *  may not carry them; the mark falls back to the monogram. */
+  logoVersion?: number;
+  logoSource?: string;
+  accentColor?: string;
+  accentSuggested?: string;
+  website?: string;
 }
 
 export interface CompanyCardFilters {
@@ -93,7 +102,14 @@ function CardShell({ card }: { card: CompanyCard }) {
   const initial = (card.name || "?").trim().charAt(0).toUpperCase();
   const place = [card.city, card.state].filter(Boolean).join(", ");
   return (
-    <article className="card-surface card-hover flex flex-col overflow-hidden">
+    <article
+      className="card-surface card-hover flex flex-col overflow-hidden"
+      style={
+        card.accentColor
+          ? { borderTop: `3px solid ${accentForSurface(card.accentColor, "onLight")}` }
+          : undefined
+      }
+    >
       {/* Hero: uploaded banner, else the navy brand gradient with the
           company's serif initial (no stock/AI imagery per PROJECT_RULES). */}
       <div className="relative h-28 w-full shrink-0 overflow-hidden bg-[#0d1f3c]">
@@ -137,7 +153,15 @@ function CardShell({ card }: { card: CompanyCard }) {
 
       <div className="flex flex-1 flex-col p-4">
         <div className="flex items-start gap-3">
-          {card.logoUrl ? (
+          {card.logoVersion ? (
+            <CompanyMark
+              companyId={card.id}
+              name={card.name}
+              logoVersion={card.logoVersion}
+              size={40}
+              rounded="rounded-lg"
+            />
+          ) : card.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={card.logoUrl}
@@ -146,12 +170,7 @@ function CardShell({ card }: { card: CompanyCard }) {
               className="h-10 w-10 shrink-0 rounded-lg object-contain ring-1 ring-slate-200 dark:ring-white/10"
             />
           ) : (
-            <span
-              aria-hidden
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#0d1f3c] font-display text-lg font-semibold text-[#b8975a]"
-            >
-              {initial}
-            </span>
+            <CompanyMark companyId={card.id} name={card.name} size={40} rounded="rounded-lg" />
           )}
           <div className="min-w-0">
             <Link

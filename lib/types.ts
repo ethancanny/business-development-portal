@@ -185,6 +185,13 @@ export interface Deal {
   investmentType?: InvestmentTypeKey;
   /** Add-on → its platform deal (required for add_on deals). */
   parentDealId?: string | null;
+  /** Deal Identity (Oct 24, 2026): optional codename. Internal
+   *  surfaces show it beside the real name; external surfaces show
+   *  the codename ONLY (logo hidden) when codenameExternal is on. */
+  codename?: string;
+  /** Per-deal override: FALSE = real name shows externally too.
+   *  Absent/TRUE = codename applies externally when set. */
+  codenameExternal?: boolean;
   /** Early-stage flywheel link: where this deal was sourced from. */
   sourcedFromType?: "portfolio_company" | "market_insight" | null;
   sourcedFromId?: string | null;

@@ -24,6 +24,13 @@ export interface CompanyCard {
   rag: RagStatus | null;
   logoUrl: string;
   heroUrl: string;
+  /** Deal Identity (Oct 24, 2026): stored-logo version (0 = none —
+   *  surfaces render the monogram), accent color, website domain. */
+  logoVersion: number;
+  logoSource: string;
+  accentColor: string;
+  accentSuggested: string;
+  website: string;
 }
 
 export interface CapitalStack {
@@ -150,6 +157,8 @@ export interface CompanyDetail {
     source: string;
     gallery: string[];
     notes: string;
+    logoMime: string;
+    logoUpdatedAt: string | null;
     legacyDealId: string | null;
     legacyMiId: string | null;
     createdAt: string;

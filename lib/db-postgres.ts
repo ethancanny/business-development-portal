@@ -202,6 +202,14 @@ export function ensureSchema(): Promise<void> {
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS sourced_from_type TEXT`;
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS sourced_from_id TEXT`;
+      // Deal Identity (Oct 24, 2026): optional codename + the per-deal
+      // external-display toggle. codename_external TRUE (default) =
+      // the codename replaces the real name (and hides the logo) on
+      // external surfaces; FALSE = Ethan's override, real name shows.
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS codename TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS codename_external BOOLEAN NOT NULL DEFAULT TRUE`;
       await db`
         ALTER TABLE executives ADD COLUMN IF NOT EXISTS photo_url TEXT NOT NULL DEFAULT ''`;
       /* ---- Market Intel tables ---- */
@@ -495,6 +503,8 @@ function rowToDeal(r: Record<string, unknown>): Deal {
     investmentType: (String(r.investment_type ?? "platform_lbo") ||
       "platform_lbo") as Deal["investmentType"],
     parentDealId: r.parent_deal_id ? String(r.parent_deal_id) : null,
+    codename: String(r.codename ?? ""),
+    codenameExternal: r.codename_external !== false,
     sourcedFromType: (r.sourced_from_type
       ? String(r.sourced_from_type)
       : null) as Deal["sourcedFromType"],
@@ -560,7 +570,8 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           contact_email, notes, owner, city, lat, lng, links, operator_ids,
           revenue, ebitda, asking_price, growth_pct, broker, pass_reason, source, drivers, structure,
           metrics, synthesis, investment_type, parent_deal_id,
-          sourced_from_type, sourced_from_id, created_at, updated_at
+          sourced_from_type, sourced_from_id, codename, codename_external,
+          created_at, updated_at
         ) VALUES (
           ${d.id}, ${d.companyName}, ${d.industry}, ${d.stage},
           ${d.dealValue || 0}, ${d.contactName}, ${d.contactEmail},
@@ -575,6 +586,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           ${d.synthesis ? JSON.stringify(d.synthesis) : null},
           ${d.investmentType ?? "platform_lbo"}, ${d.parentDealId ?? null},
           ${d.sourcedFromType ?? null}, ${d.sourcedFromId ?? null},
+          ${d.codename ?? ""}, ${d.codenameExternal !== false},
           ${d.createdAt}, ${d.updatedAt}
         )`
     ),

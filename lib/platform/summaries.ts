@@ -252,7 +252,12 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
       'lastActivityAt', greatest(s.updated_at, coalesce(s.last_act, s.updated_at)),
       'rag', CASE WHEN s.stage = 'portfolio' THEN s.rag ELSE NULL END,
       'logoUrl', s.logo_url,
-      'heroUrl', s.hero_url
+      'heroUrl', s.hero_url,
+      'logoVersion', coalesce(s.logo_version, 0),
+      'logoSource', coalesce(s.logo_source, ''),
+      'accentColor', coalesce(s.accent_color, ''),
+      'accentSuggested', coalesce(s.accent_suggested, ''),
+      'website', coalesce(s.website, '')
     ), now()
     FROM (
       SELECT c.*,

@@ -25,6 +25,11 @@ import {
 import { fmtDate, fmtRelTime } from "@/lib/format";
 import Comments from "@/components/Comments";
 import ActivityFeed from "@/components/ActivityFeed";
+import DealBanner from "@/components/identity/DealBanner";
+import LogoManager from "@/components/identity/LogoManager";
+import RecordRecent from "@/components/identity/RecordRecent";
+import CompanyMark from "@/components/identity/CompanyMark";
+import { accentForSurface } from "@/lib/identity/shared";
 import DataRoomButton from "@/components/hubs/DataRoomButton";
 import GenerateReportButton from "@/components/comms/GenerateReportButton";
 import FinancialsSection from "@/components/FinancialsSection";
@@ -37,6 +42,8 @@ interface CompanyDetail extends CompanyCard {
   source: string | null;
   gallery: string[];
   notes: string | null;
+  logoMime?: string;
+  logoUpdatedAt?: string | null;
 }
 
 interface Participant {
@@ -142,6 +149,13 @@ export default function CompanyProfilePage() {
     };
   }, [id, reloadTick]);
 
+  // Browser tab carries the company name (Deal Identity System).
+  useEffect(() => {
+    if (state.kind === "ready") {
+      document.title = `${state.data.company.name} · Canny Capital Partners`;
+    }
+  }, [state]);
+
   if (state.kind === "loading") {
     return (
       <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
@@ -177,7 +191,6 @@ export default function CompanyProfilePage() {
   }
 
   const { company: c, participants, timeline, linked } = state.data;
-  const initial = (c.name || "?").trim().charAt(0).toUpperCase();
   const place = [c.city, c.state].filter(Boolean).join(", ");
 
   const participantGroups = new Map<string, Participant[]>();
@@ -190,6 +203,8 @@ export default function CompanyProfilePage() {
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
+      <DealBanner companyId={c.id} />
+      <RecordRecent companyId={c.id} dealId={linked.deals[0]?.id} />
       {/* Breadcrumbs */}
       <nav aria-label="Breadcrumb" className="mb-4 flex flex-wrap items-center gap-1.5 text-xs text-caption">
         <Link href="/overview" className="font-semibold hover:text-gold-700 dark:hover:text-gold-400">
@@ -206,7 +221,14 @@ export default function CompanyProfilePage() {
       </nav>
 
       {/* Hero banner */}
-      <div className="card-surface overflow-hidden">
+      <div
+        className="card-surface overflow-hidden"
+        style={
+          c.accentColor
+            ? { borderTop: `3px solid ${accentForSurface(c.accentColor, "onLight")}` }
+            : undefined
+        }
+      >
         <div className="relative h-40 w-full bg-[#0d1f3c] sm:h-52">
           {c.heroUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -224,7 +246,16 @@ export default function CompanyProfilePage() {
           <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/45 to-transparent" />
         </div>
         <div className="flex flex-wrap items-start gap-4 p-5 sm:p-6">
-          {c.logoUrl ? (
+          {c.logoVersion ? (
+            <CompanyMark
+              companyId={c.id}
+              name={c.name}
+              logoVersion={c.logoVersion}
+              size={80}
+              rounded="rounded-2xl"
+              className="-mt-12 ring-1 ring-white/20"
+            />
+          ) : c.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={c.logoUrl}
@@ -233,12 +264,13 @@ export default function CompanyProfilePage() {
               className="-mt-12 h-20 w-20 shrink-0 rounded-2xl bg-white object-contain ring-1 ring-slate-200 dark:ring-white/10"
             />
           ) : (
-            <span
-              aria-hidden
-              className="-mt-12 flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-[#0d1f3c] font-display text-4xl font-semibold text-[#b8975a] ring-1 ring-white/20"
-            >
-              {initial}
-            </span>
+            <CompanyMark
+              companyId={c.id}
+              name={c.name}
+              size={80}
+              rounded="rounded-2xl"
+              className="-mt-12 ring-1 ring-white/20"
+            />
           )}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -273,6 +305,21 @@ export default function CompanyProfilePage() {
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <div className="min-w-0 space-y-4 lg:col-span-2">
+          {/* Logo & accent (Deal Identity System) */}
+          <LogoManager
+            companyId={c.id}
+            companyName={c.name}
+            initial={{
+              logoVersion: c.logoVersion ?? 0,
+              logoSource: c.logoSource ?? "",
+              logoMime: c.logoMime ?? "",
+              logoUpdatedAt: c.logoUpdatedAt ?? null,
+              accentColor: c.accentColor ?? "",
+              accentSuggested: c.accentSuggested ?? "",
+              website: c.website ?? "",
+            }}
+            fallbackWebsite={linked.deals.length ? "" : ""}
+          />
           {/* Key facts */}
           <section className="card-surface p-5" aria-label="Key facts">
             <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
