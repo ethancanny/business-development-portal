@@ -117,12 +117,18 @@ async function g<T = Record<string, unknown>>(
   } catch (err) {
     if (graphStatusCode(err) === 404) return null;
     if (isScopeStyleError(err)) {
+      // Surface Graph's own words (Oct 24, 2026): the generic "predates
+      // consent" text sent Ethan through two reconnects without ever
+      // naming the actual refusal. The graph() error message carries
+      // the status + the Graph error body — quote it.
+      const raw = err instanceof Error ? err.message : String(err);
+      const excerpt = raw.replace(/\s+/g, " ").slice(0, 260);
       throw setupError(
         "SharePoint storage is not reachable with the current Microsoft " +
-          "token (Graph refused a Files/Sites call). The token likely " +
-          "predates the Entra consent — reconnect Microsoft in Settings " +
-          "→ Integrations so a fresh token carries Files.ReadWrite.All " +
-          "and Sites.ReadWrite.All."
+          "token (Graph refused a Files/Sites call). Reconnect Microsoft " +
+          "from the Calendar page so a fresh token carries " +
+          "Files.ReadWrite.All and Sites.ReadWrite.All. " +
+          `Graph said: ${excerpt}`
       );
     }
     throw err;
