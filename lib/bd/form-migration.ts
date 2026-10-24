@@ -119,11 +119,17 @@ export async function runFormSectionsMigration(
   let alreadySet = 0;
   const missing: string[] = [];
   for (const [key, section] of Object.entries(SECTION_BY_KEY)) {
+    /* NOTE: the jsonb existence operator is deliberately NOT used
+       here — this runs through the Neon serverless driver, whose
+       tagged-template handling rejects a literal "?" in the query
+       text (the first version of this migration used it and every
+       UPDATE threw, aborting the run before any row was stamped).
+       (config -> 'section') IS NULL is the equivalent test. */
     const rows = await db`
       UPDATE bd.metric_definitions
       SET config = config || ${JSON.stringify({ section })}::jsonb,
         updated_at = now()
-      WHERE key = ${key} AND NOT (config ? 'section')
+      WHERE key = ${key} AND (config -> 'section') IS NULL
       RETURNING key`;
     if (rows.length) {
       assigned += rows.length;
