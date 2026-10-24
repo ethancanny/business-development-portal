@@ -928,6 +928,69 @@ export async function deleteReport(id: string, actor = ""): Promise<boolean> {
   return rows.length > 0;
 }
 
+/**
+ * Discard retention (Ethan, Oct 23, 2026): a discarded report is
+ * permanently deleted 30 days after discard. `updated_at` is the
+ * discard moment — discarded reports are frozen (no transitions or
+ * edits out of 'discarded'), so it never moves afterward. Children
+ * are deleted first, stored PDF bytes best-effort alongside, and one
+ * activity tombstone per report remains. Called daily by the
+ * 'comms_purge_discarded' standing job; capped per run so a backlog
+ * drains over days rather than in one sweep.
+ */
+export async function purgeExpiredDiscards(
+  retentionDays = 30
+): Promise<number> {
+  await ready();
+  const db = sql();
+  const rows = await db`
+    SELECT id, title FROM comms.reports
+    WHERE status = 'discarded'
+      AND updated_at < now() - make_interval(days => ${retentionDays})
+    ORDER BY updated_at ASC
+    LIMIT 200`;
+  let purged = 0;
+  for (const r of rows) {
+    const rec = r as Record<string, unknown>;
+    const id = str(rec.id);
+    const files = await db`
+      SELECT storage_key FROM comms.report_files WHERE report_id = ${id}`;
+    for (const f of files) {
+      const key = str((f as Record<string, unknown>).storage_key);
+      if (!key) continue;
+      try {
+        const { getStorageProvider } = await import("../storage");
+        await getStorageProvider().delete(key);
+      } catch {
+        /* stored bytes are best-effort; the row purge proceeds */
+      }
+    }
+    await db`
+      UPDATE comms.schedules SET last_report_id = NULL
+      WHERE last_report_id = ${id}`;
+    await db`DELETE FROM comms.report_files WHERE report_id = ${id}`;
+    await db`DELETE FROM comms.access_log WHERE report_id = ${id}`;
+    await db`DELETE FROM comms.deliveries WHERE report_id = ${id}`;
+    await db`DELETE FROM comms.report_audit WHERE report_id = ${id}`;
+    await db`DELETE FROM comms.report_versions WHERE report_id = ${id}`;
+    const gone = await db`
+      DELETE FROM comms.reports
+      WHERE id = ${id} AND status = 'discarded'
+      RETURNING id`;
+    if (gone.length) {
+      purged += 1;
+      await writeActivity(
+        "comms_report",
+        id,
+        "system",
+        "report_purged",
+        `Discarded report permanently deleted after ${retentionDays} days: ${str(rec.title) || "Untitled report"}`
+      );
+    }
+  }
+  return purged;
+}
+
 /* ------------------------------ diff ----------------------------------- */
 
 export interface VersionChange {

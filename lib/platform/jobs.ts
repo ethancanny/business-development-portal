@@ -287,6 +287,14 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
       await runCommsScheduleJob(job.payload);
       return;
     }
+    case "comms_purge_discarded": {
+      // Part 12 retention (Oct 23, 2026): discarded reports are
+      // permanently deleted 30 days after discard. Daily standing job,
+      // registered by ensureBuiltinJobs.
+      const { runCommsPurgeDiscardedJob } = await import("../comms/jobs");
+      await runCommsPurgeDiscardedJob();
+      return;
+    }
     default:
       throw new Error(`Unknown job kind: ${job.kind}`);
   }
@@ -367,6 +375,19 @@ export async function ensureBuiltinJobs(): Promise<void> {
       VALUES (${newId()}, 'db_backup',
         ${JSON.stringify({
           note: "Registered by ensureBuiltinJobs — execution is triggered by the external scheduler; the snapshot mechanism itself is Neon PITR (provider-side).",
+        })}::jsonb,
+        'registered')`;
+  }
+  const recentPurge = await db`
+    SELECT id FROM core.jobs
+    WHERE kind = 'comms_purge_discarded' AND created_at > now() - interval '24 hours'
+    LIMIT 1`;
+  if (!recentPurge.length) {
+    await db`
+      INSERT INTO core.jobs (id, kind, payload, status)
+      VALUES (${newId()}, 'comms_purge_discarded',
+        ${JSON.stringify({
+          note: "Daily retention purge: reports in 'discarded' for over 30 days are permanently deleted (Ethan, Oct 23, 2026).",
         })}::jsonb,
         'registered')`;
   }
