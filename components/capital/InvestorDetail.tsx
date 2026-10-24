@@ -19,6 +19,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Button, ErrorState, SkeletonRows, StatTile } from "@/components/ui";
 import GenerateReportButton from "@/components/comms/GenerateReportButton";
+import { GenerateDocumentButton } from "@/components/docgen/GenerateDocument";
+import ContractsPanel from "@/components/docgen/ContractsPanel";
 import {
   API,
   INVESTOR_STATUSES,
@@ -206,6 +208,12 @@ export default function InvestorDetail({
             Open in Directory
           </Link>
           <GenerateReportButton subjectKind="investor" personId={personId} />
+          <GenerateDocumentButton
+            scope="investor"
+            investorPersonId={personId}
+            label="Draft document"
+            className="btn btn-secondary btn-sm min-h-[44px]"
+          />
           {onClose && (
             <Button variant="ghost" size="sm" onClick={onClose} className="min-h-[44px]">
               Close
@@ -415,6 +423,11 @@ export default function InvestorDetail({
               </ul>
             </div>
           )}
+
+          {/* Documents (Contract generation, Oct 24, 2026): investor
+              documents register on the investor, mirroring how
+              contracts hang off a company. */}
+          <ContractsPanel investorPersonId={personId} />
 
           {/* Activity */}
           <div className={cardCls}>

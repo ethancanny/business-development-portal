@@ -30,6 +30,7 @@ import {
   type InvestorListItem,
 } from "@/components/capital/types";
 import InvestorDetail from "@/components/capital/InvestorDetail";
+import { GenerateDocumentButton } from "@/components/docgen/GenerateDocument";
 
 const PAGE_SIZE = 25;
 
@@ -148,13 +149,20 @@ export default function InvestorsPanel() {
             status live here; identity lives once, in the Directory.
           </p>
         </div>
-        <Button
-          variant={showAdd ? "secondary" : "primary"}
-          onClick={() => setShowAdd((s) => !s)}
-          className="min-h-[44px]"
-        >
-          {showAdd ? "Cancel" : "Add investor"}
-        </Button>
+        <span className="flex flex-wrap gap-2">
+          <GenerateDocumentButton
+            scope="investor"
+            label="Draft document"
+            className="btn btn-secondary min-h-[44px]"
+          />
+          <Button
+            variant={showAdd ? "secondary" : "primary"}
+            onClick={() => setShowAdd((s) => !s)}
+            className="min-h-[44px]"
+          >
+            {showAdd ? "Cancel" : "Add investor"}
+          </Button>
+        </span>
       </div>
 
       {showAdd && (
