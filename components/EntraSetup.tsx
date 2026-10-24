@@ -3,8 +3,10 @@
  *
  * Documents the EXISTING app registration Ethan created on Oct 9, 2026
  * and the exact configuration lib/microsoft.ts expects. Static
- * guidance only — no credentials, no values, no scope changes. If any
- * step here ever disagrees with lib/microsoft.ts, the code wins.
+ * guidance only — no credentials, no values. Scope set expanded on
+ * Oct 23, 2026 (mail + SharePoint) with Ethan's Entra grant and admin
+ * consent. If any step here ever disagrees with lib/microsoft.ts,
+ * the code wins.
  */
 
 const STEPS: { title: string; body: React.ReactNode }[] = [
@@ -22,17 +24,20 @@ const STEPS: { title: string; body: React.ReactNode }[] = [
     ),
   },
   {
-    title: "2 · API permissions — calendar only",
+    title: "2 · API permissions — calendar, mail, and files",
     body: (
       <>
-        Microsoft Graph, <strong>delegated</strong> permissions, exactly
-        these three: <code>Calendars.ReadWrite</code>,{" "}
-        <code>offline_access</code>, and <code>User.Read</code> (the
-        sign-in profile the code requests alongside them).{" "}
-        <strong>No Mail scopes</strong> — do not add{" "}
-        <code>Mail.Read</code>, <code>Mail.Send</code> or any other mail
-        permission. Mail features use manual linking until Ethan
-        explicitly approves a scope change and a fresh consent.
+        Microsoft Graph, <strong>delegated</strong> permissions:{" "}
+        <code>Calendars.ReadWrite</code>, <code>offline_access</code>,{" "}
+        <code>User.Read</code>, <code>Mail.Read</code>,{" "}
+        <code>Mail.Send</code>, <code>Files.ReadWrite.All</code>, and{" "}
+        <code>Sites.ReadWrite.All</code>. Calendar came first (Oct 9,
+        2026); the mail and SharePoint scopes were added on Oct 23, 2026
+        with admin consent at Ethan&apos;s direction — mail powers
+        Reporting delivery, signer emails, and inbox linking, and the
+        file scopes power SharePoint data-room storage. After any scope
+        change, reconnect Microsoft (Settings → Integrations) so the
+        stored token carries the new permissions.
       </>
     ),
   },

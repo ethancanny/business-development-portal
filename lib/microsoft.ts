@@ -39,7 +39,7 @@ const SITE = "https://portal.cannycapitalpartners.com";
 export const MS_REDIRECT_URI = `${SITE}/api/calendar/microsoft/callback`;
 const AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0";
 const GRAPH = "https://graph.microsoft.com/v1.0";
-const SCOPES = "offline_access Calendars.ReadWrite User.Read";
+const SCOPES = "offline_access Calendars.ReadWrite User.Read Mail.Read Mail.Send Files.ReadWrite.All Sites.ReadWrite.All";
 const TZ = "America/Phoenix";
 
 export function msConfigured(): boolean {
