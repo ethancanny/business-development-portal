@@ -116,9 +116,9 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           ? c.isChain || c.isInstitutional || c.institutionalSuspect
           : !fitOnly || c.status === "fit") &&
         (!q ||
-          c.name.toLowerCase().includes(q) ||
-          c.city.toLowerCase().includes(q) ||
-          c.subsector.toLowerCase().includes(q))
+          (c.name ?? "").toLowerCase().includes(q) ||
+          (c.city ?? "").toLowerCase().includes(q) ||
+          (c.subsector ?? "").toLowerCase().includes(q))
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, filteredRows, query, fitOnly, view]);

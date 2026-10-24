@@ -78,7 +78,6 @@ export interface DirectoryDetailPayload {
 export const DIRECTORY_TYPES: { id: string; label: string }[] = [
   { id: "operator", label: "Operator" },
   { id: "investor", label: "Investor" },
-  { id: "lp", label: "LP" },
   { id: "lender", label: "Lender" },
   { id: "broker", label: "Broker" },
   { id: "attorney", label: "Attorney" },
@@ -90,6 +89,9 @@ export const DIRECTORY_TYPES: { id: string; label: string }[] = [
 ];
 
 export function typeLabel(id: string): string {
+  // Legacy "lp" tags display as Investor (Ethan, Oct 23, 2026 — the
+  // Directory only uses "Investor"; the type itself is retired).
+  if (id === "lp") return "Investor";
   const hit = DIRECTORY_TYPES.find((t) => t.id === id);
   return hit ? hit.label : id.replace(/_/g, " ");
 }
@@ -114,6 +116,17 @@ export function KindBadge({ kind }: { kind: DirectoryKind }) {
       {kind === "person" ? "Person" : "Organization"}
     </span>
   );
+}
+
+/** Display types for a record: legacy "lp" folds into "investor" and
+ * duplicates collapse, so a contact never shows two Investor badges. */
+export function displayTypes(types: string[] | undefined): string[] {
+  const out: string[] = [];
+  for (const t of types ?? []) {
+    const id = t === "lp" ? "investor" : t;
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
 }
 
 /** Subtitle line for a card: title · firm for people, title for orgs. */
@@ -180,7 +193,7 @@ export default function DirectoryGrid({
 
             <span className="mt-3 flex flex-wrap items-center gap-1.5">
               <KindBadge kind={item.kind} />
-              {(item.types || []).map((t) => (
+              {displayTypes(item.types).map((t) => (
                 <TypeBadge key={t} typeId={t} />
               ))}
             </span>
@@ -205,6 +218,90 @@ export default function DirectoryGrid({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** Table view (Ethan, Oct 23, 2026): the Directory's default view —
+ * the same records as the card (Kanban) grid in the portal's standard
+ * table styling (.tbl-grad: navy header, cream text, gold rule).
+ * Clicking a row opens the record, exactly like a card. */
+export function DirectoryTable({
+  items,
+  selectedId,
+  onSelect,
+}: {
+  items: DirectoryItem[];
+  selectedId?: string | null;
+  onSelect: (item: DirectoryItem) => void;
+}) {
+  const th =
+    "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider";
+  const td = "px-3 py-2.5 text-sm text-slate-700 dark:text-white/80";
+  return (
+    <div className="card-surface overflow-x-auto">
+      <table className="tbl-grad w-full border-collapse">
+        <thead>
+          <tr>
+            <th className={th}>Name</th>
+            <th className={th}>Title</th>
+            <th className={th}>Organization</th>
+            <th className={th}>Type</th>
+            <th className={th}>Email</th>
+            <th className={th}>Phone</th>
+            <th className={th}>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => {
+            const active = selectedId === item.id;
+            return (
+              <tr
+                key={`${item.kind}-${item.id}`}
+                onClick={() => onSelect(item)}
+                className={`cursor-pointer border-b border-slate-100 transition hover:bg-[#f0f4fa] dark:border-white/5 dark:hover:bg-white/5 ${
+                  active ? "bg-[#f7f1e3] dark:bg-white/10" : ""
+                }`}
+              >
+                <td className={`${td} font-medium`}>
+                  <span className="flex items-center gap-2.5">
+                    {item.kind === "organization" ? (
+                      <CompanyLogo
+                        name={item.name}
+                        website={item.website || undefined}
+                        size={28}
+                      />
+                    ) : (
+                      <PersonAvatar
+                        name={item.name}
+                        photoUrl={item.photoUrl || undefined}
+                        size={28}
+                      />
+                    )}
+                    <span className="truncate text-[#0d1f3c] dark:text-white">
+                      {item.name}
+                    </span>
+                  </span>
+                </td>
+                <td className={td}>{item.title || "—"}</td>
+                <td className={td}>{item.organizationName || "—"}</td>
+                <td className={td}>
+                  <span className="flex flex-wrap gap-1">
+                    {displayTypes(item.types).map((t) => (
+                      <TypeBadge key={t} typeId={t} />
+                    ))}
+                  </span>
+                </td>
+                <td className={td}>{item.email || "—"}</td>
+                <td className={td}>{item.phone || "—"}</td>
+                <td className={`${td} whitespace-nowrap`}>
+                  {item.updatedAt ? fmtDate(item.updatedAt) : "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

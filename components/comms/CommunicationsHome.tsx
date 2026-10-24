@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import PageHero from "@/components/PageHero";
 import { SkeletonRows } from "@/components/ui";
 import ReportsList from "@/components/comms/ReportsList";
 import TemplatesList from "@/components/comms/TemplatesList";
@@ -103,17 +104,14 @@ export default function CommunicationsHome() {
   const counts = status?.counts ?? {};
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
-      <header>
-        <h1 className="font-display text-3xl font-semibold text-navy-900 dark:text-white">
-          Reporting
-        </h1>
-        <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-white/50">
-          Reports assembled from live portal data, reviewed and approved
-          before anything leaves the firm, and delivered through tracked
-          recipient links.
-        </p>
-      </header>
+    <div>
+      {/* Same hero heading as the Directory (Ethan, Oct 23, 2026). */}
+      <PageHero
+        eyebrow="Canny Capital Partners"
+        title="Reporting"
+        subtitle="Reports assembled from live portal data, reviewed and approved before anything leaves the firm, and delivered through tracked recipient links"
+      />
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
 
       {/* Status strip — states rendered exactly as the API reports. */}
       <div className="mt-5">
@@ -199,6 +197,7 @@ export default function CommunicationsHome() {
         {tab === "reports" && <ReportsList />}
         {tab === "templates" && <TemplatesList />}
         {tab === "schedules" && <SchedulesPanel />}
+      </div>
       </div>
     </div>
   );

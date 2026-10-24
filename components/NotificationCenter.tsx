@@ -5,11 +5,12 @@
  * It merges core.notifications for the signed-in user (mentions and
  * other collaboration notifications, added this phase) with the
  * EXISTING unread concept — unread deal_flow / Activity items, the
- * same set lib/badge.ts counts. Platform items mark read through
- * POST /api/platform/notifications; Activity items simply link to
- * /activity, where their established read flow runs — nothing is
- * forked or double-marked. NO interval polling (platform rules):
- * Data is fetched on mount and again when the panel opens.
+ * same set lib/badge.ts counts. Every item can be cleared in place
+ * (Ethan, Oct 23, 2026 — no click-through required): the × button and
+ * "Mark all read" POST to /api/platform/notifications, which stamps
+ * whichever store the item came from; rows still link to their item
+ * for anyone who wants to open it. NO interval polling (platform
+ * rules): data is fetched on mount and again when the panel opens.
  *
  * Rendered in-flow by the TopBar (Navigation Restructure): the bell
  * trigger + dropdown live inside a relative container — no fixed
@@ -114,16 +115,20 @@ export default function NotificationCenter() {
   }, [open ]);
 
   const markRead = async (item: NotificationItem) => {
-    if (item.source !== "platform" || item.read) return;
+    if (item.read) return;
     setItems((prev) =>
-      prev.map((i) => (i.id === item.id ? { ...i, read: true } : i))
+      prev.map((i) =>
+        i.id === item.id && i.source === item.source
+          ? { ...i, read: true }
+          : i
+      )
     );
     setUnreadCount((n) => Math.max(0, n - 1));
     try {
       await fetch("/api/platform/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: item.id }),
+        body: JSON.stringify({ id: item.id, source: item.source }),
       });
     } catch {
       /* optimistic state stands; next open re-fetches the truth */
@@ -131,20 +136,16 @@ export default function NotificationCenter() {
   };
 
   const markAllRead = async () => {
-    setItems((prev) =>
-      prev.map((i) => (i.source === "platform" ? { ...i, read: true } : i))
-    );
-    setUnreadCount((n) =>
-      // Activity (deal_flow) unread stay counted until triaged/read
-      // on /activity — only the platform share clears here.
-      Math.max(0, n - items.filter((i) => i.source === "platform" && !i.read).length)
-    );
+    setItems((prev) => prev.map((i) => ({ ...i, read: true })));
+    setUnreadCount(0);
     try {
       await fetch("/api/platform/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ all: true }),
       });
+      // Resync from the server so the count matches the stored truth.
+      void load();
     } catch {
       /* best-effort */
     }
@@ -221,14 +222,14 @@ export default function NotificationCenter() {
             ) : (
               <ul className="divide-y divide-slate-100 dark:divide-white/5">
                 {items.map((item) => (
-                  <li key={`${item.source}-${item.id}`}>
+                  <li key={`${item.source}-${item.id}`} className="relative">
                     <Link
                       href={item.href || "/overview"}
                       onClick={() => {
                         void markRead(item);
                         setOpen(false);
                       }}
-                      className={`block px-1 py-2.5 transition hover:bg-[#f0f4fa] dark:hover:bg-white/5 ${
+                      className={`block px-1 py-2.5 pr-7 transition hover:bg-[#f0f4fa] dark:hover:bg-white/5 ${
                         item.read ? "opacity-70" : ""
                       }`}
                     >
@@ -251,12 +252,18 @@ export default function NotificationCenter() {
                           {item.body}
                         </span>
                       )}
-                      {item.source === "activity" && (
-                        <span className="mt-1 block pl-4 text-[11px] font-medium text-gold-700 dark:text-gold-400">
-                          Opens in Activity
-                        </span>
-                      )}
                     </Link>
+                    {!item.read && (
+                      <button
+                        type="button"
+                        onClick={() => void markRead(item)}
+                        aria-label={`Clear notification: ${item.title}`}
+                        title="Clear without opening"
+                        className="absolute right-0.5 top-2 flex h-6 w-6 items-center justify-center rounded-full text-base leading-none text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 dark:text-white/25 dark:hover:bg-white/10 dark:hover:text-white"
+                      >
+                        ×
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
