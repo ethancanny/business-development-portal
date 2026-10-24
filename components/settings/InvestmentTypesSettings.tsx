@@ -63,13 +63,15 @@ export default function InvestmentTypesSettings() {
         setNote(data.error ?? `Save failed (${res.status})`);
         return;
       }
-      setCfg(data.config as BdConfig);
+      // The config PUT returns the config at the top level
+      // ({types, definitions, sectorPacks}); the bootstrap GET wraps
+      // it in {config}. Accept both — reading only data.config here
+      // used to throw after every save and report a false failure.
+      const nextCfg = (data.config ?? data) as BdConfig;
+      setCfg(nextCfg);
       setStageDrafts(
         Object.fromEntries(
-          (data.config as BdConfig).types.map((t) => [
-            t.key,
-            t.stages.join("\n"),
-          ])
+          nextCfg.types.map((t) => [t.key, t.stages.join("\n")])
         )
       );
       setNote(okNote);
@@ -118,6 +120,15 @@ export default function InvestmentTypesSettings() {
       { kind: "definition", key: d.key, enabled: !d.enabled },
       `${d.label} ${!d.enabled ? "enabled" : "disabled"}.`
     );
+  const [sectionDrafts, setSectionDrafts] = useState<Record<string, string>>({});
+  const saveSection = (d: BdMetricDefinition) => {
+    const section = (sectionDrafts[d.key] ?? d.config.section ?? "").trim();
+    void put(
+      `section:${d.key}`,
+      { definitions: [{ key: d.key, section: section === "" ? null : section }] },
+      `${d.label} section ${section === "" ? "cleared" : `set to "${section}"`}.`
+    );
+  };
   const togglePack = (p: BdSectorPack) =>
     put(
       `pack:${p.key}`,
@@ -203,7 +214,10 @@ export default function InvestmentTypesSettings() {
         </h3>
         <p className="mb-2 text-xs text-slate-500 dark:text-white/50">
           Disabled fields stop appearing on deals; values already
-          recorded are kept.
+          recorded are kept. The section key controls which section of
+          the New investment form the field renders in (lbo_metrics,
+          addon_metrics, round, traction, team_market, investors_es,
+          es_basics, sector_pack).
         </p>
         <ul className="divide-y divide-slate-100 dark:divide-white/5">
           {cfg.definitions.map((d) => (
@@ -220,14 +234,33 @@ export default function InvestmentTypesSettings() {
                   {d.required ? " · required" : ""}
                 </span>
               </span>
-              <button
-                type="button"
-                disabled={busyKey === `def:${d.key}`}
-                onClick={() => toggleDef(d)}
-                className={toggleCls(d.enabled)}
-              >
-                {d.enabled ? "On" : "Off"}
-              </button>
+              <span className="flex shrink-0 items-center gap-1.5">
+                <input
+                  aria-label={`Form section for ${d.label}`}
+                  className="w-32 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 focus:border-[#b8975a] focus:outline-none dark:border-white/15 dark:bg-[#0d1f3c] dark:text-[#e8dfc8]"
+                  value={sectionDrafts[d.key] ?? d.config.section ?? ""}
+                  onChange={(e) =>
+                    setSectionDrafts((s) => ({ ...s, [d.key]: e.target.value }))
+                  }
+                  placeholder="section"
+                />
+                <button
+                  type="button"
+                  disabled={busyKey === `section:${d.key}`}
+                  onClick={() => saveSection(d)}
+                  className="btn btn-ghost btn-sm"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  disabled={busyKey === `def:${d.key}`}
+                  onClick={() => toggleDef(d)}
+                  className={toggleCls(d.enabled)}
+                >
+                  {d.enabled ? "On" : "Off"}
+                </button>
+              </span>
             </li>
           ))}
         </ul>

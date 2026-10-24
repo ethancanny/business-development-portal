@@ -128,7 +128,7 @@ export default function DealDetailPage() {
   return (
     <>
       <PageHero
-        eyebrow="Acquisition target"
+        eyebrow="Investment target"
         title={deal.companyName}
         subtitle={
           [deal.industry, deal.city].filter(Boolean).join(" · ") || undefined

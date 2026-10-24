@@ -2,7 +2,7 @@
 
 /**
  * Deals import/export tools (Phase 10): compact toolbar controls for
- * the Acquisition Pipeline. Export downloads the full deals grid from
+ * the Investments pipeline. Export downloads the full deals grid from
  * GET /api/deals/export (CSV or XLSX) via a single dropdown button;
  * Import reads a .csv as text or an .xlsx as base64, POSTs to
  * /api/deals/import, shows the created/updated/skipped summary inline
