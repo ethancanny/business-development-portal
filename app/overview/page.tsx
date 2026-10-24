@@ -253,10 +253,14 @@ export default function Overview() {
   }, []);
 
   // Top Signals (premium redesign Wave 1): the newest high-signal fit
-  // targets. The companies endpoint orders by signal_value desc, so
-  // its first page is the highest-signal slice; keep fits first seen
-  // in the last 14 days and take the top three. Save / Dismiss persist
-  // in localStorage across visits.
+  // targets. Sourced from the canonical fits feed (mode=fits — the
+  // same server-scoped set Fit Targets shows, so chain / institutional
+  // flags are already excluded) and re-checked here: flagged rows
+  // never surface as signals (Ethan, Oct 23, 2026 — national chains
+  // like QuikTrip and Dollar Tree were leaking in through the general
+  // companies list). Keep fits first seen in the last 14 days, rank by
+  // signal value, take the top three. Save / Dismiss persist in
+  // localStorage across visits.
   useEffect(() => {
     try {
       const s = window.localStorage.getItem("ccp-saved-signals");
@@ -267,7 +271,7 @@ export default function Overview() {
       /* storage unavailable — saves/dismissals are session-only */
     }
     let live = true;
-    fetch("/api/market/companies?limit=250")
+    fetch("/api/market/companies?mode=fits")
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { companies?: MiCompany[] } | null) => {
         if (!live || !d || !Array.isArray(d.companies)) return;
@@ -275,6 +279,8 @@ export default function Overview() {
         const picks = d.companies
           .filter((c) => {
             if (c.status === "dismissed") return false;
+            if (c.isChain || c.isInstitutional || c.institutionalSuspect)
+              return false;
             if (new Date(c.firstSeen).getTime() < cutoff) return false;
             try {
               return (
@@ -1352,11 +1358,14 @@ export default function Overview() {
         </section>
       )}
 
-      {/* Sector Overview — one tile per focus sector (fit counts from
-          the same per-sector fetches as the density view; the
-          tailwind line renders only for sectors with a computed
-          score — ≥2 live components — per Phase 5 / §4). The MI page
-          takes no sector param, so tiles link to the Fit Targets tab. */}
+      {/* Sector Overview — a bar chart, one bar per focus sector
+          (Ethan, Oct 23, 2026: a chart like the rest of the Overview,
+          replacing the tile grid; it also takes the slot the Capital
+          Stacks widget had — capital stacks now live in Business
+          Development). Fit counts come from the same per-sector
+          fetches as the density view; the tailwind score renders only
+          for sectors with a computed score — ≥2 live components — per
+          Phase 5 / §4. Bars link to the Fit Targets tab. */}
       <section className="mb-6">
         <div className="mb-3 flex items-baseline justify-between gap-2">
           <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
@@ -1369,57 +1378,70 @@ export default function Overview() {
             Open Market Intel →
           </Link>
         </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-          {FIT_SECTORS.map((sector) => {
-            const count = fitCounts[sector];
-            return (
-              <Link
-                key={sector}
-                href="/market-intel#fit-targets"
-                className="card-surface group block overflow-hidden"
-              >
-                <div
-                  className="img-grade h-16 sm:h-20"
-                  style={{
-                    background: `linear-gradient(135deg, ${sectorColor(sector)} 0%, #0d1f3c 130%)`,
-                  }}
-                >
-                  <div className="flex h-full items-center justify-center">
-                    <span className="text-3xl text-white/85" aria-hidden>
-                      {sectorIcon(sector)}
-                    </span>
-                  </div>
-                </div>
-                <div className="p-3.5">
-                  <p className="font-display text-lg font-semibold leading-tight text-[#0d1f3c] dark:text-white">
-                    {sector}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-white/60">
-                    <span className="tnum font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
-                      {count === null || count === undefined
-                        ? "…"
-                        : count.toLocaleString()}
-                    </span>{" "}
-                    fit targets
-                  </p>
-                  {tailwind[sector]?.score !== null &&
-                    tailwind[sector]?.score !== undefined && (
-                      <p className="mt-1.5 text-[11px] leading-snug text-slate-500 dark:text-white/60">
-                        <span className="font-semibold text-[#0d1f3c] dark:text-white">
-                          Tailwind {tailwind[sector].score}
-                        </span>{" "}
-                        · {tailwind[sector].whatChanged}
+        <div className="card-surface p-4 sm:p-5">
+          <ul className="space-y-4">
+            {FIT_SECTORS.map((sector) => {
+              const count = fitCounts[sector];
+              const maxFit = Math.max(
+                1,
+                ...FIT_SECTORS.map((x) => fitCounts[x] ?? 0)
+              );
+              const tw = tailwind[sector];
+              return (
+                <li key={sector}>
+                  <Link
+                    href="/market-intel#fit-targets"
+                    className="group block"
+                  >
+                    <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
+                      <span className="font-medium text-slate-700 dark:text-white/80">
+                        <span className="mr-1.5" aria-hidden>
+                          {sectorIcon(sector)}
+                        </span>
+                        {sector}
+                      </span>
+                      <span className="tnum shrink-0 font-semibold text-[#0d1f3c] dark:text-white">
+                        {count === null || count === undefined
+                          ? "…"
+                          : count.toLocaleString()}{" "}
+                        <span className="font-normal text-slate-400 dark:text-white/40">
+                          fit targets
+                        </span>
+                        {tw?.score !== null && tw?.score !== undefined && (
+                          <span className="ml-2 font-normal text-slate-400 dark:text-white/40">
+                            Tailwind{" "}
+                            <span className="font-semibold text-[#0d1f3c] dark:text-white">
+                              {tw.score}
+                            </span>
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${count ? Math.max(3, (count / maxFit) * 100) : 0}%`,
+                          background: barGradient(sectorColor(sector)),
+                        }}
+                      />
+                    </div>
+                    {tw?.score !== null && tw?.score !== undefined && tw.whatChanged && (
+                      <p className="mt-1 text-[11px] leading-snug text-slate-400 dark:text-white/35">
+                        {tw.whatChanged}
                       </p>
                     )}
-                  {sector === "Hospitality" && hospMeta && (
-                    <p className="mt-1 text-[11px] leading-snug text-slate-400 dark:text-white/40">
-                      Sources: {hospMeta.sources} · Updated {hospMeta.updated}
-                    </p>
-                  )}
-                </div>
-              </Link>
-            );
-          })}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+          {hospMeta && (
+            <p className="mt-3 text-[11px] leading-snug text-slate-400 dark:text-white/40">
+              Hospitality sources: {hospMeta.sources} · Updated{" "}
+              {hospMeta.updated}
+            </p>
+          )}
         </div>
       </section>
 
