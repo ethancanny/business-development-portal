@@ -168,6 +168,10 @@ function rowToContract(r: Record<string, unknown>): ContractRow {
       ? statusRaw
       : "draft") as ContractStatus,
     currentVersion: num(r.current_version) || 1,
+    currentDocumentId: r.current_document_id ? str(r.current_document_id) : null,
+    currentPdfDocumentId: r.current_pdf_document_id
+      ? str(r.current_pdf_document_id)
+      : null,
     roomId: r.room_id ? str(r.room_id) : null,
     keyDates: parseKeyDates(r.key_dates),
     signers: parseSigners(r.signers),
@@ -221,6 +225,12 @@ const CONTRACT_COLS = `
   c.status, c.current_version, c.room_id, c.key_dates, c.signers,
   c.field_values, c.ai_summary, c.ai_summary_version, c.created_by,
   c.created_at, c.updated_at,
+  (SELECT v.document_id FROM docgen.contract_versions v
+    WHERE v.contract_id = c.id AND v.version = c.current_version
+    LIMIT 1) AS current_document_id,
+  (SELECT v.pdf_document_id FROM docgen.contract_versions v
+    WHERE v.contract_id = c.id AND v.version = c.current_version
+    LIMIT 1) AS current_pdf_document_id,
   coalesce(co.name, '') AS company_name,
   coalesce(p.name, '') AS investor_name`;
 

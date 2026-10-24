@@ -92,6 +92,10 @@ export interface ContractRow {
   counterpartyCompany: string;
   status: ContractStatus;
   currentVersion: number;
+  /** Current version's primary file (the .docx for generated
+   * versions, the uploaded file for redlines) + its PDF rendition. */
+  currentDocumentId: string | null;
+  currentPdfDocumentId: string | null;
   roomId: string | null;
   keyDates: ContractKeyDates;
   signers: ContractSigner[];

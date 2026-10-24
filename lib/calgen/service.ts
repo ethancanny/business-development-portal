@@ -302,6 +302,50 @@ async function generateReportEvents(): Promise<GeneratedEventInput[]> {
   return out;
 }
 
+/**
+ * Contract generation (Oct 24, 2026) — executed contracts' key
+ * dates (kind 'deadline', previously generatorless). Titles follow
+ * the spec: company + contract name + date type; the href links back
+ * to the contract's home (company profile / investor record).
+ */
+async function generateContractDeadlineEvents(): Promise<
+  GeneratedEventInput[]
+> {
+  const { listContractCalendarItems } = await import(
+    "@/lib/docgen/contracts"
+  );
+  const items = await listContractCalendarItems();
+  const LABELS: Record<string, string> = {
+    exclusivityExpiry: "Exclusivity expiry",
+    closing: "Closing",
+    renewal: "Renewal",
+  };
+  const out: GeneratedEventInput[] = [];
+  for (const item of items) {
+    if (!item.date) continue;
+    const subject = item.companyName || item.investorName || "Contract";
+    out.push({
+      sourceId: `${item.contractId}:${item.dateType}`,
+      title: `${subject} — ${item.title} — ${LABELS[item.dateType] ?? item.dateType}`,
+      startsAt: `${item.date}T09:00:00${TZ_OFFSET}`,
+      endsAt: null,
+      allDay: true,
+      dealId: item.dealId,
+      companyId: item.companyId,
+      href: item.companyId
+        ? `/companies/${item.companyId}#contracts`
+        : "/investors-capital",
+      status: "",
+      meta: {
+        contractId: item.contractId,
+        dateType: item.dateType,
+        investorPersonId: item.investorPersonId,
+      },
+    });
+  }
+  return out;
+}
+
 export const GENERATED_EVENT_GENERATORS: Partial<
   Record<GeneratedEventKind, GeneratedEventGenerator>
 > = {
@@ -312,6 +356,7 @@ export const GENERATED_EVENT_GENERATORS: Partial<
   covenant: generateCovenantEvents,
   meeting: generateMeetingEvents,
   report: generateReportEvents,
+  deadline: generateContractDeadlineEvents,
 };
 
 /* ------------------------------ regeneration ---------------------------- */
