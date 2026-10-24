@@ -8,14 +8,14 @@ import PageHero from "@/components/PageHero";
 import { StatTile } from "@/components/ui";
 import PlatformOverview from "@/components/PlatformOverview";
 import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
-import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiCompany, type MiIndicatorObs, type MiMultiple, type Task } from "@/lib/types";
+import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiIndicatorObs, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
 import type { Investor } from "@/lib/investors-db";
 import type { OperatorCandidate } from "@/lib/candidates-db";
-import { fmtMoney, fmtMoneyCompact, dedupeSourceTokens } from "@/lib/format";
+import { fmtMoney, fmtMoneyCompact } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, sectorIcon, stageColor } from "@/lib/sector-colors";
-import SectorChip, { SectorLegend } from "@/components/SectorChip";
+import { SectorLegend } from "@/components/SectorChip";
 import LatestIntel from "@/components/LatestIntel";
 
 /** Fit-target sectors — all five focus sectors (Oct 14, 2026: the
@@ -83,15 +83,10 @@ export default function Overview() {
   // Overview tile's source/date line (hospitality build §2).
   const [hospMeta, setHospMeta] = useState<{ sources: string; updated: string } | null>(null);
   // Premium redesign Wave 1: market strip (latest + previous FRED
-  // observations per series) and Top Signals (newest high-signal fits).
+  // observations per series).
   const [rateStrip, setRateStrip] = useState<
     { label: string; value: number; change: number | null; date: string }[]
   >([]);
-  const [topSignals, setTopSignals] = useState<MiCompany[]>([]);
-  const [savedSignals, setSavedSignals] = useState<string[]>([]);
-  const [dismissedSignals, setDismissedSignals] = useState<string[]>([]);
-  const [addedSignalIds, setAddedSignalIds] = useState<string[]>([]);
-  const [addingSignalId, setAddingSignalId] = useState<string | null>(null);
   const [weekTab, setWeekTab] = useState<"this" | "last">("this");
   // Oct 17, 2026 (Ethan): the "Other calendar items" list starts
   // EXPANDED — every synced calendar event must be visible in the
@@ -247,61 +242,6 @@ export default function Overview() {
         }
       )
       .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  // Top Signals (premium redesign Wave 1): the newest high-signal fit
-  // targets. Sourced from the canonical fits feed (mode=fits — the
-  // same server-scoped set Fit Targets shows, so chain / institutional
-  // flags are already excluded) and re-checked here: flagged rows
-  // never surface as signals (Ethan, Oct 23, 2026 — national chains
-  // like QuikTrip and Dollar Tree were leaking in through the general
-  // companies list). Keep fits first seen in the last 14 days, rank by
-  // signal value, take the top three. Save / Dismiss persist in
-  // localStorage across visits.
-  useEffect(() => {
-    try {
-      const s = window.localStorage.getItem("ccp-saved-signals");
-      if (s) setSavedSignals(JSON.parse(s) as string[]);
-      const d = window.localStorage.getItem("ccp-dismissed-signals");
-      if (d) setDismissedSignals(JSON.parse(d) as string[]);
-    } catch {
-      /* storage unavailable — saves/dismissals are session-only */
-    }
-    let live = true;
-    fetch("/api/market/companies?mode=fits")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { companies?: MiCompany[] } | null) => {
-        if (!live || !d || !Array.isArray(d.companies)) return;
-        const cutoff = Date.now() - 14 * 86400000;
-        const picks = d.companies
-          .filter((c) => {
-            if (c.status === "dismissed") return false;
-            if (c.isChain || c.isInstitutional || c.institutionalSuspect)
-              return false;
-            if (new Date(c.firstSeen).getTime() < cutoff) return false;
-            try {
-              return (
-                (JSON.parse(c.details || "{}") as Record<string, unknown>)
-                  .fit === true
-              );
-            } catch {
-              return false;
-            }
-          })
-          .sort(
-            (a, b) =>
-              (b.signalValue ?? -1) - (a.signalValue ?? -1) ||
-              b.firstSeen.localeCompare(a.firstSeen)
-          )
-          .slice(0, 3);
-        setTopSignals(picks);
-      })
-      .catch(() => {
-        /* the section simply renders nothing */
-      });
     return () => {
       live = false;
     };
@@ -497,103 +437,6 @@ export default function Overview() {
         .length,
     };
   }, [execs, deals, candidates]);
-
-  // --- Top Signals actions -------------------------------------------------
-  const signalKey = (c: MiCompany) => c.dedupKey || c.id;
-
-  const persistSignalList = (name: string, list: string[]) => {
-    try {
-      window.localStorage.setItem(name, JSON.stringify(list));
-    } catch {
-      /* storage unavailable — the in-state list still applies */
-    }
-  };
-
-  const dismissSignal = (c: MiCompany) => {
-    const next = [...dismissedSignals, signalKey(c)];
-    setDismissedSignals(next);
-    persistSignalList("ccp-dismissed-signals", next);
-  };
-
-  const toggleSaveSignal = (c: MiCompany) => {
-    const k = signalKey(c);
-    const next = savedSignals.includes(k)
-      ? savedSignals.filter((x) => x !== k)
-      : [...savedSignals, k];
-    setSavedSignals(next);
-    persistSignalList("ccp-saved-signals", next);
-  };
-
-  // Same conversion CompanyTargets performs: create the deal, then
-  // mark the company "added" so it leaves the triage surfaces.
-  const addSignalToPipeline = async (c: MiCompany) => {
-    setAddingSignalId(c.id);
-    try {
-      const notes = [
-        `Profile from ${dedupeSourceTokens(c.source)} (Market Intel company targets).`,
-        c.subsector
-          ? `Sub-sector: ${c.subsector}${c.naics ? ` (NAICS ${c.naics})` : ""}.`
-          : "",
-        c.signalValue
-          ? `${c.signalLabel || "Size signal"}: ${fmtMoney(c.signalValue)}.`
-          : "",
-        c.contactName
-          ? `Contact on file: ${c.contactName}${c.contactTitle ? `, ${c.contactTitle}` : ""}.`
-          : "",
-        c.formedDate ? `Registered/licensed since ${c.formedDate}.` : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-      const res = await fetch("/api/deals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          companyName: c.name,
-          industry: c.sector || "",
-          city: c.city ? `${c.city}, AZ` : "",
-          contactName: c.contactName,
-          source: `Market Intel — ${dedupeSourceTokens(c.source)}`,
-          notes,
-        }),
-      });
-      if (res.ok) {
-        await fetch("/api/market/companies", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: c.id, status: "added" }),
-        }).catch(() => null);
-        setAddedSignalIds((prev) => [...prev, c.id]);
-        load();
-      }
-    } finally {
-      setAddingSignalId(null);
-    }
-  };
-
-  // One-line "why it matters" for a signal card: the most recent
-  // recorded signal text, else the fit rationale, else the size
-  // signal label/value, else the sub-sector.
-  const signalWhy = (c: MiCompany): string => {
-    let d: Record<string, unknown> = {};
-    try {
-      d = JSON.parse(c.details || "{}") as Record<string, unknown>;
-    } catch {
-      d = {};
-    }
-    const sigs = Array.isArray(d.signals)
-      ? (d.signals as Record<string, unknown>[])
-      : [];
-    for (let i = sigs.length - 1; i >= 0; i--) {
-      const t = sigs[i]?.label ?? sigs[i]?.text;
-      if (typeof t === "string" && t.trim()) return t.trim();
-    }
-    if (typeof d.fitWhy === "string" && d.fitWhy.trim()) return d.fitWhy.trim();
-    if (c.signalLabel)
-      return c.signalValue
-        ? `${c.signalLabel}: ${fmtMoney(c.signalValue)}`
-        : c.signalLabel;
-    return c.subsector || "";
-  };
 
   const dismissEvent = async (eventId: string) => {
     setCalEvents((prev) => prev.filter((e) => e.eventId !== eventId));
@@ -907,9 +750,6 @@ export default function Overview() {
         .sort()
         .slice(-1)[0]
     : "";
-  const visibleSignals = topSignals.filter(
-    (c) => !dismissedSignals.includes(signalKey(c))
-  );
 
   if (loading) {
     return (
@@ -1203,161 +1043,6 @@ export default function Overview() {
         </div>
       </section>
 
-      {/* Top Signals — the newest high-signal fit targets. No
-          per-sector photography exists in the portal and unlicensed
-          images are off-limits, so the card header is the sector
-          color under the standard navy grade with the sector icon. */}
-      {visibleSignals.length > 0 && (
-        <section className="mb-6">
-          <div className="mb-3 flex items-baseline justify-between gap-2">
-            <h2 className="text-xl font-bold text-[#0d1f3c] dark:text-white">
-              Top signals
-            </h2>
-            <Link
-              href="/market-intel#fit-targets"
-              className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
-            >
-              All fit targets →
-            </Link>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {visibleSignals.map((c) => {
-              const key = signalKey(c);
-              const saved = savedSignals.includes(key);
-              const added =
-                c.status === "added" || addedSignalIds.includes(c.id);
-              const why = signalWhy(c);
-              return (
-                <article key={c.id} className="card-surface overflow-hidden">
-                  <div
-                    className="img-grade h-24"
-                    style={{
-                      background: `linear-gradient(135deg, ${sectorColor(c.sector)} 0%, #0d1f3c 130%)`,
-                    }}
-                  >
-                    <div className="flex h-full items-center justify-center">
-                      <span className="text-4xl text-white/85" aria-hidden>
-                        {sectorIcon(c.sector)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="p-4">
-                    <p className="truncate text-lg font-semibold text-[#0d1f3c] dark:text-white">
-                      {c.name}
-                    </p>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                      <SectorChip sector={c.sector} />
-                      {(c.city || c.state) && (
-                        <span className="text-xs text-slate-400 dark:text-white/40">
-                          {[c.city, c.state].filter(Boolean).join(", ")}
-                        </span>
-                      )}
-                    </div>
-                    {why && (
-                      <p className="mt-2 line-clamp-2 text-sm text-slate-600 dark:text-white/70">
-                        {why}
-                      </p>
-                    )}
-                    <p className="mt-2 text-[11px] text-slate-400 dark:text-white/40">
-                      First seen{" "}
-                      {new Date(c.firstSeen).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
-                      {c.signalValue
-                        ? ` · ${c.signalLabel || "Signal"} ${fmtMoney(c.signalValue)}`
-                        : ""}
-                    </p>
-                    <div className="mt-3 flex items-center gap-2">
-                      {added ? (
-                        <span className="rounded-lg bg-[#b8975a]/15 px-3 py-1.5 text-xs font-semibold text-[#8a6f3c] dark:text-[#d4b37a]">
-                          In pipeline ✓
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => addSignalToPipeline(c)}
-                          disabled={addingSignalId === c.id}
-                          className="rounded-lg bg-[#b8975a] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#a8874f] disabled:opacity-60"
-                        >
-                          {addingSignalId === c.id ? "Adding…" : "Add to pipeline"}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => toggleSaveSignal(c)}
-                        aria-pressed={saved}
-                        className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-                          saved
-                            ? "border-[#b8975a] text-[#8a6f3c] dark:text-[#d4b37a]"
-                            : "border-slate-200 text-slate-500 hover:border-[#b8975a]/60 dark:border-white/15 dark:text-white/60"
-                        }`}
-                      >
-                        {saved ? "Saved" : "Save"}
-                      </button>
-                      <button
-                        onClick={() => dismissSignal(c)}
-                        className="ml-auto px-1.5 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-600 dark:text-white/40 dark:hover:text-white/70"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Latest intelligence — top 3 News & Intelligence stories,
-          directly under Top Signals. Self-fetching; renders nothing
-          when the feed is empty or unavailable. */}
-      <LatestIntel />
-
-      {/* Market strip — FRED reference rates only (Prime, SOFR,
-          10-Yr, 2-Yr) with the move vs the previous observation and
-          an as-of date. No sector ETF/reference quotes: no licensed
-          source exists, and unlabeled data is off-limits. */}
-      {rateStrip.length > 0 && (
-        <section className="card-surface mb-6 flex flex-wrap items-center gap-x-8 gap-y-3 px-5 py-3.5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
-            Markets
-          </p>
-          {rateStrip.map((r) => (
-            <div key={r.label} className="flex items-baseline gap-2">
-              <span className="text-xs font-medium text-slate-500 dark:text-white/60">
-                {r.label}
-              </span>
-              <span className="tnum font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
-                {r.value.toFixed(2)}%
-              </span>
-              {r.change !== null && r.change !== 0 && (
-                <span
-                  className={`tnum text-xs font-semibold ${
-                    r.change > 0
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-rose-500 dark:text-rose-400"
-                  }`}
-                >
-                  {r.change > 0 ? "▲" : "▼"} {Math.abs(r.change).toFixed(2)}
-                </span>
-              )}
-            </div>
-          ))}
-          {rateAsOf && (
-            <p className="ml-auto text-[11px] text-slate-400 dark:text-white/40">
-              As of{" "}
-              {new Date(`${rateAsOf}T12:00:00`).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              })}{" "}
-              · FRED
-            </p>
-          )}
-        </section>
-      )}
-
       {/* Sector Overview — a bar chart, one bar per focus sector
           (Ethan, Oct 23, 2026: a chart like the rest of the Overview,
           replacing the tile grid; it also takes the slot the Capital
@@ -1365,7 +1050,10 @@ export default function Overview() {
           Development). Fit counts come from the same per-sector
           fetches as the density view; the tailwind score renders only
           for sectors with a computed score — ≥2 live components — per
-          Phase 5 / §4. Bars link to the Fit Targets tab. */}
+          Phase 5 / §4. Bars link to the Fit Targets tab.
+          Moved up into the Top signals slot on Oct 23, 2026 — Top
+          signals was removed at Ethan's request and the industries
+          fill its place. */}
       <section className="mb-6">
         <div className="mb-3 flex items-baseline justify-between gap-2">
           <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
@@ -1444,6 +1132,55 @@ export default function Overview() {
           )}
         </div>
       </section>
+
+      {/* Latest intelligence — top 3 News & Intelligence stories,
+          directly under Sector overview. Self-fetching; renders nothing
+          when the feed is empty or unavailable. */}
+      <LatestIntel />
+
+      {/* Market strip — FRED reference rates only (Prime, SOFR,
+          10-Yr, 2-Yr) with the move vs the previous observation and
+          an as-of date. No sector ETF/reference quotes: no licensed
+          source exists, and unlabeled data is off-limits. */}
+      {rateStrip.length > 0 && (
+        <section className="card-surface mb-6 flex flex-wrap items-center gap-x-8 gap-y-3 px-5 py-3.5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
+            Markets
+          </p>
+          {rateStrip.map((r) => (
+            <div key={r.label} className="flex items-baseline gap-2">
+              <span className="text-xs font-medium text-slate-500 dark:text-white/60">
+                {r.label}
+              </span>
+              <span className="tnum font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
+                {r.value.toFixed(2)}%
+              </span>
+              {r.change !== null && r.change !== 0 && (
+                <span
+                  className={`tnum text-xs font-semibold ${
+                    r.change > 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-500 dark:text-rose-400"
+                  }`}
+                >
+                  {r.change > 0 ? "▲" : "▼"} {Math.abs(r.change).toFixed(2)}
+                </span>
+              )}
+            </div>
+          ))}
+          {rateAsOf && (
+            <p className="ml-auto text-[11px] text-slate-400 dark:text-white/40">
+              As of{" "}
+              {new Date(`${rateAsOf}T12:00:00`).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}{" "}
+              · FRED
+            </p>
+          )}
+        </section>
+      )}
 
       {/* Operators tile (restyled Wave 1: card surface + serif figures) */}
       <section className="card-surface mb-6 p-5">
