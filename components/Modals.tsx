@@ -12,7 +12,7 @@ import {
   type BdBootstrap,
 } from "@/components/InvestmentTypeBits";
 import { fmtMoney, fmtDate, uniqueStrings, dedupeSourceTokens } from "@/lib/format";
-import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, dealFocusSector, estimateMultiple, isFocusDeal, matchGroup, resolveDealValue, resolveStatedPrice, resolveStructure, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
+import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, dealFocusSector, estimateMultiple, matchGroup, resolveDealValue, resolveStatedPrice, resolveStructure, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
 import SectorChip, { StageChip } from "@/components/SectorChip";
 import DealRecordHeader from "@/components/DealRecordHeader";
 
@@ -805,11 +805,6 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
               deal.industry ? (
                 <span className="inline-flex items-center gap-1.5">
                   <SectorChip sector={dealFocusSector(deal.industry) ?? deal.industry} />
-                  {!isFocusDeal(deal.industry) && (
-                    <span className="inline-block rounded-full bg-slate-100 px-1.5 py-px align-middle text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-white/50">
-                      Non-focus
-                    </span>
-                  )}
                 </span>
               ) : (
                 ""

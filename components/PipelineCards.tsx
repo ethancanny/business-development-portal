@@ -5,7 +5,6 @@ import { fmtDate, fmtMoney, uniqueStrings } from "@/lib/format";
 import {
   dealFocusSector,
   estimateMultiple,
-  isFocusDeal,
   resolveDealValue,
   type MarketRates,
 } from "@/lib/valuation";
@@ -105,11 +104,6 @@ export function DealCardGrid({
                 {d.industry ? (
                   <>
                     <SectorChip sector={sector} />
-                    {!isFocusDeal(d.industry) && (
-                      <span className="inline-block rounded-full bg-slate-100 px-1.5 py-px text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-white/50">
-                        Non-focus
-                      </span>
-                    )}
                   </>
                 ) : (
                   <span className="text-xs text-slate-400 dark:text-white/40">Industry —</span>
