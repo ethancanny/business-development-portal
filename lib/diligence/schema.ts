@@ -43,16 +43,27 @@ export const WORKSTREAM_LABELS: Record<string, string> = {
   it: "IT / Systems",
 };
 
+/**
+ * Checklist statuses — workspace redesign (Oct 24, 2026). The 7-value
+ * set Ethan specified. Legacy values are remapped by the marker-guarded
+ * migration `dd-checklist-status-v2` in ensureDiligenceSchema():
+ *   in_progress → in_review · reviewed → in_review · approved → complete
+ *   waived → na · not_started / received / na unchanged.
+ * "Done" for completion % = terminal statuses only (complete, na).
+ */
 export const CHECKLIST_STATUSES = [
   "not_started",
-  "in_progress",
+  "requested",
   "received",
-  "reviewed",
-  "approved",
-  "waived",
+  "in_review",
+  "issue",
+  "complete",
   "na",
 ] as const;
 export type ChecklistStatus = (typeof CHECKLIST_STATUSES)[number];
+
+export const CHECKLIST_PRIORITIES = ["high", "normal", "low"] as const;
+export type ChecklistPriority = (typeof CHECKLIST_PRIORITIES)[number];
 
 export const REQUEST_ITEM_STATUSES = [
   "requested",
@@ -76,6 +87,11 @@ export const FINDING_TERM_TYPES = [
   "price_adjustment",
   "escrow",
   "representation",
+  // Added Oct 24, 2026 (workspace redesign): outcome options Ethan
+  // named for new findings. Existing rows keep their original values.
+  "indemnity",
+  "closing_condition",
+  "walk_away",
   "other",
 ] as const;
 export const FINDING_STATUSES = ["proposed", "accepted", "rejected"] as const;
@@ -181,6 +197,75 @@ export const CHECKLIST_TEMPLATE: Array<{
   { workstream: "it", title: "Cybersecurity policies, incidents & access controls" },
   { workstream: "it", title: "Backup, recovery & business continuity procedures" },
 ];
+
+/**
+ * Template packs (workspace redesign, Oct 24, 2026). Applied ONLY at
+ * workspace creation (selected from the deal's investment type /
+ * industry) or via the explicit apply-template action, which inserts
+ * only titles not already present. A pack change NEVER mutates an
+ * existing workspace's items.
+ */
+export const TEMPLATE_PACKS: Record<
+  string,
+  {
+    label: string;
+    appliesTo: string;
+    items: Array<{ workstream: Workstream; title: string }>;
+  }
+> = {
+  base: {
+    label: "Standard diligence checklist",
+    appliesTo: "Every workspace (seeded at creation)",
+    items: CHECKLIST_TEMPLATE,
+  },
+  ad: {
+    label: "Aerospace & Defense pack",
+    appliesTo: "Deals in Aerospace & Defense",
+    items: [
+      { workstream: "legal", title: "ITAR / EAR export compliance review & registrations" },
+      { workstream: "legal", title: "Government contracts inventory, novation & change-of-control consents" },
+      { workstream: "operations", title: "Quality certifications (AS9100 / ISO 9001) & audit history" },
+      { workstream: "operations", title: "DCAA-compliant accounting system adequacy & incurred-cost submissions" },
+      { workstream: "hr", title: "Facility / personnel security clearances & FOCI review" },
+      { workstream: "it", title: "CMMC / NIST 800-171 cybersecurity posture & CUI handling" },
+      { workstream: "financial", title: "Government receivables, progress payments & contract backlog by program" },
+    ],
+  },
+  addon: {
+    label: "Add-on integration pack",
+    appliesTo: "Add-on acquisitions",
+    items: [
+      { workstream: "operations", title: "Integration plan & Day-1 readiness checklist" },
+      { workstream: "commercial", title: "Customer / product overlap & cross-sell analysis" },
+      { workstream: "it", title: "Systems migration & data conversion plan" },
+      { workstream: "hr", title: "Key employee retention & platform reporting lines" },
+      { workstream: "financial", title: "Synergy case (revenue / cost) with owners & timing" },
+    ],
+  },
+  early_stage: {
+    label: "Early stage pack",
+    appliesTo: "Early stage investments",
+    items: [
+      { workstream: "legal", title: "Founder documents, IP assignments & invention agreements" },
+      { workstream: "legal", title: "Cap table cleanup, SAFEs / notes & prior financings" },
+      { workstream: "commercial", title: "Customer references & pipeline verification calls" },
+      { workstream: "financial", title: "Runway, burn & use-of-proceeds model" },
+    ],
+  },
+};
+
+/** Pack keys a new workspace receives, from its deal context. */
+export function templatePacksForDeal(input: {
+  investmentType?: string | null;
+  industry?: string | null;
+}): string[] {
+  const packs: string[] = [];
+  const industry = (input.industry ?? "").toLowerCase();
+  if (/aerospace|defense|defence/.test(industry)) packs.push("ad");
+  if (input.investmentType === "addon") packs.push("addon");
+  if (input.investmentType === "early_stage") packs.push("early_stage");
+  return packs;
+}
 
 /** Controls & systems scorecard areas (spec §8), scored 1–5. */
 export const SCORECARD_AREAS = [
@@ -488,6 +573,61 @@ export function ensureDiligenceSchema(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS diligence_bpmn_versions_diagram_idx
         ON diligence.bpmn_versions (diagram_id, version DESC)`;
+
+      /* ---- Workspace redesign (Oct 24, 2026): additive columns ---- */
+      await db`
+        ALTER TABLE diligence.checklist_items
+          ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'normal'`;
+      await db`
+        ALTER TABLE diligence.checklist_items
+          ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE diligence.findings
+          ADD COLUMN IF NOT EXISTS impact_amount NUMERIC`;
+      await db`
+        ALTER TABLE diligence.findings
+          ADD COLUMN IF NOT EXISTS owner TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE diligence.findings
+          ADD COLUMN IF NOT EXISTS checklist_item_id TEXT`;
+      await db`
+        ALTER TABLE diligence.workspaces
+          ADD COLUMN IF NOT EXISTS loi_date DATE`;
+      await db`
+        ALTER TABLE diligence.workspaces
+          ADD COLUMN IF NOT EXISTS exclusivity_expiry DATE`;
+      await db`
+        ALTER TABLE diligence.workspaces
+          ADD COLUMN IF NOT EXISTS target_close_date DATE`;
+
+      /* ---- Marker-guarded status remap: dd-checklist-status-v2 ----
+       * Maps the legacy 7-value checklist status set onto the redesign
+       * set (see CHECKLIST_STATUSES). Idempotent by construction (the
+       * legacy values cease to exist), but marker-guarded so it runs
+       * exactly once and is auditable. */
+      await db`
+        CREATE TABLE IF NOT EXISTS diligence.schema_migrations (
+          key TEXT PRIMARY KEY,
+          applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
+      const marker = await db`
+        SELECT key FROM diligence.schema_migrations
+        WHERE key = 'dd-checklist-status-v2' LIMIT 1`;
+      if (!marker.length) {
+        await db`
+          UPDATE diligence.checklist_items SET status = 'in_review'
+          WHERE status IN ('in_progress', 'reviewed')`;
+        await db`
+          UPDATE diligence.checklist_items SET status = 'complete'
+          WHERE status = 'approved'`;
+        await db`
+          UPDATE diligence.checklist_items SET status = 'na'
+          WHERE status = 'waived'`;
+        await db`
+          INSERT INTO diligence.schema_migrations (key)
+          VALUES ('dd-checklist-status-v2')
+          ON CONFLICT (key) DO NOTHING`;
+      }
     })().catch((err) => {
       schemaReady = null;
       throw err;
