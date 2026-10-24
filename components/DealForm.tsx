@@ -46,6 +46,7 @@ import {
   type BdMetricDefinition,
 } from "@/components/InvestmentTypeBits";
 import { CompLogSection, EstimateBody } from "@/components/Modals";
+import LogoManager from "@/components/identity/LogoManager";
 import { fmtMoney, uniqueStrings } from "@/lib/format";
 import {
   DRIVER_DEFS,
@@ -78,6 +79,95 @@ const DRIVER_KEYS_SHORT: Array<keyof DealDrivers> = [
   "ownerDependence",
   "financials",
 ];
+
+/**
+ * Identity wiring (Deal Identity System, Oct 24, 2026): the logo
+ * lives on the COMPANY, so the form resolves the deal's company via
+ * the identity banner read, loads its identity state, and embeds
+ * the identity system's own LogoManager — upload, auto-fetch with
+ * preview, and confirm-before-save are entirely theirs; the form
+ * builds no second logo pipeline. Create mode has no company yet:
+ * the slot appears on the first edit after saving.
+ */
+function LogoSlot({
+  dealId,
+  companyName,
+  website,
+}: {
+  dealId: string;
+  companyName: string;
+  website: string;
+}) {
+  const [state, setState] = useState<{
+    companyId: string;
+    initial: {
+      logoVersion: number;
+      logoSource: string;
+      logoMime: string;
+      logoUpdatedAt: string | null;
+      accentColor: string;
+      accentSuggested: string;
+      website: string;
+    };
+  } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const banner = await fetch(
+          `/api/platform/identity/banner?dealId=${encodeURIComponent(dealId)}`
+        ).then((r) => (r.ok ? r.json() : null));
+        const companyId: string | undefined =
+          banner?.company?.id ?? banner?.deal?.companyId;
+        if (!companyId) throw new Error("no company for deal");
+        const res = await fetch(
+          `/api/platform/companies/${encodeURIComponent(companyId)}/identity`
+        ).then((r) => (r.ok ? r.json() : null));
+        const ident = res?.identity;
+        if (!ident) throw new Error("no identity");
+        if (!live) return;
+        setState({
+          companyId,
+          initial: {
+            logoVersion: ident.logoVersion ?? 0,
+            logoSource: ident.logoSource ?? "",
+            logoMime: ident.logoMime ?? "",
+            logoUpdatedAt: ident.logoUpdatedAt ?? null,
+            accentColor: ident.accentColor ?? "",
+            accentSuggested: ident.accentSuggested ?? "",
+            website: ident.website ?? "",
+          },
+        });
+      } catch {
+        if (live) setFailed(true);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [dealId]);
+  if (failed) {
+    return (
+      <p className="text-[11px] text-slate-400 dark:text-white/40">
+        Logo tools are unavailable for this deal&rsquo;s company record — manage the logo on the company profile.
+      </p>
+    );
+  }
+  if (!state) {
+    return (
+      <p className="text-[11px] text-slate-400 dark:text-white/40">Loading logo tools…</p>
+    );
+  }
+  return (
+    <LogoManager
+      companyId={state.companyId}
+      companyName={companyName}
+      initial={state.initial}
+      fallbackWebsite={website}
+    />
+  );
+}
 
 export interface DealFormProps {
   deal: Deal | null; // null = create new
@@ -812,6 +902,16 @@ export default function DealForm({
               />
               Use the codename (and hide the logo) on external surfaces — calendar invites, shared links, guest views, reports
             </label>
+            {!isNew && deal ? (
+              <div>
+                <span className={labelCls}>Company logo &amp; accent</span>
+                <LogoSlot dealId={deal.id} companyName={form.companyName || deal.companyName} website={form.website} />
+              </div>
+            ) : (
+              <p className="text-[11px] leading-snug text-slate-400 dark:text-white/40">
+                With a website entered, saving the deal unlocks the logo tools here: auto-fetch shows candidates from the company&rsquo;s domain and saves only the one you confirm; upload always overrides. The logo lives on the company record, so it appears everywhere the company does.
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <Field label="Revenue (USD)">
                 <input type="number" min="0" className={inputCls} value={form.revenue} onChange={set("revenue")} placeholder="—" />
