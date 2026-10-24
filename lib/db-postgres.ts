@@ -210,6 +210,12 @@ export function ensureSchema(): Promise<void> {
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS codename TEXT NOT NULL DEFAULT ''`;
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS codename_external BOOLEAN NOT NULL DEFAULT TRUE`;
+      // New investment form (Oct 24, 2026): the company website as
+      // recorded on the deal — the domain the form offers logo fetch
+      // from. The identity system keeps the canonical website/logo on
+      // core.companies; this column is the BD record of it.
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS website TEXT NOT NULL DEFAULT ''`;
       await db`
         ALTER TABLE executives ADD COLUMN IF NOT EXISTS photo_url TEXT NOT NULL DEFAULT ''`;
       /* ---- Market Intel tables ---- */
@@ -505,6 +511,7 @@ function rowToDeal(r: Record<string, unknown>): Deal {
     parentDealId: r.parent_deal_id ? String(r.parent_deal_id) : null,
     codename: String(r.codename ?? ""),
     codenameExternal: r.codename_external !== false,
+    website: String(r.website ?? ""),
     sourcedFromType: (r.sourced_from_type
       ? String(r.sourced_from_type)
       : null) as Deal["sourcedFromType"],
@@ -571,7 +578,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           revenue, ebitda, asking_price, growth_pct, broker, pass_reason, source, drivers, structure,
           metrics, synthesis, investment_type, parent_deal_id,
           sourced_from_type, sourced_from_id, codename, codename_external,
-          created_at, updated_at
+          website, created_at, updated_at
         ) VALUES (
           ${d.id}, ${d.companyName}, ${d.industry}, ${d.stage},
           ${d.dealValue || 0}, ${d.contactName}, ${d.contactEmail},
@@ -587,6 +594,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           ${d.investmentType ?? "platform_lbo"}, ${d.parentDealId ?? null},
           ${d.sourcedFromType ?? null}, ${d.sourcedFromId ?? null},
           ${d.codename ?? ""}, ${d.codenameExternal !== false},
+          ${d.website ?? ""},
           ${d.createdAt}, ${d.updatedAt}
         )`
     ),
