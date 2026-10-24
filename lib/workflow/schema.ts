@@ -70,15 +70,23 @@ export interface DefaultGateRule {
   sort: number;
 }
 
-/** Default rules seeded on first ensure (ON CONFLICT DO NOTHING). */
+/**
+ * Default rules seeded on first ensure (ON CONFLICT DO NOTHING).
+ *
+ * Stage names follow the Investment Types Step 1 model (Oct 24,
+ * 2026): the bd migration remapped the LIVE gate_rules rows with
+ * Ethan's approved map (Negotiation → LOI, Closing → Financing,
+ * Closed Won → Closed) and retired the Initial Contact rules
+ * (Sourced is the ungated entry stage). The seeds must carry the
+ * same names: a seed whose id already exists under a remapped stage
+ * misses the (target_stage, condition_key) conflict arbiter and the
+ * insert dies on the primary key — which made ensureWorkflow throw
+ * on every call and took down ALL gate evaluation (every
+ * stage-changing deal PUT except to Passed/Sourced) from the Step 1
+ * deploy until this fix. Ids are unchanged — they are the live
+ * rows' identities.
+ */
 export const DEFAULT_GATE_RULES: DefaultGateRule[] = [
-  {
-    id: "gate_initial_contact_contact_recorded",
-    targetStage: "Initial Contact",
-    conditionKey: "contact_recorded",
-    label: "A contact name or email is recorded on the deal",
-    sort: 10,
-  },
   {
     id: "gate_diligence_financials_posted",
     targetStage: "Diligence",
@@ -95,21 +103,21 @@ export const DEFAULT_GATE_RULES: DefaultGateRule[] = [
   },
   {
     id: "gate_negotiation_diligence_workspace_created",
-    targetStage: "Negotiation",
+    targetStage: "LOI",
     conditionKey: "diligence_workspace_created",
     label: "A diligence workspace exists for the deal",
     sort: 10,
   },
   {
     id: "gate_closing_ic_memo_approved",
-    targetStage: "Closing",
+    targetStage: "Financing",
     conditionKey: "ic_memo_approved",
     label: "The IC memo is approved",
     sort: 10,
   },
   {
     id: "gate_closed_won_closing_checklist_complete",
-    targetStage: "Closed Won",
+    targetStage: "Closed",
     conditionKey: "closing_checklist_complete",
     label:
       "The closing checklist is complete (all items done/waived/N/A, at least one item)",
@@ -159,12 +167,15 @@ export function ensureWorkflow(): Promise<void> {
         ON workflow.gate_overrides (deal_id, created_at DESC)`;
 
       for (const rule of DEFAULT_GATE_RULES) {
+        // Bare ON CONFLICT DO NOTHING (any arbiter): a future stage
+        // remap of the live rows must never turn this seed loop into
+        // a throw again — see the DEFAULT_GATE_RULES note above.
         await db`
           INSERT INTO workflow.gate_rules
             (id, target_stage, condition_key, label, enabled, sort)
           VALUES (${rule.id}, ${rule.targetStage}, ${rule.conditionKey},
             ${rule.label}, true, ${rule.sort})
-          ON CONFLICT (target_stage, condition_key) DO NOTHING`;
+          ON CONFLICT DO NOTHING`;
       }
     })().catch((err) => {
       schemaReady = null;
