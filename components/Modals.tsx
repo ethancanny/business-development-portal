@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { DEAL_STAGES, EXEC_STAGES, PARTNER_NAMES, type Deal, type DealDrivers, type Executive, type MiMultiple } from "@/lib/types";
+import { EARLY_STAGE_STAGES, EXEC_STAGES, INVESTMENT_TYPE_LABELS, PARTNER_NAMES, PLATFORM_LBO_STAGES, stageForTypeChange, type Deal, type DealDrivers, type Executive, type InvestmentTypeKey, type MiMultiple } from "@/lib/types";
+import {
+  TypeBadge,
+  applicableDefs,
+  fetchBdBootstrap,
+  fmtMetricValue,
+  metricRawValue,
+  stagesForType,
+  type BdBootstrap,
+} from "@/components/InvestmentTypeBits";
 import { fmtMoney, fmtDate, uniqueStrings, dedupeSourceTokens } from "@/lib/format";
 import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, dealFocusSector, estimateMultiple, isFocusDeal, matchGroup, resolveDealValue, resolveStatedPrice, resolveStructure, type MarketRates, type MultipleEstimate } from "@/lib/valuation";
 import SectorChip, { StageChip } from "@/components/SectorChip";
@@ -460,7 +469,11 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
   const [form, setForm] = useState({
     companyName: deal?.companyName ?? "",
     industry: deal?.industry ?? "",
-    stage: deal?.stage ?? ("Sourcing" as Deal["stage"]),
+    stage: deal?.stage ?? ("Sourced" as Deal["stage"]),
+    investmentType: (deal?.investmentType ?? "platform_lbo") as InvestmentTypeKey,
+    parentDealId: deal?.parentDealId ?? "",
+    sourcedFromType: deal?.sourcedFromType ?? "",
+    sourcedFromId: deal?.sourcedFromId ?? "",
     dealValue: deal?.dealValue?.toString() ?? "",
     contactName: deal?.contactName ?? "",
     contactEmail: deal?.contactEmail ?? "",
@@ -540,6 +553,58 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Investment Types (Step 1): bd config + this deal's structured
+  // metrics. Seeded once when the bootstrap lands; saved alongside
+  // the deal via the deal-metrics endpoint.
+  const [bd, setBd] = useState<BdBootstrap | null>(null);
+  const [metricForm, setMetricForm] = useState<Record<string, string>>({});
+  const metricsSeeded = useRef(false);
+  useEffect(() => {
+    void fetchBdBootstrap().then((b) => {
+      setBd(b);
+      if (b && deal && !metricsSeeded.current) {
+        metricsSeeded.current = true;
+        const existing = b.metricsByDeal[deal.id] ?? {};
+        const seed: Record<string, string> = {};
+        for (const def of b.config.definitions) {
+          seed[def.key] = metricRawValue(def, existing[def.key]);
+        }
+        setMetricForm(seed);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const stageOptionsFor = (typeKey: string): string[] => {
+    const fromCfg = bd ? stagesForType(bd.config, typeKey) : [];
+    if (fromCfg.length) return fromCfg;
+    return typeKey === "early_stage"
+      ? [...EARLY_STAGE_STAGES]
+      : [...PLATFORM_LBO_STAGES];
+  };
+  const onTypeChange = (next: InvestmentTypeKey) => {
+    setForm((f) => ({
+      ...f,
+      investmentType: next,
+      stage: stageForTypeChange(f.stage, stageOptionsFor(next)),
+    }));
+  };
+  /** Old-type fields with values that the new type will hide. */
+  const hiddenOnTypeChange: string[] = (() => {
+    if (isNew || !bd || !deal) return [];
+    const oldType = (deal.investmentType ?? "platform_lbo") as InvestmentTypeKey;
+    if (form.investmentType === oldType) return [];
+    const newKeys = new Set(
+      applicableDefs(bd.config, form.investmentType, form.industry).map((d) => d.key)
+    );
+    return applicableDefs(bd.config, oldType, form.industry)
+      .filter((d) => !newKeys.has(d.key))
+      .filter((d) => {
+        const v = metricForm[d.key];
+        return v !== undefined && v.trim() !== "";
+      })
+      .map((d) => d.label);
+  })();
+
   const setDriver = (key: keyof DealDrivers, v: string) =>
     setForm((f) => ({ ...f, drivers: { ...f.drivers, [key]: v as DealDrivers[typeof key] } }));
 
@@ -574,6 +639,10 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     companyName: form.companyName,
     industry: form.industry,
     stage: form.stage,
+    investmentType: form.investmentType,
+    parentDealId: form.parentDealId || null,
+    sourcedFromType: (form.sourcedFromType || null) as Deal["sourcedFromType"],
+    sourcedFromId: form.sourcedFromId || null,
     dealValue: Number(form.dealValue) || 0,
     revenue: form.revenue.trim() === "" ? null : Number(form.revenue) || null,
     ebitda: form.ebitda.trim() === "" ? null : Number(form.ebitda) || null,
@@ -607,8 +676,16 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
     }
     setBusy(true);
     setError("");
+    if (form.investmentType === "add_on" && !form.parentDealId) {
+      setError("Add-on deals require a parent platform deal — pick one below.");
+      return;
+    }
     const payload = {
       ...form,
+      investmentType: form.investmentType,
+      parentDealId: form.parentDealId || null,
+      sourcedFromType: form.sourcedFromType || null,
+      sourcedFromId: form.sourcedFromId || null,
       dealValue: Number(form.dealValue) || 0,
       links: form.links.filter((l) => l.url.trim() !== ""),
       operatorIds: form.operatorIds,
@@ -653,8 +730,46 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
       }
     }
     setBusy(false);
-    if (res.ok) onSaved();
-    else {
+    if (res.ok) {
+      // Structured type/sector metrics ride along (Step 1). The deal
+      // itself is already saved; a metrics failure is reported but
+      // does not pretend the deal save failed.
+      let savedId = deal?.id ?? null;
+      if (isNew) {
+        const created = (await res
+          .clone()
+          .json()
+          .catch(() => null)) as { id?: string } | null;
+        savedId = created?.id ?? null;
+      }
+      if (savedId && bd) {
+        const defs = applicableDefs(
+          bd.config,
+          form.investmentType,
+          form.industry
+        );
+        const entries = defs.map((d) => ({
+          key: d.key,
+          raw: metricForm[d.key] ?? "",
+        }));
+        const mres = await fetch(
+          "/api/platform/investment-types/deal-metrics",
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dealId: savedId, entries }),
+          }
+        );
+        if (!mres.ok) {
+          const md = await mres.json().catch(() => ({}));
+          setError(
+            `Deal saved, but its type metrics failed: ${md.error ?? mres.status}. Reopen and save again to retry.`
+          );
+          return;
+        }
+      }
+      onSaved();
+    } else {
       const d = await res.json().catch(() => ({}));
       setError(d.message || d.error || "Failed to save");
     }
@@ -703,6 +818,59 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
           />
           <DetailRow label="City" value={deal.city} />
           <DetailRow label="Stage" value={<StageChip stage={deal.stage} />} />
+          <DetailRow
+            label="Investment type"
+            value={<TypeBadge type={deal.investmentType} />}
+          />
+          {deal.investmentType === "add_on" && (
+            <DetailRow
+              label="Parent platform"
+              value={
+                allDeals.find((x) => x.id === deal.parentDealId)
+                  ?.companyName ?? "—"
+              }
+            />
+          )}
+          {deal.investmentType === "early_stage" && deal.sourcedFromId && (
+            <DetailRow
+              label="Sourced from"
+              value={
+                bd?.sourcedFromOptions.portfolioCompanies.find(
+                  (o) => o.id === deal.sourcedFromId
+                )?.label ??
+                bd?.sourcedFromOptions.marketInsights.find(
+                  (o) => o.id === deal.sourcedFromId
+                )?.label ??
+                "—"
+              }
+            />
+          )}
+          {bd &&
+            (() => {
+              const defs = applicableDefs(
+                bd.config,
+                deal.investmentType ?? "platform_lbo",
+                deal.industry
+              ).filter((d) => bd.metricsByDeal[deal.id]?.[d.key]);
+              if (!defs.length) return null;
+              return (
+                <DetailRow
+                  label="Type metrics"
+                  value={
+                    <span className="flex flex-col gap-0.5">
+                      {defs.map((d) => (
+                        <span key={d.key}>
+                          {d.label}:{" "}
+                          <span className="font-medium">
+                            {fmtMetricValue(d, bd.metricsByDeal[deal.id][d.key])}
+                          </span>
+                        </span>
+                      ))}
+                    </span>
+                  }
+                />
+              );
+            })()}
           <DetailRow
             label="Deal value"
             value={(() => {
@@ -1024,14 +1192,209 @@ export function DealModal({ deal, executives = [], allDeals = [], onClose, onSav
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
+            <Field label="Investment type">
+              <select
+                className={inputCls}
+                value={form.investmentType}
+                onChange={(e) =>
+                  onTypeChange(e.target.value as InvestmentTypeKey)
+                }
+              >
+                {(bd?.config.types ?? [])
+                  .filter((t) => t.enabled || t.key === form.investmentType)
+                  .map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.label}
+                    </option>
+                  ))}
+                {!bd &&
+                  (Object.keys(INVESTMENT_TYPE_LABELS) as InvestmentTypeKey[])
+                    .filter((k) => k !== "minority_growth")
+                    .map((k) => (
+                      <option key={k} value={k}>
+                        {INVESTMENT_TYPE_LABELS[k]}
+                      </option>
+                    ))}
+              </select>
+            </Field>
             <Field label="Stage">
               <select className={inputCls} value={form.stage} onChange={set("stage")}>
-                {DEAL_STAGES.map((s) => (
+                {stageOptionsFor(form.investmentType).map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}
+                {!stageOptionsFor(form.investmentType).includes(form.stage) && (
+                  <option value={form.stage}>{form.stage}</option>
+                )}
               </select>
             </Field>
           </div>
+          {!isNew && deal && form.investmentType !== (deal.investmentType ?? "platform_lbo") && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+              Changing the investment type keeps every shared field
+              (financials, structure, contacts, notes). Stage moves to
+              the closest stage in the new type.
+              {hiddenOnTypeChange.length > 0 ? (
+                <>
+                  {" "}These {INVESTMENT_TYPE_LABELS[(deal.investmentType ?? "platform_lbo") as InvestmentTypeKey]} fields
+                  have values and will be hidden for the new type — the
+                  values stay on record: {hiddenOnTypeChange.join(", ")}.
+                </>
+              ) : (
+                <> No type-specific fields with values will be hidden.</>
+              )}
+            </p>
+          )}
+          {form.investmentType === "add_on" && (
+            <Field label="Parent platform *">
+              <select
+                className={inputCls}
+                value={form.parentDealId}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, parentDealId: e.target.value }))
+                }
+              >
+                <option value="">Select the platform this bolts onto…</option>
+                {allDeals
+                  .filter(
+                    (x) =>
+                      (x.investmentType ?? "platform_lbo") === "platform_lbo" &&
+                      x.id !== deal?.id
+                  )
+                  .map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.companyName}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+          )}
+          {form.investmentType === "early_stage" && (
+            <Field label="Sourced from (flywheel)">
+              <select
+                className={inputCls}
+                value={
+                  form.sourcedFromType && form.sourcedFromId
+                    ? `${form.sourcedFromType}:${form.sourcedFromId}`
+                    : ""
+                }
+                onChange={(e) => {
+                  const [t, id] = e.target.value.split(":");
+                  setForm((f) => ({
+                    ...f,
+                    sourcedFromType: (t ?? "") as typeof f.sourcedFromType,
+                    sourcedFromId: id ?? "",
+                  }));
+                }}
+              >
+                <option value="">—</option>
+                {bd && bd.sourcedFromOptions.portfolioCompanies.length > 0 && (
+                  <optgroup label="Portfolio companies">
+                    {bd.sourcedFromOptions.portfolioCompanies.map((o) => (
+                      <option key={o.id} value={`company:${o.id}`}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {bd && bd.sourcedFromOptions.marketInsights.length > 0 && (
+                  <optgroup label="Market insights">
+                    {bd.sourcedFromOptions.marketInsights.map((o) => (
+                      <option key={o.id} value={`insight:${o.id}`}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </Field>
+          )}
+          {bd &&
+            (() => {
+              const defs = applicableDefs(
+                bd.config,
+                form.investmentType,
+                form.industry
+              );
+              if (!defs.length) return null;
+              const typeDefs = defs.filter((d) =>
+                d.appliesTo.startsWith("type:")
+              );
+              const packDefs = defs.filter((d) =>
+                d.appliesTo.startsWith("sector:")
+              );
+              const renderDef = (d: (typeof defs)[number]) => (
+                <Field
+                  key={d.key}
+                  label={`${d.label}${d.required ? " *" : ""}`}
+                >
+                  {d.dataType === "bool" ? (
+                    <select
+                      className={inputCls}
+                      value={metricForm[d.key] ?? ""}
+                      onChange={(e) =>
+                        setMetricForm((m) => ({ ...m, [d.key]: e.target.value }))
+                      }
+                    >
+                      <option value="">—</option>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
+                  ) : d.dataType === "enum" ? (
+                    <select
+                      className={inputCls}
+                      value={metricForm[d.key] ?? ""}
+                      onChange={(e) =>
+                        setMetricForm((m) => ({ ...m, [d.key]: e.target.value }))
+                      }
+                    >
+                      <option value="">—</option>
+                      {(d.config.options ?? []).map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={
+                        d.dataType === "date"
+                          ? "date"
+                          : d.dataType === "text"
+                            ? "text"
+                            : "number"
+                      }
+                      step="any"
+                      className={inputCls}
+                      value={metricForm[d.key] ?? ""}
+                      onChange={(e) =>
+                        setMetricForm((m) => ({ ...m, [d.key]: e.target.value }))
+                      }
+                      placeholder="—"
+                    />
+                  )}
+                </Field>
+              );
+              return (
+                <div className="rounded-xl border border-slate-200 p-3 dark:border-white/10">
+                  <p className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">
+                    {INVESTMENT_TYPE_LABELS[form.investmentType]} metrics
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {typeDefs.map(renderDef)}
+                  </div>
+                  {packDefs.length > 0 && (
+                    <>
+                      <p className="mb-2 mt-3 text-sm font-semibold text-slate-900 dark:text-white">
+                        Sector pack — {form.industry}
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {packDefs.map(renderDef)}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
           {form.stage === "Passed" && (
             <Field label="Pass reason">
               <select className={inputCls} value={form.passReason ?? ""} onChange={set("passReason")}>
