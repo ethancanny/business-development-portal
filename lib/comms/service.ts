@@ -734,10 +734,24 @@ export async function generateReportNow(
  * Best-effort display label for a report's subject, resolved ONLY via
  * other modules' service functions (directory / diligence). Falls back
  * to "" — assemble substitutes its own default label.
+ *
+ * Deal Identity (Oct 24, 2026): generated reports are an EXTERNAL
+ * surface — when the linked deal carries a codename that applies
+ * externally, the cover's subject label is the codename ONLY (the
+ * real company name never lands in the generated artifact).
  */
 async function resolveSubjectLabel(report: ReportRow): Promise<string> {
   try {
     if (report.dealId) {
+      const { dealIdentityForDeal } = await import("../identity/service");
+      const { resolveDisplayIdentity } = await import("../identity/shared");
+      const identity = await dealIdentityForDeal(report.dealId).catch(
+        () => null
+      );
+      if (identity) {
+        const resolved = resolveDisplayIdentity(identity, "external");
+        if (resolved.codenameActive) return resolved.displayName;
+      }
       const { getDealContext } = await import("../diligence/service");
       const ctx = await getDealContext(report.dealId);
       if (ctx) return ctx.companyName || ctx.dealName || "";

@@ -6,11 +6,18 @@ import { Button, EmptyState, ErrorState, SkeletonRows } from "@/components/ui";
 import { fmtDate, fmtRelTime } from "@/lib/format";
 import DocumentUploader from "@/components/DocumentUploader";
 import SigningActions from "@/components/signing/EnvelopeStatus";
+import DealBanner from "@/components/identity/DealBanner";
+import CompanyMark from "@/components/identity/CompanyMark";
+import ConfirmDealDialog from "@/components/identity/ConfirmDealDialog";
 
 interface RoomRow {
   id: string;
   dealId: string;
   companyId: string | null;
+  /** Deal Identity enrichment from the room GET. */
+  logoVersion?: number;
+  accentColor?: string;
+  codename?: string;
   dealName: string;
   name: string;
   provider: string;
@@ -147,6 +154,9 @@ export default function DataRoomDetail({ roomId }: { roomId: string }) {
   const [guestLevel, setGuestLevel] = useState<"view" | "download">("view");
   const [guestDays, setGuestDays] = useState(30);
   const [creatingGuest, setCreatingGuest] = useState(false);
+  /** Wrong-deal protection: guest-link creation goes through the
+   *  ConfirmDealDialog first (Deal Identity, Oct 24, 2026). */
+  const [confirmGuest, setConfirmGuest] = useState(false);
   const [guestError, setGuestError] = useState("");
   const [oneTimeLink, setOneTimeLink] = useState("");
   const [copied, setCopied] = useState(false);
@@ -473,6 +483,11 @@ export default function DataRoomDetail({ roomId }: { roomId: string }) {
 
   return (
     <div className="space-y-5">
+      {/* Deal Identity banner for the room's deal/company. */}
+      <DealBanner
+        companyId={room.companyId ?? undefined}
+        dealId={room.dealId}
+      />
       {/* Header */}
       <section className={cardCls}>
         {provider?.setupRequired && (
@@ -493,7 +508,17 @@ export default function DataRoomDetail({ roomId }: { roomId: string }) {
                 {savingName ? "Saving..." : "Save"}
               </Button>
             </div>
-            <p className="mt-2 text-sm text-slate-500 dark:text-white/60">{room.dealName}</p>
+            <p className="mt-2 flex items-center gap-2 text-sm text-slate-500 dark:text-white/60">
+              {room.companyId && (
+                <CompanyMark
+                  companyId={room.companyId}
+                  name={room.dealName}
+                  logoVersion={room.logoVersion ?? 0}
+                  size={20}
+                />
+              )}
+              <span className="min-w-0 truncate">{room.dealName}</span>
+            </p>
             <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
               Storage: {provider?.provider || room.provider} · Status: {room.status} · Created {room.createdAt ? fmtDate(room.createdAt) : "—"}
             </p>
@@ -756,7 +781,7 @@ export default function DataRoomDetail({ roomId }: { roomId: string }) {
         </div>
         {guestError && <p className="mt-3 text-sm text-red-600 dark:text-red-300">{guestError}</p>}
         <div className="mt-3">
-          <Button onClick={() => void createGuest()} disabled={creatingGuest || !guestEmail.trim()} className="min-h-[44px]">
+          <Button onClick={() => setConfirmGuest(true)} disabled={creatingGuest || !guestEmail.trim()} className="min-h-[44px]">
             {creatingGuest ? "Creating..." : "Create guest link"}
           </Button>
         </div>
@@ -921,6 +946,24 @@ export default function DataRoomDetail({ roomId }: { roomId: string }) {
           </div>
         )}
       </section>
+
+      {/* Wrong-deal protection for the guest invite / share action. */}
+      <ConfirmDealDialog
+        open={confirmGuest}
+        actionLabel="Invite guest to this data room"
+        companyId={room.companyId ?? undefined}
+        companyName={room.dealName}
+        codename={room.codename}
+        logoVersion={room.logoVersion ?? 0}
+        detail={`Guest: ${guestEmail.trim()} · ${guestLevel === "download" ? "View + download" : "View only"} · expires in ${guestDays} days`}
+        busy={creatingGuest}
+        confirmLabel="Create guest link"
+        onConfirm={() => {
+          setConfirmGuest(false);
+          void createGuest();
+        }}
+        onCancel={() => setConfirmGuest(false)}
+      />
     </div>
   );
 }

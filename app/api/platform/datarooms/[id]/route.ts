@@ -41,9 +41,43 @@ export async function GET(
   }
   const guests = await listGuests(params.id);
   const provider = await getStorageStatus();
+  // Deal Identity enrichment: the room header renders the company's
+  // stored mark + accent (decorative; failures degrade to monogram).
+  // The deal codename rides along for the wrong-deal confirm dialog
+  // on guest invites.
+  let identityFields: {
+    logoVersion?: number;
+    accentColor?: string;
+    codename?: string;
+  } = {};
+  if (index.room.companyId) {
+    try {
+      const { getIdentity } = await import("@/lib/identity/service");
+      const identity = await getIdentity(index.room.companyId);
+      if (identity) {
+        identityFields = {
+          logoVersion: identity.logoVersion,
+          accentColor: identity.accentColor,
+        };
+      }
+    } catch {
+      /* decorative */
+    }
+  }
+  if (index.room.dealId) {
+    try {
+      const { dealIdentityForDeal } = await import("@/lib/identity/service");
+      const dealIdentity = await dealIdentityForDeal(index.room.dealId);
+      if (dealIdentity?.codename) {
+        identityFields.codename = dealIdentity.codename;
+      }
+    } catch {
+      /* decorative */
+    }
+  }
   return NextResponse.json(
     {
-      room: index.room,
+      room: { ...index.room, ...identityFields },
       folders: index.folders,
       unfiled: index.unfiled,
       checklist: index.checklist,

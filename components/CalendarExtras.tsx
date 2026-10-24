@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import CompanyMark from "@/components/identity/CompanyMark";
 
 /**
  * Phase 2 — Calendar extras: the generated-events layer (tasks &
@@ -29,6 +30,9 @@ export interface PlatformEventItem {
   href: string;
   status: string;
   meta?: Record<string, unknown>;
+  /** Deal Identity enrichment for deal-linked events. */
+  companyId?: string | null;
+  logoVersion?: number;
 }
 
 export interface CalendarLayer {
@@ -95,6 +99,15 @@ function ItemRow({ item }: { item: PlatformEventItem }) {
   const inner = (
     <>
       <Dot color={item.color} />
+      {item.companyId && (
+        <CompanyMark
+          companyId={item.companyId}
+          name={dealNameOf(item)}
+          logoVersion={item.logoVersion ?? 0}
+          size={20}
+          className="mt-0.5"
+        />
+      )}
       <span className="min-w-0 flex-1">
         <span
           className={`block truncate text-sm font-semibold text-[#0d1f3c] dark:text-white ${

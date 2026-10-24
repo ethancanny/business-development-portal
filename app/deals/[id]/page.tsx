@@ -22,6 +22,9 @@ import SectorChip, { StageChip } from "@/components/SectorChip";
 import DealRecordHeader from "@/components/DealRecordHeader";
 import DealTimeline from "@/components/DealTimeline";
 import { GenerateDocumentButton } from "@/components/docgen/GenerateDocument";
+import DealBanner from "@/components/identity/DealBanner";
+import RecordRecent from "@/components/identity/RecordRecent";
+import CodenameEditor from "@/components/identity/CodenameEditor";
 
 export default function DealDetailPage() {
   const params = useParams();
@@ -100,6 +103,13 @@ export default function DealDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Deal Identity: the browser tab carries the company name.
+  useEffect(() => {
+    if (deal?.companyName) {
+      document.title = `${deal.companyName} · Canny Capital Partners`;
+    }
+  }, [deal?.companyName]);
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -126,6 +136,8 @@ export default function DealDetailPage() {
 
   return (
     <>
+      <RecordRecent companyId={deal.companyId} dealId={deal.id} />
+      <DealBanner companyId={deal.companyId} dealId={deal.id} />
       <PageHero
         eyebrow="Acquisition target"
         title={deal.companyName}
@@ -145,6 +157,18 @@ export default function DealDetailPage() {
             logo, serif name, and key facts, above the dossier card. */}
         <div className="mt-3">
           <DealRecordHeader deal={deal} multiples={multiples} rates={rates} />
+        </div>
+
+        {/* Deal Identity: codename + external-rule toggle. */}
+        <div className="mt-3">
+          <CodenameEditor
+            dealId={deal.id}
+            codename={deal.codename}
+            codenameExternal={deal.codenameExternal}
+            onSaved={(codename, codenameExternal) =>
+              setDeal((d) => (d ? { ...d, codename, codenameExternal } : d))
+            }
+          />
         </div>
 
         {/* Dossier header */}

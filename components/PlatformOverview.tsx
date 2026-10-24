@@ -21,6 +21,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import CompanyMark from "@/components/identity/CompanyMark";
 import { Button, EmptyState, SkeletonRows, StatTile } from "@/components/ui";
 import { ragDot, type CompanyCard } from "@/components/CompanyCards";
 import { useTheme } from "@/components/ThemeProvider";
@@ -47,6 +48,7 @@ export interface PlatformSummary {
     dealId: string;
     companyId: string;
     companyName: string;
+    logoVersion?: number;
     debt: number;
     equity: number;
     sellerNote: number;
@@ -66,6 +68,7 @@ export interface PlatformSummary {
 export interface EarlyWarningItem {
   companyId: string;
   companyName: string;
+  logoVersion?: number;
   score: number;
   band: string;
   components: unknown;
@@ -429,12 +432,22 @@ export function CapitalStacksPanel({ summary }: { summary: PlatformSummary }) {
           return (
             <li key={s.dealId}>
               <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
-                <Link
-                  href={`/companies/${s.companyId}`}
-                  className="truncate font-medium text-slate-700 hover:text-gold-700 dark:text-white/80 dark:hover:text-gold-400"
-                >
-                  {s.companyName}
-                </Link>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {s.companyId && (
+                    <CompanyMark
+                      companyId={s.companyId}
+                      name={s.companyName}
+                      logoVersion={s.logoVersion ?? 0}
+                      size={16}
+                    />
+                  )}
+                  <Link
+                    href={`/companies/${s.companyId}`}
+                    className="truncate font-medium text-slate-700 hover:text-gold-700 dark:text-white/80 dark:hover:text-gold-400"
+                  >
+                    {s.companyName}
+                  </Link>
+                </span>
                 <span className="tnum shrink-0 font-semibold text-[#0d1f3c] dark:text-white" title={fmtMoney(total)}>
                   {fmtMoneyCompact(total)}
                 </span>
@@ -620,6 +633,12 @@ function RagWidget({
                 className="flex items-center gap-2 text-sm text-slate-800 hover:text-gold-700 dark:text-white/90 dark:hover:text-gold-400"
               >
                 {ragDot(c.rag)}
+                <CompanyMark
+                  companyId={c.id}
+                  name={c.name}
+                  logoVersion={c.logoVersion ?? 0}
+                  size={18}
+                />
                 <span className="min-w-0 truncate">{c.name}</span>
                 {c.city && (
                   <span className="ml-auto shrink-0 text-xs text-caption">{c.city}</span>
@@ -818,12 +837,20 @@ function EarlyWarningBlock({ items }: { items: EarlyWarningItem[] }) {
               className="rounded-xl border border-slate-100 p-4 dark:border-white/10"
             >
               <div className="flex items-start justify-between gap-3">
-                <Link
-                  href={`/portfolio-monitoring/${encodeURIComponent(it.companyId)}`}
-                  className="min-w-0 truncate text-sm font-semibold text-slate-800 hover:text-gold-700 dark:text-white/90 dark:hover:text-gold-400"
-                >
-                  {it.companyName}
-                </Link>
+                <span className="flex min-w-0 items-center gap-2">
+                  <CompanyMark
+                    companyId={it.companyId}
+                    name={it.companyName}
+                    logoVersion={it.logoVersion ?? 0}
+                    size={22}
+                  />
+                  <Link
+                    href={`/portfolio-monitoring/${encodeURIComponent(it.companyId)}`}
+                    className="min-w-0 truncate text-sm font-semibold text-slate-800 hover:text-gold-700 dark:text-white/90 dark:hover:text-gold-400"
+                  >
+                    {it.companyName}
+                  </Link>
+                </span>
                 <span
                   className={`badge shrink-0 ${chip.className}`}
                   style={chip.style}

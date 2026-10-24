@@ -423,6 +423,12 @@ export interface NotificationItem {
   href: string;
   read: boolean;
   createdAt: string;
+  /** Deal Identity (Oct 24, 2026): display-only enrichment — the
+   *  company the notification refers to + its stored-logo version,
+   *  so the bell can render the company mark. Absent when the
+   *  notification has no company/deal entity reference. */
+  companyId?: string;
+  logoVersion?: number;
 }
 
 export async function listNotifications(
@@ -437,7 +443,8 @@ export async function listNotifications(
   // what made the center impossible to empty: clearing stamped
   // read_at, but the rows kept rendering (dimmed) forever.
   const rows = await db`
-    SELECT id, kind, title, body, href, read_at, created_at
+    SELECT id, kind, title, body, href, read_at, created_at,
+      entity_kind, entity_id
     FROM core.notifications
     WHERE (user_email = ${email} OR user_email = '') AND read_at IS NULL
     ORDER BY created_at DESC
@@ -453,8 +460,61 @@ export async function listNotifications(
       href: str(rec.href) || "/overview",
       read: Boolean(rec.read_at),
       createdAt: isoOrNull(rec.created_at) ?? "",
+      // Stash the raw entity ref for the identity enrichment below;
+      // stripped before return if it cannot be resolved.
+      ...(str(rec.entity_kind) && str(rec.entity_id)
+        ? {
+            companyId:
+              str(rec.entity_kind) === "company"
+                ? str(rec.entity_id)
+                : `deal:${str(rec.entity_id)}`,
+          }
+        : {}),
     };
   });
+  // Deal Identity enrichment: resolve deal refs to their company and
+  // attach logo versions (one query each; failures degrade to no
+  // mark — the notification itself still renders).
+  try {
+    const dealRefs = platform
+      .map((i) => i.companyId)
+      .filter((c): c is string => !!c && c.startsWith("deal:"))
+      .map((c) => c.slice(5));
+    if (dealRefs.length) {
+      const linkRows = await db`
+        SELECT id, company_id FROM core.deals WHERE id = ANY(${dealRefs})`;
+      const byDeal = new Map<string, string>();
+      for (const r of linkRows) {
+        const rec = r as Record<string, unknown>;
+        byDeal.set(str(rec.id), str(rec.company_id));
+      }
+      for (const item of platform) {
+        if (item.companyId?.startsWith("deal:")) {
+          item.companyId = byDeal.get(item.companyId.slice(5)) || undefined;
+        }
+      }
+    }
+    const companyIds = Array.from(
+      new Set(platform.map((i) => i.companyId).filter(Boolean) as string[])
+    );
+    if (companyIds.length) {
+      const logoRows = await db`
+        SELECT id, coalesce(logo_version, 0) AS logo_version
+        FROM core.companies WHERE id = ANY(${companyIds})`;
+      const versions = new Map<string, number>();
+      for (const r of logoRows) {
+        const rec = r as Record<string, unknown>;
+        versions.set(str(rec.id), num(rec.logo_version));
+      }
+      for (const item of platform) {
+        if (item.companyId) {
+          item.logoVersion = versions.get(item.companyId) ?? 0;
+        }
+      }
+    }
+  } catch {
+    /* mark enrichment is decorative */
+  }
   const countRows = await db`
     SELECT count(*)::int AS n FROM core.notifications
     WHERE (user_email = ${email} OR user_email = '') AND read_at IS NULL`;

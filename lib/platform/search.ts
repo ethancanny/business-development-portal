@@ -36,7 +36,8 @@ export async function searchAll(
 
   if (want("company")) {
     const rows = await db`
-      SELECT id, name, vertical, city, state, updated_at
+      SELECT id, name, vertical, city, state, updated_at,
+        coalesce(logo_version, 0) AS logo_version
       FROM core.companies
       WHERE deleted_at IS NULL
         AND (search_vector @@ plainto_tsquery('english', ${query})
@@ -54,6 +55,7 @@ export async function searchAll(
           .join(" · "),
         href: `/companies/${str(rec.id)}`,
         updatedAt: isoOrNull(rec.updated_at),
+        logoVersion: num(rec.logo_version),
       });
     }
   }
@@ -84,7 +86,8 @@ export async function searchAll(
 
   if (want("organization")) {
     const rows = await db`
-      SELECT id, name, kind, website, updated_at
+      SELECT id, name, kind, website, updated_at,
+        coalesce(logo_version, 0) AS logo_version
       FROM core.organizations
       WHERE deleted_at IS NULL
         AND (normalized_name ILIKE ${like} OR name ILIKE ${like})
@@ -101,6 +104,7 @@ export async function searchAll(
           .join(" · "),
         href: `/directory?q=${encodeURIComponent(str(rec.name))}`,
         updatedAt: isoOrNull(rec.updated_at),
+        logoVersion: num(rec.logo_version),
       });
     }
   }

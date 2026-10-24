@@ -4,7 +4,7 @@ import type { Deal, Executive } from "@/lib/types";
 import type { Investor } from "@/lib/investors-db";
 import { fmtDate } from "@/lib/format";
 import { dealFocusSector } from "@/lib/valuation";
-import CompanyLogo from "@/components/CompanyLogo";
+import CompanyMark from "@/components/identity/CompanyMark";
 import PersonAvatar from "@/components/PersonAvatar";
 import SectorChip, { StageChip } from "@/components/SectorChip";
 import { dealWebsite } from "@/components/DealTable";
@@ -68,10 +68,10 @@ export default function DirectoryGrid({
           >
             <span className="flex items-start gap-3">
               {e.kind === "business" ? (
-                <CompanyLogo
+                <CompanyMark
+                  companyId={deal ? `co_${deal.id}` : undefined}
                   name={e.name}
-                  website={e.website ?? (deal ? dealWebsite(deal) : undefined)}
-                  sector={e.sector}
+                  logoVersion={deal?.logoVersion ?? 0}
                   size={44}
                 />
               ) : (
@@ -90,7 +90,7 @@ export default function DirectoryGrid({
                 </span>
                 {inv && inv.firm && (
                   <span className="mt-1 flex items-center gap-1.5 text-xs text-slate-500 dark:text-white/50">
-                    <CompanyLogo name={inv.firm} website={inv.website || undefined} size={16} />
+                    <CompanyMark name={inv.firm} size={16} />
                     <span className="truncate">{inv.firm}</span>
                   </span>
                 )}

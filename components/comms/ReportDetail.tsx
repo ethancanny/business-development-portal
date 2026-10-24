@@ -14,6 +14,7 @@ import Link from "next/link";
 import { Button, ErrorState, SkeletonRows } from "@/components/ui";
 import ReportView from "@/components/comms/ReportView";
 import SendDialog from "@/components/comms/SendDialog";
+import ConfirmDealDialog from "@/components/identity/ConfirmDealDialog";
 import SigningActions from "@/components/signing/EnvelopeStatus";
 import {
   COMMS_API,
@@ -62,6 +63,14 @@ export default function ReportDetail({ reportId }: { reportId: string }) {
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [showSend, setShowSend] = useState(false);
+  /** Wrong-deal protection (Deal Identity, Oct 24, 2026): deal/company
+   *  reports pass through ConfirmDealDialog before the Send dialog. */
+  const [confirmSend, setConfirmSend] = useState<{
+    companyId?: string;
+    companyName: string;
+    codename?: string;
+    logoVersion: number;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setPhase("loading");
@@ -167,6 +176,43 @@ export default function ReportDetail({ reportId }: { reportId: string }) {
     }
   };
 
+  /** Send entry point: deal/company-linked reports confirm the deal
+   *  first (wrong-deal protection); other reports go straight to the
+   *  Send dialog as before. */
+  const onSendClick = async () => {
+    const dealId = str(pick(r, "dealId", "deal_id"));
+    const companyId = str(pick(r, "companyId", "company_id"));
+    if (!dealId && !companyId) {
+      setShowSend(true);
+      return;
+    }
+    try {
+      const qs = new URLSearchParams();
+      if (companyId) qs.set("companyId", companyId);
+      if (dealId) qs.set("dealId", dealId);
+      const res = await fetch(`/api/platform/identity/banner?${qs.toString()}`);
+      const data = (await res.json().catch(() => ({}))) as {
+        company?: { id?: string; name?: string; logoVersion?: number } | null;
+        deal?: { codename?: string | null } | null;
+      };
+      setConfirmSend({
+        companyId: data.company?.id ?? (companyId || undefined),
+        companyName:
+          data.company?.name || render?.subjectLabel || report.title || "This report",
+        codename: data.deal?.codename ?? undefined,
+        logoVersion: data.company?.logoVersion ?? 0,
+      });
+    } catch {
+      // Identity lookup failed — fall back to naming the report's
+      // subject label; never block the send flow on it.
+      setConfirmSend({
+        companyId: companyId || undefined,
+        companyName: render?.subjectLabel || report.title || "This report",
+        logoVersion: 0,
+      });
+    }
+  };
+
   return (
     <div>
       <Link
@@ -221,7 +267,7 @@ export default function ReportDetail({ reportId }: { reportId: string }) {
             </Button>
           )}
           {(status === "approved" || status === "sent") && (
-            <Button variant="primary" size="sm" className="min-h-[44px]" onClick={() => setShowSend(true)}>
+            <Button variant="primary" size="sm" className="min-h-[44px]" onClick={() => void onSendClick()}>
               Send…
             </Button>
           )}
@@ -420,6 +466,24 @@ export default function ReportDetail({ reportId }: { reportId: string }) {
             ))}
           </ul>
         </section>
+      )}
+
+      {confirmSend && (
+        <ConfirmDealDialog
+          open
+          actionLabel="Send report"
+          companyId={confirmSend.companyId}
+          companyName={confirmSend.companyName}
+          codename={confirmSend.codename}
+          logoVersion={confirmSend.logoVersion}
+          detail={report.title || undefined}
+          confirmLabel="Continue to send"
+          onConfirm={() => {
+            setConfirmSend(null);
+            setShowSend(true);
+          }}
+          onCancel={() => setConfirmSend(null)}
+        />
       )}
 
       {showSend && (

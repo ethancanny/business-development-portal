@@ -185,18 +185,19 @@ export interface Deal {
   investmentType?: InvestmentTypeKey;
   /** Add-on → its platform deal (required for add_on deals). */
   parentDealId?: string | null;
-  /** Deal identity (Oct 24, 2026): optional codename shown beside the
-   * real name internally; on external surfaces it REPLACES the name
-   * (and hides the logo) unless codenameExternal is false. Owned by
-   * the identity system (deals.codename / codename_external columns);
-   * the New investment form edits it through the deals API. */
+  /** Deal Identity (Oct 24, 2026): optional codename. Internal
+   *  surfaces show it beside the real name; external surfaces show
+   *  the codename ONLY (logo hidden) when codenameExternal is on. */
   codename?: string;
+  /** Per-deal override: FALSE = real name shows externally too.
+   *  Absent/TRUE = codename applies externally when set. */
   codenameExternal?: boolean;
-  /** Company website as recorded on the deal (New investment form,
-   * Oct 24, 2026). The identity system keeps the company's canonical
-   * website/logo on core.companies; this is the BD record of it and
-   * the domain the form offers logo fetch from. */
-  website?: string;
+  /** Deal Identity enrichment (API-side, from the identity service):
+   *  the core company this deal belongs to + its stored-logo version
+   *  and accent, so list surfaces render the mark without extra reads. */
+  companyId?: string;
+  logoVersion?: number;
+  accentColor?: string;
   /** Early-stage flywheel link: where this deal was sourced from. */
   sourcedFromType?: "portfolio_company" | "market_insight" | null;
   sourcedFromId?: string | null;

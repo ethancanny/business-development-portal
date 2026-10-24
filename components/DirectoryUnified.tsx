@@ -11,7 +11,7 @@
  * in DirectoryTemplates.tsx.
  */
 
-import CompanyLogo from "@/components/CompanyLogo";
+import CompanyMark from "@/components/identity/CompanyMark";
 import PersonAvatar from "@/components/PersonAvatar";
 import { fmtDate } from "@/lib/format";
 
@@ -28,6 +28,7 @@ export interface DirectoryItem {
   photoUrl?: string | null;
   organizationName?: string | null;
   website?: string | null;
+  logoVersion?: number;
   linkedDealCount?: number;
   updatedAt?: string | null;
   source?: string | null;
@@ -164,9 +165,10 @@ export default function DirectoryGrid({
           >
             <span className="flex items-start gap-3">
               {item.kind === "organization" ? (
-                <CompanyLogo
+                <CompanyMark
+                  companyId={item.id}
                   name={item.name}
-                  website={item.website || undefined}
+                  logoVersion={item.logoVersion ?? 0}
                   size={44}
                 />
               ) : (
@@ -266,9 +268,10 @@ export function DirectoryTable({
                 <td className={`${td} font-medium`}>
                   <span className="flex items-center gap-2.5">
                     {item.kind === "organization" ? (
-                      <CompanyLogo
+                      <CompanyMark
+                        companyId={item.id}
                         name={item.name}
-                        website={item.website || undefined}
+                        logoVersion={item.logoVersion ?? 0}
                         size={28}
                       />
                     ) : (

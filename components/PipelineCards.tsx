@@ -10,7 +10,7 @@ import {
   type MarketRates,
 } from "@/lib/valuation";
 import { agingColor, sectorColor } from "@/lib/sector-colors";
-import CompanyLogo from "@/components/CompanyLogo";
+import CompanyMark from "@/components/identity/CompanyMark";
 import PersonAvatar from "@/components/PersonAvatar";
 import SectorChip, { StageChip } from "@/components/SectorChip";
 import { dealWebsite } from "@/components/DealTable";
@@ -84,7 +84,7 @@ export function DealCardGrid({
               }}
             >
               <div className="relative z-10 flex h-full items-end p-3">
-                <CompanyLogo name={d.companyName} website={dealWebsite(d)} sector={sector} size={34} />
+                <CompanyMark companyId={d.companyId ?? `co_${d.id}`} name={d.companyName} logoVersion={d.logoVersion ?? 0} size={34} />
               </div>
             </div>
             <div className="p-4">
@@ -244,7 +244,7 @@ export function PairingCardGrid({
               }}
             >
               <div className="relative z-10 flex h-full items-end p-3">
-                <CompanyLogo name={d.companyName} website={dealWebsite(d)} sector={sector} size={30} />
+                <CompanyMark companyId={d.companyId ?? `co_${d.id}`} name={d.companyName} logoVersion={d.logoVersion ?? 0} size={30} />
               </div>
             </div>
             <div className="p-4">

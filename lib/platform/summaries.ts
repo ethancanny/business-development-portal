@@ -124,9 +124,11 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
 
   const stackRows = await db`
     SELECT d.id AS deal_id, d.company_name, d.deal_value, d.asking_price,
-      d.structure, cd.company_id AS company_id
+      d.structure, cd.company_id AS company_id,
+      coalesce(cc.logo_version, 0) AS logo_version
     FROM deals d
     LEFT JOIN core.deals cd ON cd.id = d.id
+    LEFT JOIN core.companies cc ON cc.id = cd.company_id
     WHERE d.stage <> 'Passed'
     ORDER BY d.updated_at DESC
     LIMIT 12`;
@@ -143,6 +145,7 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
       dealId: str(rec.deal_id),
       companyId: rec.company_id ? str(rec.company_id) : null,
       companyName: str(rec.company_name),
+      logoVersion: num(rec.logo_version),
       ...stack,
     };
   });

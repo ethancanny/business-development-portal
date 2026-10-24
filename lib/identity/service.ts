@@ -410,6 +410,39 @@ export async function dealIdentityForDeal(
   };
 }
 
+/** Identity summaries for a set of deals (list enrichment): deal id →
+ *  its core company + logo version + accent. One query. */
+export async function identitySummariesForDeals(
+  dealIds: string[]
+): Promise<
+  Map<string, { companyId: string; logoVersion: number; accentColor: string }>
+> {
+  const out = new Map<
+    string,
+    { companyId: string; logoVersion: number; accentColor: string }
+  >();
+  const ids = Array.from(new Set(dealIds.filter(Boolean)));
+  if (!ids.length) return out;
+  await ensureIdentitySchema();
+  const db = sql();
+  const rows = await db`
+    SELECT cd.id AS deal_id, cd.company_id,
+      coalesce(c.logo_version, 0) AS logo_version,
+      coalesce(c.accent_color, '') AS accent_color
+    FROM core.deals cd
+    LEFT JOIN core.companies c ON c.id = cd.company_id
+    WHERE cd.id = ANY(${ids})`;
+  for (const raw of rows) {
+    const r = raw as Record<string, unknown>;
+    out.set(str(r.deal_id), {
+      companyId: str(r.company_id),
+      logoVersion: num(r.logo_version),
+      accentColor: str(r.accent_color),
+    });
+  }
+  return out;
+}
+
 /** Active deals for the banner quick-switcher (not Closed/Passed). */
 export async function listActiveDealIdentities(): Promise<
   Array<DealIdentity & { logoVersion: number; accentColor: string }>

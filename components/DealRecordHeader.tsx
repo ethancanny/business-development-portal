@@ -4,7 +4,7 @@ import type { Deal, MiMultiple } from "@/lib/types";
 import { fmtMoney } from "@/lib/format";
 import { dealFocusSector, resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { sectorColor } from "@/lib/sector-colors";
-import CompanyLogo from "@/components/CompanyLogo";
+import CompanyMark from "@/components/identity/CompanyMark";
 import { StageChip } from "@/components/SectorChip";
 import { dealWebsite } from "@/components/DealTable";
 
@@ -40,10 +40,10 @@ export default function DealRecordHeader({
         className="relative z-10 flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4"
         style={{ minHeight: 96 }}
       >
-        <CompanyLogo
+        <CompanyMark
+          companyId={deal.companyId ?? `co_${deal.id}`}
           name={deal.companyName}
-          website={dealWebsite(deal)}
-          sector={sector}
+          logoVersion={deal.logoVersion ?? 0}
           size={44}
         />
         <div className="min-w-0">

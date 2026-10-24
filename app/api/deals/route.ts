@@ -106,7 +106,24 @@ export async function GET() {
   if (ctx.companyIds !== null) {
     return NextResponse.json({ error: "internal_only" }, { status: 403 });
   }
-  return NextResponse.json(await getDeals());
+  const deals = await getDeals();
+  // Deal Identity enrichment: company link + logo version + accent
+  // for mark rendering in table / Kanban / card surfaces.
+  try {
+    const { identitySummariesForDeals } = await import("@/lib/identity/service");
+    const summaries = await identitySummariesForDeals(deals.map((d) => d.id));
+    for (const d of deals) {
+      const s = summaries.get(d.id);
+      if (s) {
+        d.companyId = s.companyId;
+        d.logoVersion = s.logoVersion;
+        d.accentColor = s.accentColor;
+      }
+    }
+  } catch {
+    /* identity enrichment is decorative — deals still serve */
+  }
+  return NextResponse.json(deals);
 }
 
 export async function POST(req: NextRequest) {

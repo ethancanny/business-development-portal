@@ -109,6 +109,18 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const deals = await getDeals();
   const deal = deals.find((d) => d.id === params.id);
   if (!deal) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try {
+    const { identitySummariesForDeals } = await import("@/lib/identity/service");
+    const summaries = await identitySummariesForDeals([deal.id]);
+    const s = summaries.get(deal.id);
+    if (s) {
+      deal.companyId = s.companyId;
+      deal.logoVersion = s.logoVersion;
+      deal.accentColor = s.accentColor;
+    }
+  } catch {
+    /* decorative enrichment */
+  }
   return NextResponse.json(deal);
 }
 

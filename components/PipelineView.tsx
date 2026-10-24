@@ -24,7 +24,7 @@ import {
   CapitalStacksPanel,
   type PlatformSummary,
 } from "@/components/PlatformOverview";
-import CompanyLogo from "@/components/CompanyLogo";
+import CompanyMark from "@/components/identity/CompanyMark";
 import PersonAvatar from "@/components/PersonAvatar";
 import SectorChip from "@/components/SectorChip";
 import { dealWebsite } from "@/components/DealTable";
@@ -449,10 +449,10 @@ export default function PipelineView({
             renderCard={(d) => (
               <div>
                 <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                  <CompanyLogo
+                  <CompanyMark
+                    companyId={d.companyId ?? `co_${d.id}`}
                     name={d.companyName}
-                    website={dealWebsite(d)}
-                    sector={dealFocusSector(d.industry) ?? d.industry}
+                    logoVersion={d.logoVersion ?? 0}
                     size={20}
                   />
                   {d.companyName}
@@ -584,10 +584,10 @@ export default function PipelineView({
                 renderCard={({ deal: d, operator: op, isMatch }) => (
                   <div>
                     <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                      <CompanyLogo
+                      <CompanyMark
+                        companyId={d.companyId ?? `co_${d.id}`}
                         name={d.companyName}
-                        website={dealWebsite(d)}
-                        sector={dealFocusSector(d.industry) ?? d.industry}
+                        logoVersion={d.logoVersion ?? 0}
                         size={20}
                       />
                       {d.companyName}

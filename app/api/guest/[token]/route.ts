@@ -4,6 +4,8 @@ import { ensureDataRoom } from "@/lib/dataroom/schema";
 import { getRoomIndex } from "@/lib/dataroom/service";
 import { logAccess, validateGuestToken } from "@/lib/dataroom/guests";
 import { listThreads } from "@/lib/dataroom/qa";
+import { dealIdentityForDeal } from "@/lib/identity/service";
+import { resolveDisplayIdentity } from "@/lib/identity/shared";
 
 /** Guest responses carry access decisions — they must never be stored
  * by any cache layer. (A cached 200 kept revoked links working in
@@ -68,6 +70,33 @@ export async function GET(
   if (!v.ok) return failure(v.reason);
   const index = await getRoomIndex(v.room.id);
   if (!index) return failure("room_inactive");
+  // Deal Identity — codename rule (EXTERNAL surface): when the deal
+  // carries a codename that applies externally, guests see the
+  // codename ONLY — the real name is scrubbed from the room's
+  // identity fields (name + dealName) and no logo is ever exposed
+  // here. Document titles are content, not identity chrome.
+  let roomName = index.room.name;
+  let dealName = index.room.dealName;
+  try {
+    const dealIdentity = index.room.dealId
+      ? await dealIdentityForDeal(index.room.dealId)
+      : null;
+    if (dealIdentity) {
+      const resolved = resolveDisplayIdentity(dealIdentity, "external");
+      if (resolved.codenameActive) {
+        const real = dealIdentity.name;
+        dealName = resolved.displayName;
+        if (real && roomName.includes(real)) {
+          roomName = roomName.split(real).join(resolved.displayName);
+        }
+        if (real && dealName.includes(real)) {
+          dealName = dealName.split(real).join(resolved.displayName);
+        }
+      }
+    }
+  } catch {
+    /* identity resolution must never break guest access control */
+  }
   const qa = await listThreads(v.room.id);
   await logAccess({
     roomId: v.room.id,
@@ -84,8 +113,8 @@ export async function GET(
     },
     room: {
       id: index.room.id,
-      name: index.room.name,
-      dealName: index.room.dealName,
+      name: roomName,
+      dealName,
       status: index.room.status,
     },
     folders: index.folders,

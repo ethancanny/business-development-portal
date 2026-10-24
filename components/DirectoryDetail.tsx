@@ -12,7 +12,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import CompanyLogo from "@/components/CompanyLogo";
+import CompanyMark from "@/components/identity/CompanyMark";
+import ConfirmDealDialog from "@/components/identity/ConfirmDealDialog";
 import PersonAvatar from "@/components/PersonAvatar";
 import { ErrorState, SkeletonRows } from "@/components/ui";
 import Comments from "@/components/Comments";
@@ -112,6 +113,9 @@ export default function DirectoryDetail({
   const [emailMsg, setEmailMsg] = useState("");
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  /** Wrong-deal protection (Deal Identity, Oct 24, 2026): deleting an
+   *  ORGANIZATION record goes through the naming dialog. */
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteMsg, setDeleteMsg] = useState("");
 
@@ -358,9 +362,10 @@ export default function DirectoryDetail({
               </div>
               <h3 className="mt-3 flex items-center gap-3 text-2xl font-bold text-[#0d1f3c] dark:text-white">
                 {kind === "organization" ? (
-                  <CompanyLogo
+                  <CompanyMark
+                    companyId={record.id}
                     name={record.name}
-                    website={record.website || undefined}
+                    logoVersion={typeof record.logoVersion === "number" ? record.logoVersion : 0}
                     size={40}
                   />
                 ) : (
@@ -783,7 +788,11 @@ export default function DirectoryDetail({
                 {!confirmingDelete ? (
                   <button
                     type="button"
-                    onClick={() => setConfirmingDelete(true)}
+                    onClick={() =>
+                      kind === "organization"
+                        ? setShowDeleteDialog(true)
+                        : setConfirmingDelete(true)
+                    }
                     className="btn btn-ghost btn-sm min-h-[44px] text-red-600 dark:text-red-300"
                   >
                     Delete record
@@ -819,6 +828,26 @@ export default function DirectoryDetail({
           )}
         </div>
       </aside>
+
+      {/* Wrong-deal protection for organization deletes. */}
+      {showDeleteDialog && record && (
+        <ConfirmDealDialog
+          open
+          actionLabel="Delete record"
+          companyId={id}
+          companyName={record.name}
+          logoVersion={typeof record.logoVersion === "number" ? record.logoVersion : 0}
+          detail="Soft delete — the record can be restored."
+          danger
+          busy={deleting}
+          confirmLabel="Delete record"
+          onConfirm={() => {
+            setShowDeleteDialog(false);
+            void deleteThisRecord();
+          }}
+          onCancel={() => setShowDeleteDialog(false)}
+        />
+      )}
     </div>
   );
 }

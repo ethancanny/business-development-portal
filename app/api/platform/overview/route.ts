@@ -19,6 +19,23 @@ export async function GET(req: NextRequest) {
       "@/lib/portmgmt/service"
     );
     earlyWarning = await getEarlyWarningOverview();
+    // Deal Identity: attach logo versions so early-warning cards
+    // render the company mark (decorative; never blocks Overview).
+    if (Array.isArray(earlyWarning) && earlyWarning.length) {
+      try {
+        const { identitiesFor } = await import("@/lib/identity/service");
+        const ids = (earlyWarning as Array<Record<string, unknown>>)
+          .map((it) => (typeof it.companyId === "string" ? it.companyId : ""))
+          .filter(Boolean);
+        const map = await identitiesFor(ids);
+        for (const it of earlyWarning as Array<Record<string, unknown>>) {
+          const found = map.get(String(it.companyId ?? ""));
+          if (found) it.logoVersion = found.logoVersion;
+        }
+      } catch {
+        /* decorative */
+      }
+    }
   } catch (err) {
     console.error(
       "[overview] early-warning read failed",

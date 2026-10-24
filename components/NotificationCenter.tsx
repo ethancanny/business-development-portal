@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import ActivityFeed from "@/components/ActivityFeed";
+import CompanyMark from "@/components/identity/CompanyMark";
 import { fmtRelTime } from "@/lib/format";
 
 interface NotificationItem {
@@ -32,6 +33,9 @@ interface NotificationItem {
   href: string;
   read: boolean;
   createdAt: string;
+  /** Deal Identity enrichment (display only). */
+  companyId?: string;
+  logoVersion?: number;
 }
 
 function IconBell({ className }: { className?: string }) {
@@ -240,6 +244,15 @@ export default function NotificationCenter() {
                           <span
                             aria-hidden
                             className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full bg-red-600"
+                          />
+                        )}
+                        {item.companyId && (
+                          <CompanyMark
+                            companyId={item.companyId}
+                            name={item.title}
+                            logoVersion={item.logoVersion ?? 0}
+                            size={18}
+                            className="translate-y-[3px]"
                           />
                         )}
                         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#0d1f3c] dark:text-white">

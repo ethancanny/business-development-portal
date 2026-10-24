@@ -1,5 +1,6 @@
 import PageHero from "@/components/PageHero";
 import VcWorkspace from "@/components/valuecreation/VcWorkspace";
+import DealBanner from "@/components/identity/DealBanner";
 
 export default function ValueCreationWorkspacePage({
   params,
@@ -14,6 +15,7 @@ export default function ValueCreationWorkspacePage({
         subtitle="Initiatives, 100-day plan, playbooks, driver trees, scenarios, process maps, add-ons, org & talent, targets, and exit readiness — for one company"
       />
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+        <DealBanner companyId={params.companyId} />
         <VcWorkspace companyId={params.companyId} />
       </div>
     </div>

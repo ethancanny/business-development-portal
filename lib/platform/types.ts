@@ -37,6 +37,8 @@ export interface CapitalStack {
   dealId: string;
   companyId: string | null;
   companyName: string;
+  /** Deal Identity: stored-logo version (0 = monogram). */
+  logoVersion?: number;
   debt: number;
   equity: number;
   sellerNote: number;
@@ -86,6 +88,9 @@ export interface SearchItem {
   subtitle: string;
   href: string;
   updatedAt: string | null;
+  /** Deal Identity: stored-logo version for company/organization
+   *  results, so the palette renders the mark (0/absent = monogram). */
+  logoVersion?: number;
 }
 
 export interface JobRow {

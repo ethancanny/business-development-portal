@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { EmptyState, SkeletonRows } from "@/components/ui";
+import CompanyMark from "@/components/identity/CompanyMark";
 
 export interface SearchItem {
   kind: string;
@@ -20,6 +21,8 @@ export interface SearchItem {
   subtitle?: string;
   href: string;
   updatedAt?: string;
+  /** Deal Identity: stored-logo version for company/org results. */
+  logoVersion?: number;
 }
 
 interface RecentItem {
@@ -307,9 +310,18 @@ export default function GlobalSearch() {
                           : ""
                       }`}
                     >
-                      <span className="badge badge-neutral shrink-0">
-                        {KIND_LABELS[item.kind] ?? item.kind}
-                      </span>
+                      {(item.kind === "company" || item.kind === "organization") ? (
+                        <CompanyMark
+                          companyId={item.id}
+                          name={item.title}
+                          logoVersion={(item as SearchItem).logoVersion ?? 0}
+                          size={26}
+                        />
+                      ) : (
+                        <span className="badge badge-neutral shrink-0">
+                          {KIND_LABELS[item.kind] ?? item.kind}
+                        </span>
+                      )}
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold text-[#0d1f3c] dark:text-white">
                           {item.title}

@@ -1,5 +1,6 @@
 import { newId, normalizeName, num, sql, str, isoOrNull } from "../platform/db";
 import { publishEvent } from "../platform/events";
+import { ensureIdentitySchema } from "../identity/schema";
 import { logUsage } from "../platform/usage";
 import {
   ensureDirectory,
@@ -103,6 +104,9 @@ export interface DirectoryListItem {
   photoUrl: string;
   organizationName: string;
   website: string;
+  /** Deal Identity: stored-logo version for organization entries
+   *  (0 for people and for orgs without a logo). */
+  logoVersion: number;
   linkedDealCount: number;
   updatedAt: string | null;
 }
@@ -119,6 +123,8 @@ export async function listDirectory(
   filters: DirectoryListFilters
 ): Promise<{ items: DirectoryListItem[]; total: number }> {
   await ensureDirectory();
+  // Organization rows carry Deal Identity columns (logo_version).
+  await ensureIdentitySchema().catch(() => undefined);
   const db = sql();
   const kindParam = filters.kind ? normalizeEntityKind(filters.kind) ?? "" : "";
   const typeParam = (filters.type ?? "").trim().toLowerCase();
@@ -130,11 +136,12 @@ export async function listDirectory(
   const rows = await db`
     SELECT u.kind, u.id, u.name, u.title, u.core_kind, u.email, u.phone,
       u.photo_url, u.organization_name, u.website, u.updated_at,
-      u.linked_deal_count, u.types
+      u.linked_deal_count, u.types, u.logo_version
     FROM (
       SELECT 'person'::text AS kind, p.id, p.name, p.title,
         p.kind AS core_kind, p.email, p.phone, p.photo_url,
         p.organization_name, ''::text AS website, p.updated_at,
+        0::int AS logo_version,
         (SELECT count(*)::int FROM core.deal_participants dp
           WHERE dp.entity_kind = 'person' AND dp.entity_id = p.id)
           AS linked_deal_count,
@@ -155,7 +162,7 @@ export async function listDirectory(
       SELECT 'organization'::text AS kind, o.id, o.name, ''::text AS title,
         o.kind AS core_kind, ''::text AS email, ''::text AS phone,
         ''::text AS photo_url, ''::text AS organization_name, o.website,
-        o.updated_at,
+        o.updated_at, coalesce(o.logo_version, 0) AS logo_version,
         (SELECT count(*)::int FROM core.deal_participants dp
           WHERE dp.entity_kind = 'organization' AND dp.entity_id = o.id)
           AS linked_deal_count,
@@ -190,6 +197,7 @@ export async function listDirectory(
       photoUrl: str(rec.photo_url),
       organizationName: str(rec.organization_name),
       website: str(rec.website),
+      logoVersion: num(rec.logo_version),
       linkedDealCount: num(rec.linked_deal_count),
       updatedAt: isoOrNull(rec.updated_at),
     };
@@ -366,8 +374,11 @@ export async function getDirectoryDetail(
     return { record, types, linkedDeals, legacyInvestor };
   }
 
+  await ensureIdentitySchema().catch(() => undefined);
   const rows = await db`
-    SELECT id, name, kind, website, notes, source, created_at, updated_at
+    SELECT id, name, kind, website, notes, source, created_at, updated_at,
+      coalesce(logo_version, 0) AS logo_version,
+      coalesce(accent_color, '') AS accent_color
     FROM core.organizations
     WHERE id = ${id} AND deleted_at IS NULL
     LIMIT 1`;
@@ -376,6 +387,8 @@ export async function getDirectoryDetail(
   const record: Record<string, unknown> = {
     id: str(rec.id),
     entityKind: "organization",
+    logoVersion: num(rec.logo_version),
+    accentColor: str(rec.accent_color),
     kind: "organization",
     name: str(rec.name),
     title: str(rec.kind),

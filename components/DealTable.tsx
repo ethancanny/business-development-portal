@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { Deal, Executive, MiMultiple } from "@/lib/types";
 import { fmtMoney, uniqueStrings } from "@/lib/format";
 import { dealFocusSector, estimateMultiple, resolveDealValue, type MarketRates } from "@/lib/valuation";
-import CompanyLogo from "@/components/CompanyLogo";
+import CompanyMark from "@/components/identity/CompanyMark";
 import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
 import {
   TypeBadge,
@@ -166,10 +166,10 @@ export default function DealTable({
     sortKey: "companyName",
     cell: (d) => (
       <span className="flex items-center gap-2">
-        <CompanyLogo
+        <CompanyMark
+          companyId={d.companyId ?? `co_${d.id}`}
           name={d.companyName}
-          website={dealWebsite(d)}
-          sector={dealFocusSector(d.industry) ?? d.industry}
+          logoVersion={d.logoVersion ?? 0}
         />
         <span>
           <Link
@@ -491,10 +491,10 @@ export default function DealTable({
           >
             <div className="flex items-start justify-between gap-3">
               <span className="flex min-w-0 items-center gap-2">
-                <CompanyLogo
+                <CompanyMark
+                  companyId={d.companyId ?? `co_${d.id}`}
                   name={d.companyName}
-                  website={dealWebsite(d)}
-                  sector={dealFocusSector(d.industry) ?? d.industry}
+                  logoVersion={d.logoVersion ?? 0}
                 />
                 <span className="min-w-0">
                   <Link

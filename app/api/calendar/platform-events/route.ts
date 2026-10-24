@@ -38,6 +38,9 @@ export interface PlatformEventItem {
   href: string;
   status: string;
   meta?: Record<string, unknown>;
+  /** Deal Identity enrichment for deal-linked events. */
+  companyId?: string | null;
+  logoVersion?: number;
 }
 
 const OUTLOOK_LAYER = { kind: "outlook", label: "Outlook calendar", color: "#0d1f3c" };
@@ -108,6 +111,31 @@ export async function GET(req: NextRequest) {
         status: g.status,
         meta: g.meta,
       });
+    }
+
+    // Deal Identity: attach company id + logo version to deal-linked
+    // events so the calendar renders the company mark. Decorative —
+    // failures leave events unmarked.
+    try {
+      const dealIds = Array.from(
+        new Set(items.map((i) => i.dealId).filter(Boolean) as string[])
+      );
+      if (dealIds.length) {
+        const { identitySummariesForDeals } = await import(
+          "@/lib/identity/service"
+        );
+        const summaries = await identitySummariesForDeals(dealIds);
+        for (const item of items) {
+          if (!item.dealId) continue;
+          const s = summaries.get(item.dealId);
+          if (s) {
+            item.companyId = s.companyId;
+            item.logoVersion = s.logoVersion;
+          }
+        }
+      }
+    } catch {
+      /* identity enrichment is decorative */
     }
 
     items.sort((a, b) => a.start.localeCompare(b.start));
