@@ -8,7 +8,7 @@
  * anomalies in as new candidates.
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button, EmptyState } from "@/components/ui";
 import {
   api,
@@ -36,7 +36,7 @@ function severityBadge(severity: string) {
   return <span className={`badge ${cls}`}>{severity}</span>;
 }
 
-export default function RedFlagsTab({ workspaceId, bundle, reload }: TabProps) {
+export default function RedFlagsTab({ workspaceId, reload }: TabProps) {
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -56,7 +56,22 @@ export default function RedFlagsTab({ workspaceId, bundle, reload }: TabProps) {
   });
   const [adding, setAdding] = useState(false);
 
-  const flags = bundle.redFlags;
+  // Redesigned shell: section data is fetched per tab (the shell
+  // passes a slim bundle — identity + counts only).
+  const [flags, setFlags] = useState<RedFlag[]>([]);
+  const loadSection = useCallback(async () => {
+    try {
+      const d = await api<{ flags: RedFlag[] }>(
+        `/api/platform/diligence/workspaces/${encodeURIComponent(workspaceId)}/red-flags`
+      );
+      setFlags(d.flags ?? []);
+    } catch {
+      /* keep the current list on a transient failure */
+    }
+  }, [workspaceId]);
+  useEffect(() => {
+    void loadSection();
+  }, [loadSection]);
   const candidates = flags.filter((f) => f.status === "candidate");
   const register = flags.filter((f) => f.status !== "candidate");
 
@@ -68,7 +83,8 @@ export default function RedFlagsTab({ workspaceId, bundle, reload }: TabProps) {
         method: "PATCH",
         body: JSON.stringify(body),
       });
-      await reload();
+      await loadSection();
+      void reload();
     } catch {
       setError("Could not update that red flag. Please try again.");
     } finally {
@@ -83,7 +99,8 @@ export default function RedFlagsTab({ workspaceId, bundle, reload }: TabProps) {
       await api(`/api/platform/diligence/red-flags/${encodeURIComponent(flagId)}`, {
         method: "DELETE",
       });
-      await reload();
+      await loadSection();
+      void reload();
     } catch {
       setError("Could not delete that red flag. Please try again.");
     } finally {
@@ -109,7 +126,8 @@ export default function RedFlagsTab({ workspaceId, bundle, reload }: TabProps) {
           ? `Sync complete: ${data.created} new candidate(s) created from analysis ${data.analysisId} (status: ${data.analysisStatus ?? "—"}). ${data.totalCandidates} candidate(s) in total awaiting review.`
           : "No financial analysis exists for this company yet, so there are no anomalies to sync."
       );
-      await reload();
+      await loadSection();
+      void reload();
     } catch {
       setError("Sync failed. Please try again.");
     } finally {
@@ -133,7 +151,8 @@ export default function RedFlagsTab({ workspaceId, bundle, reload }: TabProps) {
         }),
       });
       setForm({ title: "", detail: "", severity: "medium", owner: "", mitigation: "" });
-      await reload();
+      await loadSection();
+      void reload();
     } catch {
       setError("Could not add that red flag. Please try again.");
     } finally {

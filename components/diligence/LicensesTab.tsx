@@ -6,7 +6,7 @@
  * first-class column. Expiries within 90 days highlight amber.
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import {
   api,
@@ -59,14 +59,29 @@ function toForm(l: License): LicenseForm {
   };
 }
 
-export default function LicensesTab({ workspaceId, bundle, reload }: TabProps) {
+export default function LicensesTab({ workspaceId, reload }: TabProps) {
   const [form, setForm] = useState<LicenseForm>(EMPTY);
   const [editingId, setEditingId] = useState("");
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
 
-  const licenses = bundle.licenses;
+  // Redesigned shell: section data is fetched per tab (the shell
+  // passes a slim bundle — identity + counts only).
+  const [licenses, setLicenses] = useState<License[]>([]);
+  const loadSection = useCallback(async () => {
+    try {
+      const d = await api<{ licenses: License[] }>(
+        `/api/platform/diligence/workspaces/${encodeURIComponent(workspaceId)}/licenses`
+      );
+      setLicenses(d.licenses ?? []);
+    } catch {
+      /* keep the current list on a transient failure */
+    }
+  }, [workspaceId]);
+  useEffect(() => {
+    void loadSection();
+  }, [loadSection]);
   const set = (patch: Partial<LicenseForm>) => setForm((f) => ({ ...f, ...patch }));
 
   const save = async () => {
@@ -97,7 +112,7 @@ export default function LicensesTab({ workspaceId, bundle, reload }: TabProps) {
       }
       setForm(EMPTY);
       setEditingId("");
-      await reload();
+      await loadSection();
     } catch {
       setError("Could not save that license. A license type is required.");
     } finally {
@@ -116,7 +131,7 @@ export default function LicensesTab({ workspaceId, bundle, reload }: TabProps) {
         setEditingId("");
         setForm(EMPTY);
       }
-      await reload();
+      await loadSection();
     } catch {
       setError("Could not delete that license. Please try again.");
     } finally {

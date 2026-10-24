@@ -7,7 +7,7 @@
  * (server-side projection), which the tab states explicitly.
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button, EmptyState } from "@/components/ui";
 import {
   api,
@@ -22,13 +22,28 @@ import {
   type TabProps,
 } from "@/components/diligence/types";
 
-export default function ClosingTab({ workspaceId, bundle, reload }: TabProps) {
+export default function ClosingTab({ workspaceId, reload }: TabProps) {
   const [form, setForm] = useState({ category: "funds_flow", title: "", dueDate: "", notes: "" });
   const [adding, setAdding] = useState(false);
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
 
-  const items = bundle.closingItems;
+  // Redesigned shell: section data is fetched per tab (the shell
+  // passes a slim bundle — identity + counts only).
+  const [items, setItems] = useState<ClosingItem[]>([]);
+  const loadSection = useCallback(async () => {
+    try {
+      const d = await api<{ items: ClosingItem[] }>(
+        `/api/platform/diligence/workspaces/${encodeURIComponent(workspaceId)}/closing`
+      );
+      setItems(d.items ?? []);
+    } catch {
+      /* keep the current list on a transient failure */
+    }
+  }, [workspaceId]);
+  useEffect(() => {
+    void loadSection();
+  }, [loadSection]);
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
 
   const patch = async (item: ClosingItem, body: Record<string, unknown>) => {
@@ -39,7 +54,8 @@ export default function ClosingTab({ workspaceId, bundle, reload }: TabProps) {
         method: "PATCH",
         body: JSON.stringify(body),
       });
-      await reload();
+      await loadSection();
+      void reload();
     } catch {
       setError("Could not update that closing item. Please try again.");
     } finally {
@@ -54,7 +70,8 @@ export default function ClosingTab({ workspaceId, bundle, reload }: TabProps) {
       await api(`/api/platform/diligence/closing/${encodeURIComponent(item.id)}`, {
         method: "DELETE",
       });
-      await reload();
+      await loadSection();
+      void reload();
     } catch {
       setError("Could not delete that closing item. Please try again.");
     } finally {
@@ -77,7 +94,8 @@ export default function ClosingTab({ workspaceId, bundle, reload }: TabProps) {
         }),
       });
       setForm({ category: "funds_flow", title: "", dueDate: "", notes: "" });
-      await reload();
+      await loadSection();
+      void reload();
     } catch {
       setError("Could not add that closing item. Please try again.");
     } finally {

@@ -7,7 +7,7 @@
  * detail; the same form adds and edits.
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import {
   api,
@@ -87,7 +87,7 @@ function toPayload(f: ContractForm): Record<string, unknown> {
   };
 }
 
-export default function ContractsTab({ workspaceId, bundle, reload }: TabProps) {
+export default function ContractsTab({ workspaceId, reload }: TabProps) {
   const [form, setForm] = useState<ContractForm>(EMPTY);
   const [editingId, setEditingId] = useState("");
   const [expandedId, setExpandedId] = useState("");
@@ -95,7 +95,22 @@ export default function ContractsTab({ workspaceId, bundle, reload }: TabProps) 
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
 
-  const contracts = bundle.contracts;
+  // Redesigned shell: section data is fetched per tab (the shell
+  // passes a slim bundle — identity + counts only).
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const loadSection = useCallback(async () => {
+    try {
+      const d = await api<{ contracts: Contract[] }>(
+        `/api/platform/diligence/workspaces/${encodeURIComponent(workspaceId)}/contracts`
+      );
+      setContracts(d.contracts ?? []);
+    } catch {
+      /* keep the current list on a transient failure */
+    }
+  }, [workspaceId]);
+  useEffect(() => {
+    void loadSection();
+  }, [loadSection]);
 
   const save = async () => {
     if (!form.title.trim() || saving) return;
@@ -115,7 +130,7 @@ export default function ContractsTab({ workspaceId, bundle, reload }: TabProps) 
       }
       setForm(EMPTY);
       setEditingId("");
-      await reload();
+      await loadSection();
     } catch {
       setError("Could not save that contract. A title is required.");
     } finally {
@@ -134,7 +149,7 @@ export default function ContractsTab({ workspaceId, bundle, reload }: TabProps) 
         setEditingId("");
         setForm(EMPTY);
       }
-      await reload();
+      await loadSection();
     } catch {
       setError("Could not delete that contract. Please try again.");
     } finally {

@@ -6,7 +6,7 @@
  * by data room document id only; no files are uploaded here.
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button, EmptyState } from "@/components/ui";
 import {
   api,
@@ -16,10 +16,11 @@ import {
   selectCls,
   fmtDateShort,
   splitList,
+  type SiteVisit,
   type TabProps,
 } from "@/components/diligence/types";
 
-export default function SiteVisitsTab({ workspaceId, bundle, reload }: TabProps) {
+export default function SiteVisitsTab({ workspaceId, reload }: TabProps) {
   const [form, setForm] = useState({
     visitDate: "",
     attendees: "",
@@ -33,7 +34,22 @@ export default function SiteVisitsTab({ workspaceId, bundle, reload }: TabProps)
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
 
-  const visits = bundle.siteVisits;
+  // Redesigned shell: section data is fetched per tab (the shell
+  // passes a slim bundle — identity + counts only).
+  const [visits, setVisits] = useState<SiteVisit[]>([]);
+  const loadSection = useCallback(async () => {
+    try {
+      const d = await api<{ visits: SiteVisit[] }>(
+        `/api/platform/diligence/workspaces/${encodeURIComponent(workspaceId)}/site-visits`
+      );
+      setVisits(d.visits ?? []);
+    } catch {
+      /* keep the current list on a transient failure */
+    }
+  }, [workspaceId]);
+  useEffect(() => {
+    void loadSection();
+  }, [loadSection]);
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
 
   const add = async () => {
@@ -65,7 +81,7 @@ export default function SiteVisitsTab({ workspaceId, bundle, reload }: TabProps)
         observations: "",
         photoDocumentIds: "",
       });
-      await reload();
+      await loadSection();
     } catch {
       setError("Could not record that site visit. Please try again.");
     } finally {
@@ -80,7 +96,7 @@ export default function SiteVisitsTab({ workspaceId, bundle, reload }: TabProps)
       await api(`/api/platform/diligence/site-visits/${encodeURIComponent(visitId)}`, {
         method: "DELETE",
       });
-      await reload();
+      await loadSection();
     } catch {
       setError("Could not delete that site visit. Please try again.");
     } finally {
