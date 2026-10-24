@@ -2548,13 +2548,18 @@ export async function convertFinding(
   actor: string
 ): Promise<InitiativeRow> {
   await requirePlan(planId);
-  const findings = await listFindings(input.workspaceId).catch(() => null);
-  if (!findings) throw new VcError("finding_not_found");
-  const finding = findings.find((f) => f.id === input.findingId);
-  if (!finding) throw new VcError("finding_not_found");
   const existing = await listFindingCandidates(planId);
   const cand = existing.find((c) => c.findingId === input.findingId);
   if (cand?.alreadyConverted) throw new VcError("already_converted");
+  /* workspaceId is optional in the request: the candidate list already
+   * resolved which workspace the finding belongs to. */
+  const workspaceId = input.workspaceId || cand?.workspaceId || "";
+  const findings = workspaceId
+    ? await listFindings(workspaceId).catch(() => null)
+    : null;
+  if (!findings) throw new VcError("finding_not_found");
+  const finding = findings.find((f) => f.id === input.findingId);
+  if (!finding) throw new VcError("finding_not_found");
   const detailParts = [finding.detail];
   if (finding.proposedTermDetail) {
     detailParts.push(
@@ -2575,7 +2580,7 @@ export async function convertFinding(
       effort: 3,
       sourceKind: "finding",
       sourceRef: {
-        workspaceId: input.workspaceId,
+        workspaceId,
         dealId: cand?.dealId ?? "",
         findingId: finding.id,
         severity: finding.severity,

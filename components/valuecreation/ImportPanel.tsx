@@ -73,6 +73,7 @@ export default function ImportPanel({
         method: "POST",
         body: JSON.stringify({
           findingId: c.findingId,
+          workspaceId: c.workspaceId,
           ownerName: ownerName.trim() || undefined,
           dueDate: dueDate || undefined,
         }),
