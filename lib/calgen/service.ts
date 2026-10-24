@@ -324,9 +324,15 @@ async function generateContractDeadlineEvents(): Promise<
   for (const item of items) {
     if (!item.date) continue;
     const subject = item.companyName || item.investorName || "Contract";
+    // Contract titles already embed the subject ("<Template> —
+    // <Company>"); prefix it only when it is missing so the calendar
+    // title never names the company twice.
+    const base = item.title.includes(subject)
+      ? item.title
+      : `${subject} — ${item.title}`;
     out.push({
       sourceId: `${item.contractId}:${item.dateType}`,
-      title: `${subject} — ${item.title} — ${LABELS[item.dateType] ?? item.dateType}`,
+      title: `${base} — ${LABELS[item.dateType] ?? item.dateType}`,
       startsAt: `${item.date}T09:00:00${TZ_OFFSET}`,
       endsAt: null,
       allDay: true,
