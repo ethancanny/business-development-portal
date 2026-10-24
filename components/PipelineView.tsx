@@ -14,7 +14,6 @@ import { DEAL_STAGES, EXEC_STAGES, type Deal, type Executive, type MiMultiple } 
 import { fmtMoney, uniqueStrings } from "@/lib/format";
 import { dealFocusSector, resolveDealValue } from "@/lib/valuation";
 import DealsDataTools from "@/components/DealsDataTools";
-import UnifiedTasks from "@/components/UnifiedTasks";
 import {
   CapitalStacksPanel,
   type PlatformSummary,
@@ -540,21 +539,6 @@ export default function PipelineView({
         )}
 
         <CapitalStacksSection />
-
-        {/* Tasks & Follow-ups (Ethan, Oct 23, 2026): the Business
-            Development hub no longer carries a separate Tasks tab —
-            open tasks and follow-ups are referenced here on the
-            Pipeline page; dated tasks also appear on the Calendar. */}
-        <section className="mt-10" aria-label="Tasks and follow-ups">
-          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
-            Tasks &amp; Follow-ups
-          </h2>
-          <p className="mb-4 mt-0.5 text-sm text-slate-500 dark:text-white/50">
-            Every open task across deals and operators — dated tasks
-            appear on the Calendar automatically.
-          </p>
-          <UnifiedTasks />
-        </section>
       </main>
 
       {/* Modals */}
