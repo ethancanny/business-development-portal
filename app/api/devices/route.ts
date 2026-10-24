@@ -8,6 +8,7 @@ import {
   getDevice,
   listCredentials,
   listDevices,
+  pruneStaleSessionDevices,
 } from "@/lib/webauthn-db";
 
 /**
@@ -24,6 +25,13 @@ export async function GET() {
   const user = getSessionUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // File stale sign-ins away before listing (90-day rule in
+  // lib/webauthn-db) — best-effort; the listing proceeds regardless.
+  try {
+    await pruneStaleSessionDevices(user.id);
+  } catch {
+    /* housekeeping only */
   }
   const [devices, creds] = await Promise.all([
     listDevices(user.id),

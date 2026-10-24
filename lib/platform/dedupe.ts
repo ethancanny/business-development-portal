@@ -231,3 +231,104 @@ export async function merge(
 
   return { ok: false, error: `Unknown dedupe kind: ${kind}` };
 }
+
+/**
+ * Auto-merge (Ethan, Oct 23, 2026): the manual duplicate-review queue
+ * is gone. Records whose normalized names are EXACTLY equal — the
+ * "trademark office would get involved" test — are merged
+ * automatically by the daily dedupe_scan job. Nothing fuzzy is ever
+ * auto-merged: near-names stay separate records, and people matched
+ * only by email (different names) are NOT merged either.
+ *
+ * Survivor rule per group: the record with the most references
+ * (deals/documents/participants for companies, participants/activity
+ * for people) wins; ties break to the earliest created, then id.
+ * Every merge goes through merge() above, so references repoint,
+ * empty keeper fields fill in, the loser soft-deletes, and
+ * core.audit_log records it under the system actor.
+ */
+export async function autoMergeExactDuplicates(
+  actor = "system:auto-merge"
+): Promise<{ companiesMerged: number; peopleMerged: number; groups: number }> {
+  const db = sql();
+  let companiesMerged = 0;
+  let peopleMerged = 0;
+  let groups = 0;
+
+  const companyGroups = await db`
+    SELECT normalized_name FROM core.companies
+    WHERE deleted_at IS NULL AND normalized_name <> ''
+    GROUP BY normalized_name
+    HAVING COUNT(*) > 1
+    ORDER BY normalized_name
+    LIMIT 50`;
+  for (const g of companyGroups) {
+    const name = str((g as Record<string, unknown>).normalized_name);
+    const members = await db`
+      SELECT c.id,
+        (SELECT COUNT(*)::int FROM core.deals d WHERE d.company_id = c.id)
+        + (SELECT COUNT(*)::int FROM core.documents doc WHERE doc.company_id = c.id)
+        + (SELECT COUNT(*)::int FROM core.deal_participants dp
+             WHERE dp.entity_id = c.id AND dp.entity_kind = 'company') AS refs
+      FROM core.companies c
+      WHERE c.normalized_name = ${name} AND c.deleted_at IS NULL
+      ORDER BY refs DESC, c.created_at ASC, c.id ASC`;
+    if (members.length < 2) continue;
+    groups += 1;
+    const keepId = str((members[0] as Record<string, unknown>).id);
+    for (const m of members.slice(1)) {
+      const mergeId = str((m as Record<string, unknown>).id);
+      const res = await merge("companies", keepId, mergeId, actor);
+      if (res.ok) companiesMerged += 1;
+      else
+        console.error(
+          "[dedupe] auto-merge failed (companies)",
+          keepId,
+          mergeId,
+          res.error ?? ""
+        );
+    }
+  }
+
+  const peopleGroups = await db`
+    SELECT normalized_name FROM core.people
+    WHERE deleted_at IS NULL AND normalized_name <> ''
+    GROUP BY normalized_name
+    HAVING COUNT(*) > 1
+    ORDER BY normalized_name
+    LIMIT 50`;
+  for (const g of peopleGroups) {
+    const name = str((g as Record<string, unknown>).normalized_name);
+    const members = await db`
+      SELECT p.id,
+        (SELECT COUNT(*)::int FROM core.deal_participants dp
+           WHERE dp.entity_id = p.id AND dp.entity_kind = 'person')
+        + (SELECT COUNT(*)::int FROM core.activity_log a
+             WHERE a.entity_id = p.id) AS refs
+      FROM core.people p
+      WHERE p.normalized_name = ${name} AND p.deleted_at IS NULL
+      ORDER BY refs DESC, p.created_at ASC, p.id ASC`;
+    if (members.length < 2) continue;
+    groups += 1;
+    const keepId = str((members[0] as Record<string, unknown>).id);
+    for (const m of members.slice(1)) {
+      const mergeId = str((m as Record<string, unknown>).id);
+      const res = await merge("people", keepId, mergeId, actor);
+      if (res.ok) peopleMerged += 1;
+      else
+        console.error(
+          "[dedupe] auto-merge failed (people)",
+          keepId,
+          mergeId,
+          res.error ?? ""
+        );
+    }
+  }
+
+  if (companiesMerged || peopleMerged) {
+    console.log(
+      `[dedupe] auto-merge: ${companiesMerged} companies + ${peopleMerged} people merged across ${groups} exact-name groups`
+    );
+  }
+  return { companiesMerged, peopleMerged, groups };
+}

@@ -262,11 +262,11 @@ async function executeJob(db: Sql, job: JobRow): Promise<void> {
       return;
     }
     case "dedupe_scan": {
-      // Pairs are computed on demand by dedupe.findDuplicates(); the scan
-      // job just exercises both kinds so failures surface in the job log.
-      const { findDuplicates } = await import("./dedupe");
-      await findDuplicates("companies");
-      await findDuplicates("people");
+      // Auto-merge (Ethan, Oct 23, 2026): exact normalized-name groups
+      // merge themselves via dedupe.merge() — no review queue. The
+      // scan IS the merge now; failures land in the job log.
+      const { autoMergeExactDuplicates } = await import("./dedupe");
+      await autoMergeExactDuplicates();
       return;
     }
     case "comms_generate_report": {
@@ -375,6 +375,19 @@ export async function ensureBuiltinJobs(): Promise<void> {
       VALUES (${newId()}, 'db_backup',
         ${JSON.stringify({
           note: "Registered by ensureBuiltinJobs — execution is triggered by the external scheduler; the snapshot mechanism itself is Neon PITR (provider-side).",
+        })}::jsonb,
+        'registered')`;
+  }
+  const recentDedupe = await db`
+    SELECT id FROM core.jobs
+    WHERE kind = 'dedupe_scan' AND created_at > now() - interval '24 hours'
+    LIMIT 1`;
+  if (!recentDedupe.length) {
+    await db`
+      INSERT INTO core.jobs (id, kind, payload, status)
+      VALUES (${newId()}, 'dedupe_scan',
+        ${JSON.stringify({
+          note: "Daily auto-merge: exact same-name companies/people merge automatically (Ethan, Oct 23, 2026).",
         })}::jsonb,
         'registered')`;
   }

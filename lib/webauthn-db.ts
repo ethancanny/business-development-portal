@@ -315,6 +315,29 @@ export async function listDevices(userId: string): Promise<DeviceRow[]> {
   return rows.map((r) => rowToDevice(r as Record<string, unknown>));
 }
 
+/**
+ * Filing rule (Ethan, Oct 23, 2026): session device rows are sign-in
+ * ephemera — after 90 days unseen the browser is gone and the row is
+ * deleted, so the Settings device list stays the handful of devices
+ * actually in use. Passkeys and push subscriptions are NEVER pruned
+ * here (they are managed explicitly). Returns rows deleted.
+ */
+export async function pruneStaleSessionDevices(
+  userId: string,
+  retentionDays = 90
+): Promise<number> {
+  await ensure();
+  const q = sql();
+  const rows = await q`
+    DELETE FROM devices
+    WHERE user_id = ${userId}
+      AND kind = 'session'
+      AND revoked = false
+      AND last_seen_at < now() - make_interval(days => ${retentionDays})
+    RETURNING id`;
+  return rows.length;
+}
+
 export async function getDevice(id: string): Promise<DeviceRow | null> {
   await ensure();
   const q = sql();
