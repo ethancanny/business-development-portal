@@ -25,18 +25,26 @@ interface ImportResult {
 
 export default function DealsDataTools({
   onImported,
+  typeFilter = "all",
 }: {
   onImported?: () => void;
+  /** Investment Types (Step 1): the pipeline's active type filter —
+   * exports and import templates follow it (per-type column sets). */
+  typeFilter?: string;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState("");
 
+  const typeParam = typeFilter && typeFilter !== "all" ? typeFilter : "";
   const download = (format: "csv" | "xlsx") => {
     // Plain navigation download — the session cookie rides along and
     // the route answers with Content-Disposition: attachment.
-    window.location.href = `/api/deals/export?format=${format}`;
+    window.location.href = `/api/deals/export?format=${format}${typeParam ? `&type=${typeParam}` : ""}`;
+  };
+  const downloadTemplate = (format: "csv" | "xlsx") => {
+    window.location.href = `/api/deals/export?format=${format}&template=1${typeParam ? `&type=${typeParam}` : ""}`;
   };
 
   const onFile = async (file: File) => {
@@ -94,6 +102,22 @@ export default function DealsDataTools({
         </button>
         <button type="button" className={btnCls} onClick={() => download("xlsx")}>
           Export XLSX
+        </button>
+        <button
+          type="button"
+          className={btnCls}
+          onClick={() => downloadTemplate("csv")}
+          title="Blank import template with this type's columns"
+        >
+          Template CSV
+        </button>
+        <button
+          type="button"
+          className={btnCls}
+          onClick={() => downloadTemplate("xlsx")}
+          title="Blank import template with this type's columns"
+        >
+          Template XLSX
         </button>
         <button
           type="button"

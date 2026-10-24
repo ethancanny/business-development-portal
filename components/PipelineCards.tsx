@@ -14,6 +14,7 @@ import CompanyLogo from "@/components/CompanyLogo";
 import PersonAvatar from "@/components/PersonAvatar";
 import SectorChip, { StageChip } from "@/components/SectorChip";
 import { dealWebsite } from "@/components/DealTable";
+import { TypeBadge } from "@/components/InvestmentTypeBits";
 import type { Pairing } from "@/components/PairingTable";
 
 /**
@@ -47,11 +48,14 @@ export function DealCardGrid({
   multiples = [],
   rates = {},
   onSelect,
+  allDeals = [],
 }: {
   deals: Deal[];
   multiples?: MiMultiple[];
   rates?: MarketRates;
   onSelect: (d: Deal) => void;
+  /** Investment Types (Step 1): full pipeline for add-on parent labels. */
+  allDeals?: Deal[];
 }) {
   if (deals.length === 0) {
     return (
@@ -101,7 +105,18 @@ export function DealCardGrid({
                   <span className="text-xs text-slate-400 dark:text-white/40">Industry —</span>
                 )}
                 <StageChip stage={d.stage} />
+                <TypeBadge type={d.investmentType} />
               </div>
+              {d.investmentType === "add_on" && d.parentDealId && (
+                <p className="mt-1.5 text-xs text-slate-500 dark:text-white/50">
+                  Add-on to{" "}
+                  <span className="font-medium text-slate-700 dark:text-[#e8dfc8]">
+                    {(allDeals.length ? allDeals : deals).find(
+                      (x) => x.id === d.parentDealId
+                    )?.companyName ?? "platform"}
+                  </span>
+                </p>
+              )}
               <div className="mt-3 flex items-baseline justify-between gap-2">
                 <span className="tnum text-lg font-semibold text-slate-800 dark:text-[#e8dfc8]">
                   {rv.value === null ? "—" : fmtMoney(rv.value)}
