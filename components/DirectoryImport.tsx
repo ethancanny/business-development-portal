@@ -102,7 +102,10 @@ export default function DirectoryImport({
   onClose: () => void;
   onImported?: () => void;
 }) {
-  const [kind, setKind] = useState<DirectoryKind>(defaultKind);
+  // People only (Ethan, Oct 23, 2026): Directory imports create
+  // contacts (people); the defaultKind prop is accepted for API
+  // compatibility but no longer selectable in this dialog.
+  const kind: DirectoryKind = "person";
   const [fileName, setFileName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, string>[]>([]);
@@ -218,28 +221,6 @@ export default function DirectoryImport({
           <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">
             Close
           </button>
-        </div>
-
-        <div className="mb-4 flex flex-wrap gap-2">
-          {(
-            [
-              ["person", "People"],
-              ["organization", "Organizations"],
-            ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setKind(k)}
-              className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition ${
-                kind === k
-                  ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
-                  : "border border-slate-200 text-slate-500 hover:border-[#b8975a]/60 dark:border-white/10 dark:text-white/60"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
         </div>
 
         <label className={labelCls} htmlFor="dir-import-file">

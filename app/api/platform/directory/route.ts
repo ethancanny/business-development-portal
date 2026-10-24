@@ -26,7 +26,11 @@ export async function GET(req: NextRequest) {
   const limitRaw = Number(sp.get("limit") ?? 25);
   const offsetRaw = Number(sp.get("offset") ?? 0);
   const { items, total } = await listDirectory({
-    kind: sp.get("kind") ?? undefined,
+    // People only (Ethan, Oct 23, 2026): the Directory is a contacts
+    // list — a contact's company must not appear as a second contact.
+    // Organization records stay in core.organizations and remain
+    // reachable via the record routes; only this list is scoped.
+    kind: "person",
     type: sp.get("type") ?? undefined,
     q: sp.get("q") ?? undefined,
     limit: Math.min(50, Math.max(1, isFinite(limitRaw) ? limitRaw : 25)),

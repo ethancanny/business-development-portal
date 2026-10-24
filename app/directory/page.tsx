@@ -6,12 +6,18 @@
  * One directory over core.people / core.organizations, replacing the
  * legacy Operators / Businesses / Investors tabs (their data is fully
  * projected into core; investor investment fields return through the
- * detail API as legacyInvestor). Server-side search / kind / type
- * filtering via GET /api/platform/directory, paginated at 50.
+ * detail API as legacyInvestor). Server-side search / type filtering
+ * via GET /api/platform/directory, paginated at 50.
+ *
+ * People only (Ethan, Oct 23, 2026): this is a CONTACTS list. A
+ * contact's company is their affiliation (organizationName), never a
+ * second contact — the list, counts, exports, add form, and import
+ * are all scoped to kind="person". Organization records themselves
+ * are untouched and remain reachable via the record routes.
  *
  * Deep links keep working: /directory?q=<name> initializes the search
- * from ?q= and, once results land, auto-opens the exact (else first)
- * matching record's detail — the old page's behavior.
+ * from ?q= and, once results land, auto-opens the record only on an
+ * exact match (the person's name, or their organization's name).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -27,8 +33,6 @@ import DirectoryDetail from "@/components/DirectoryDetail";
 import DirectoryImport from "@/components/DirectoryImport";
 import DirectoryTemplates from "@/components/DirectoryTemplates";
 
-type ViewKind = "all" | DirectoryKind;
-
 const PAGE_SIZE = 50;
 
 const inputCls =
@@ -37,13 +41,12 @@ const labelCls =
   "mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-white/40";
 
 function buildListUrl(opts: {
-  view: ViewKind;
   type: string;
   q: string;
   offset: number;
 }): string {
   const params = new URLSearchParams();
-  if (opts.view !== "all") params.set("kind", opts.view);
+  params.set("kind", "person");
   if (opts.type !== "all") params.set("type", opts.type);
   if (opts.q.trim()) params.set("q", opts.q.trim());
   params.set("limit", String(PAGE_SIZE));
@@ -51,10 +54,10 @@ function buildListUrl(opts: {
   return `/api/platform/directory?${params.toString()}`;
 }
 
-function buildExportHref(format: "xlsx" | "csv", view: ViewKind, type: string, q: string): string {
+function buildExportHref(format: "xlsx" | "csv", type: string, q: string): string {
   const params = new URLSearchParams();
   params.set("format", format);
-  if (view !== "all") params.set("kind", view);
+  params.set("kind", "person");
   if (type !== "all") params.set("type", type);
   if (q.trim()) params.set("q", q.trim());
   return `/api/platform/directory/export?${params.toString()}`;
@@ -79,7 +82,7 @@ function AddRecordModal({
   onClose: () => void;
   onCreated: (item: DirectoryItem | null) => void;
 }) {
-  const [kind, setKind] = useState<DirectoryKind>("person");
+  const kind: DirectoryKind = "person";
   const [form, setForm] = useState({
     name: "",
     title: "",
@@ -143,7 +146,7 @@ function AddRecordModal({
       }
       onCreated(created);
     } catch {
-      setMsg("Could not create the record — please try again.");
+      setMsg("Could not create the contact — please try again.");
     } finally {
       setBusy(false);
     }
@@ -160,33 +163,11 @@ function AddRecordModal({
       <div className="absolute inset-x-0 bottom-0 max-h-[92vh] overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl dark:bg-[#0f2242] sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-0 sm:h-full sm:w-full sm:max-w-[520px] sm:rounded-none">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
-            Add record
+            Add contact
           </h3>
           <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">
             Close
           </button>
-        </div>
-
-        <div className="mb-4 flex flex-wrap gap-2">
-          {(
-            [
-              ["person", "Person"],
-              ["organization", "Organization"],
-            ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setKind(k)}
-              className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition ${
-                kind === k
-                  ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
-                  : "border border-slate-200 text-slate-500 hover:border-[#b8975a]/60 dark:border-white/10 dark:text-white/60"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
         </div>
 
         <div className="space-y-3">
@@ -196,7 +177,7 @@ function AddRecordModal({
               id="dir-add-name"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder={kind === "person" ? "Full name" : "Organization name"}
+              placeholder="Full name"
               className={inputCls}
             />
           </div>
@@ -212,7 +193,7 @@ function AddRecordModal({
             </div>
             <div>
               <label className={labelCls} htmlFor="dir-add-org">
-                {kind === "person" ? "Organization" : "Organization / firm"}
+                Organization
               </label>
               <input
                 id="dir-add-org"
@@ -240,17 +221,6 @@ function AddRecordModal({
               />
             </div>
           </div>
-          {kind === "organization" && (
-            <div>
-              <label className={labelCls} htmlFor="dir-add-website">Website</label>
-              <input
-                id="dir-add-website"
-                value={form.website}
-                onChange={(e) => setForm({ ...form, website: e.target.value })}
-                className={inputCls}
-              />
-            </div>
-          )}
           <div>
             <label className={labelCls} htmlFor="dir-add-notes">Notes</label>
             <textarea
@@ -289,7 +259,7 @@ function AddRecordModal({
             onClick={() => void submit()}
             className="btn btn-primary min-h-[44px]"
           >
-            {busy ? "Creating…" : "Create record"}
+            {busy ? "Creating…" : "Create contact"}
           </button>
           {msg && (
             <span className="text-xs text-red-700 dark:text-red-300">{msg}</span>
@@ -304,7 +274,6 @@ function AddRecordModal({
 
 export default function Directory() {
   const router = useRouter();
-  const [view, setView] = useState<ViewKind>("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [q, setQ] = useState("");
   const [items, setItems] = useState<DirectoryItem[]>([]);
@@ -344,7 +313,7 @@ export default function Directory() {
     const timer = window.setTimeout(() => {
       (async () => {
         try {
-          const r = await fetch(buildListUrl({ view, type: typeFilter, q, offset: 0 }));
+          const r = await fetch(buildListUrl({ type: typeFilter, q, offset: 0 }));
           if (cancelled) return;
           if (r.status === 401) {
             router.replace("/login");
@@ -366,9 +335,10 @@ export default function Directory() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [view, typeFilter, q, reloadTick, router]);
+  }, [typeFilter, q, reloadTick, router]);
 
-  // Deep-link auto-open: exact name match wins, else the first result.
+  // Deep-link auto-open: exact match only — the person's name, or
+  // their organization's name; never an unrelated first result.
   useEffect(() => {
     if (!deepLinkPendingRef.current || loading) return;
     if (deepLinkQRef.current === null) return;
@@ -376,8 +346,11 @@ export default function Directory() {
     deepLinkPendingRef.current = false;
     if (items.length === 0) return;
     const needle = deepLinkQRef.current.trim().toLowerCase();
-    const hit =
-      items.find((i) => i.name.toLowerCase() === needle) || items[0];
+    const hit = items.find(
+      (i) =>
+        i.name.toLowerCase() === needle ||
+        (i.organizationName ?? "").toLowerCase() === needle
+    );
     if (hit) {
       setSelected({ kind: hit.kind, id: hit.id });
       setSelectedItem(hit);
@@ -389,7 +362,7 @@ export default function Directory() {
     setLoadingMore(true);
     try {
       const r = await fetch(
-        buildListUrl({ view, type: typeFilter, q, offset: items.length })
+        buildListUrl({ type: typeFilter, q, offset: items.length })
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const parsed = normalizeList(await r.json());
@@ -423,7 +396,7 @@ export default function Directory() {
       <PageHero
         eyebrow="Canny Capital Partners"
         title="Directory"
-        subtitle="Every person and organization we interact with — one unified record system"
+        subtitle="Every contact we interact with — people only; their companies appear as affiliations, not separate contacts"
       />
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
         {/* Search + actions */}
@@ -432,7 +405,7 @@ export default function Directory() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search people, organizations, titles…"
+              placeholder="Search people, titles, companies…"
               aria-label="Search directory"
               className={`${inputCls} min-w-0 flex-1 sm:max-w-md`}
             />
@@ -441,7 +414,7 @@ export default function Directory() {
               onClick={() => setShowAdd(true)}
               className="btn btn-primary min-h-[44px]"
             >
-              Add record
+              Add contact
             </button>
             <button
               type="button"
@@ -460,13 +433,13 @@ export default function Directory() {
             </button>
             <span className="ml-auto flex shrink-0 gap-1.5">
               <a
-                href={buildExportHref("xlsx", view, typeFilter, q)}
+                href={buildExportHref("xlsx", typeFilter, q)}
                 className="btn btn-ghost btn-sm min-h-[44px]"
               >
                 Export Excel
               </a>
               <a
-                href={buildExportHref("csv", view, typeFilter, q)}
+                href={buildExportHref("csv", typeFilter, q)}
                 className="btn btn-ghost btn-sm min-h-[44px]"
               >
                 Export CSV
@@ -475,16 +448,6 @@ export default function Directory() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <SavedViewChips
-              views={[
-                { id: "all", label: "All" },
-                { id: "person", label: "People" },
-                { id: "organization", label: "Organizations" },
-              ]}
-              activeId={view}
-              onSelect={(id) => setView(id as ViewKind)}
-            />
-            <span aria-hidden className="hidden h-5 w-px bg-slate-200 dark:bg-white/10 sm:block" />
             <SavedViewChips
               views={typeViews}
               activeId={typeFilter}
@@ -524,17 +487,17 @@ export default function Directory() {
             <EmptyState
               title="No records match"
               message={
-                q.trim() || typeFilter !== "all" || view !== "all"
-                  ? "Nothing here matches that search and filter combination. Try clearing the search, or add the record yourself."
-                  : "No directory records yet. Add the first person or organization, or import a CSV."
+                q.trim() || typeFilter !== "all"
+                  ? "Nothing here matches that search and filter combination. Try clearing the search, or add the contact yourself."
+                  : "No contacts yet. Add the first person, or import a CSV of people."
               }
-              actionLabel="Add record"
+              actionLabel="Add contact"
               onAction={() => setShowAdd(true)}
             />
           ) : (
             <>
               <p className="mb-3 text-xs text-slate-400 dark:text-white/40">
-                Showing {items.length} of {total} record{total === 1 ? "" : "s"}
+                Showing {items.length} of {total} contact{total === 1 ? "" : "s"}
                 {q.trim() ? ` for “${q.trim()}”` : ""}
               </p>
               <DirectoryGrid
@@ -581,7 +544,7 @@ export default function Directory() {
       )}
       {showImport && (
         <DirectoryImport
-          defaultKind={view === "organization" ? "organization" : "person"}
+          defaultKind="person"
           onClose={() => setShowImport(false)}
           onImported={refresh}
         />

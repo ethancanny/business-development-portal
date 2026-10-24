@@ -38,7 +38,9 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const format = (sp.get("format") ?? "csv").toLowerCase() === "xlsx" ? "xlsx" : "csv";
   const filters = {
-    kind: sp.get("kind") ?? undefined,
+    // People only (Ethan, Oct 23, 2026) — exports match the Directory
+    // contacts list; organizations are not contacts.
+    kind: "person",
     type: sp.get("type") ?? undefined,
     q: sp.get("q") ?? undefined,
   };
