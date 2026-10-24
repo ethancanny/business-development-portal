@@ -191,6 +191,17 @@ export function ensureSchema(): Promise<void> {
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS synthesis JSONB`;
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS pass_reason TEXT NOT NULL DEFAULT ''`;
+      // Investment Types Step 1 (Oct 23, 2026): type + add-on parent +
+      // early-stage sourced-from link. Additive only; the one-time
+      // stage/type migration lives in lib/bd/migrate.ts.
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS investment_type TEXT NOT NULL DEFAULT 'platform_lbo'`;
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS parent_deal_id TEXT`;
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS sourced_from_type TEXT`;
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS sourced_from_id TEXT`;
       await db`
         ALTER TABLE executives ADD COLUMN IF NOT EXISTS photo_url TEXT NOT NULL DEFAULT ''`;
       /* ---- Market Intel tables ---- */
@@ -480,7 +491,14 @@ function rowToDeal(r: Record<string, unknown>): Deal {
     id: String(r.id),
     companyName: String(r.company_name ?? ""),
     industry: String(r.industry ?? ""),
-    stage: String(r.stage ?? "Sourcing") as Deal["stage"],
+    stage: String(r.stage ?? "Sourced") as Deal["stage"],
+    investmentType: (String(r.investment_type ?? "platform_lbo") ||
+      "platform_lbo") as Deal["investmentType"],
+    parentDealId: r.parent_deal_id ? String(r.parent_deal_id) : null,
+    sourcedFromType: (r.sourced_from_type
+      ? String(r.sourced_from_type)
+      : null) as Deal["sourcedFromType"],
+    sourcedFromId: r.sourced_from_id ? String(r.sourced_from_id) : null,
     dealValue: Number(r.deal_value ?? 0),
     contactName: String(r.contact_name ?? ""),
     contactEmail: String(r.contact_email ?? ""),
@@ -541,7 +559,8 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           id, company_name, industry, stage, deal_value, contact_name,
           contact_email, notes, owner, city, lat, lng, links, operator_ids,
           revenue, ebitda, asking_price, growth_pct, broker, pass_reason, source, drivers, structure,
-          metrics, synthesis, created_at, updated_at
+          metrics, synthesis, investment_type, parent_deal_id,
+          sourced_from_type, sourced_from_id, created_at, updated_at
         ) VALUES (
           ${d.id}, ${d.companyName}, ${d.industry}, ${d.stage},
           ${d.dealValue || 0}, ${d.contactName}, ${d.contactEmail},
@@ -554,6 +573,8 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           ${JSON.stringify(d.structure ?? {})},
           ${JSON.stringify(d.metrics ?? {})},
           ${d.synthesis ? JSON.stringify(d.synthesis) : null},
+          ${d.investmentType ?? "platform_lbo"}, ${d.parentDealId ?? null},
+          ${d.sourcedFromType ?? null}, ${d.sourcedFromId ?? null},
           ${d.createdAt}, ${d.updatedAt}
         )`
     ),

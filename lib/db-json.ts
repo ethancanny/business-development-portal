@@ -55,6 +55,10 @@ export const getDeals = async (): Promise<Deal[]> => {
     askingPrice: d.askingPrice ?? null,
     broker: d.broker ?? "",
     source: d.source ?? "",
+    investmentType: d.investmentType ?? "platform_lbo",
+    parentDealId: d.parentDealId ?? null,
+    sourcedFromType: d.sourcedFromType ?? null,
+    sourcedFromId: d.sourcedFromId ?? null,
   }));
 };
 export const saveDeals = (deals: Deal[]) => writeJson(dealsFile, deals);

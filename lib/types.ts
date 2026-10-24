@@ -1,14 +1,98 @@
-export const DEAL_STAGES = [
-  "Sourcing",
-  "Initial Contact",
+/* ---------------- Investment types (Step 1, Oct 23, 2026) ------------
+ * Every deal carries an investment type. Stage lists are per type and
+ * configurable in Settings (bd.type_config is the live source); the
+ * constants below are the seeded defaults and the offline fallback.
+ * Ethan's correction (Oct 23, 23:47): NDA is NOT a stage.
+ * The pre-Oct-23 stage names (Sourcing / Initial Contact / Negotiation /
+ * Closing / Closed Won) were migrated to the Platform LBO list with the
+ * approved mapping — see bd.migration_reports. */
+
+export type InvestmentTypeKey =
+  | "platform_lbo"
+  | "add_on"
+  | "early_stage"
+  | "minority_growth";
+
+export const INVESTMENT_TYPE_LABELS: Record<InvestmentTypeKey, string> = {
+  platform_lbo: "Platform LBO",
+  add_on: "Add-on",
+  early_stage: "Early Stage",
+  minority_growth: "Minority Growth",
+};
+
+export const PLATFORM_LBO_STAGES = [
+  "Sourced",
+  "IOI",
   "Diligence",
-  "Negotiation",
-  "Closing",
-  "Closed Won",
+  "LOI",
+  "Financing",
+  "Closed",
   "Passed",
 ] as const;
 
-export type DealStage = (typeof DEAL_STAGES)[number];
+export const ADD_ON_STAGES = PLATFORM_LBO_STAGES;
+
+export const EARLY_STAGE_STAGES = [
+  "Sourced",
+  "Intro",
+  "Partner Meeting",
+  "Term Sheet",
+  "Diligence",
+  "Closed",
+  "Passed",
+] as const;
+
+/** Default stage list per investment type (Settings can override). */
+export const DEFAULT_STAGES_BY_TYPE: Record<InvestmentTypeKey, readonly string[]> = {
+  platform_lbo: PLATFORM_LBO_STAGES,
+  add_on: ADD_ON_STAGES,
+  early_stage: EARLY_STAGE_STAGES,
+  minority_growth: PLATFORM_LBO_STAGES,
+};
+
+/** Every stage name valid for at least one type — the deals API
+ * accepts these; per-type membership is enforced against bd config. */
+export const ALL_DEAL_STAGES: readonly string[] = Array.from(
+  new Set([
+    ...PLATFORM_LBO_STAGES,
+    ...EARLY_STAGE_STAGES,
+    // Legacy names stay *acceptable* on read for any pre-migration row
+    // that surfaces before the migration runs; writes never produce them.
+    "Sourcing",
+    "Initial Contact",
+    "Negotiation",
+    "Closing",
+    "Closed Won",
+  ])
+);
+
+/** Back-compat default (Platform LBO list) for surfaces that have not
+ * loaded the per-type config yet. */
+export const DEAL_STAGES = PLATFORM_LBO_STAGES;
+
+export type DealStage = string;
+
+/** Crosswalk used when a deal's type changes and its current stage is
+ * not in the new type's list: exact-name match wins; these are the
+ * judgment mappings for the non-shared stages. */
+export const STAGE_CROSSWALK: Record<string, string> = {
+  IOI: "Intro",
+  LOI: "Term Sheet",
+  Financing: "Diligence",
+  Intro: "Sourced",
+  "Partner Meeting": "Sourced",
+  "Term Sheet": "IOI",
+};
+
+export function stageForTypeChange(
+  stage: string,
+  targetStages: readonly string[]
+): string {
+  if (targetStages.includes(stage)) return stage;
+  const mapped = STAGE_CROSSWALK[stage];
+  if (mapped && targetStages.includes(mapped)) return mapped;
+  return targetStages[0] ?? "Sourced";
+}
 
 export interface DealLink {
   label: string;
@@ -96,6 +180,14 @@ export interface Deal {
   companyName: string;
   industry: string;
   stage: DealStage;
+  /** Investment type (Step 1, Oct 23, 2026). Absent on pre-migration
+   * rows — readers default to "platform_lbo". */
+  investmentType?: InvestmentTypeKey;
+  /** Add-on → its platform deal (required for add_on deals). */
+  parentDealId?: string | null;
+  /** Early-stage flywheel link: where this deal was sourced from. */
+  sourcedFromType?: "portfolio_company" | "market_insight" | null;
+  sourcedFromId?: string | null;
   dealValue: number;
   drivers?: DealDrivers;
   structure?: DealStructureInput;
