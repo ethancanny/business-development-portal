@@ -56,6 +56,7 @@ export default function JobQueuePanel() {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +104,21 @@ export default function JobQueuePanel() {
     return <ErrorState title="Couldn't load background jobs" message={error} onRetry={load} />;
   }
 
+  // Filed view (Ethan, Oct 23, 2026): what needs attention or is in
+  // flight stays on top with the latest few completed; the long tail
+  // of finished runs is history, one tap away — not the page.
+  const TERMINAL = ["succeeded", "done", "completed"];
+  const attention = jobs.filter((j) => !TERMINAL.includes(j.status));
+  const history = jobs.filter((j) => TERMINAL.includes(j.status));
+  const failedCount = jobs.filter(
+    (j) => j.status === "failed" || j.status === "error"
+  ).length;
+  const HISTORY_PREVIEW = 5;
+  const visible = [
+    ...attention,
+    ...(showHistory ? history : history.slice(0, HISTORY_PREVIEW)),
+  ];
+
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -120,8 +136,25 @@ export default function JobQueuePanel() {
           No background jobs yet.
         </p>
       ) : (
-        <ul className="divide-y divide-slate-100 dark:divide-white/5">
-          {jobs.map((job) => {
+        <>
+          <p className="mb-1 text-xs text-slate-400 dark:text-white/40">
+            <span className="tnum font-semibold">{attention.length}</span>{" "}
+            active or queued
+            {failedCount > 0 && (
+              <>
+                {" · "}
+                <span className="tnum font-semibold text-red-600 dark:text-red-300">
+                  {failedCount}
+                </span>{" "}
+                failed
+              </>
+            )}
+            {" · "}
+            <span className="tnum font-semibold">{history.length}</span>{" "}
+            completed
+          </p>
+          <ul className="divide-y divide-slate-100 dark:divide-white/5">
+            {visible.map((job) => {
             const failed = job.status === "failed" || job.status === "error";
             const queued = job.status === "queued" || job.status === "pending";
             return (
@@ -193,9 +226,21 @@ export default function JobQueuePanel() {
                   </button>
                 )}
               </li>
-            );
-          })}
-        </ul>
+              );
+            })}
+          </ul>
+          {history.length > HISTORY_PREVIEW && (
+            <button
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
+              className="mt-3 text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+            >
+              {showHistory
+                ? "Show less history"
+                : `Show full history (${history.length} completed)`}
+            </button>
+          )}
+        </>
       )}
     </div>
   );

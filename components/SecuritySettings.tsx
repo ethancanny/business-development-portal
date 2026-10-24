@@ -70,8 +70,24 @@ export default function SecuritySettings() {
     void load();
   }, [load]);
 
+  const [showAllDevices, setShowAllDevices] = useState(false);
+
   const passkeys = devices.filter((d) => d.kind === "passkey");
-  const sessions = devices.filter((d) => d.kind === "session");
+  // Filed view (Ethan, Oct 23, 2026): current device first, then most
+  // recent — five on show, the rest behind one tap. The full registry
+  // is data, not a page.
+  const sessions = devices
+    .filter((d) => d.kind === "session")
+    .sort((a, b) => {
+      if (!!a.isCurrent !== !!b.isCurrent) return a.isCurrent ? -1 : 1;
+      return (
+        new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime()
+      );
+    });
+  const DEVICE_PREVIEW = 5;
+  const visibleSessions = showAllDevices
+    ? sessions
+    : sessions.slice(0, DEVICE_PREVIEW);
 
   const addPasskey = async () => {
     setBusy(true);
@@ -284,6 +300,7 @@ export default function SecuritySettings() {
           Browsers that have signed in recently. Sessions can&apos;t be
           revoked one by one — use “Sign out everywhere” to end all of
           them at once. Passkeys can be removed individually above.
+          Sign-ins not seen for 90 days are filed away automatically.
         </p>
         {loading ? (
           <p className="mt-4 text-sm text-slate-400 dark:text-white/40">Loading…</p>
@@ -293,7 +310,7 @@ export default function SecuritySettings() {
           </p>
         ) : (
           <ul className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200 dark:divide-white/5 dark:border-white/10">
-            {sessions.map((d) => (
+            {visibleSessions.map((d) => (
               <li
                 key={d.id}
                 className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
@@ -314,6 +331,17 @@ export default function SecuritySettings() {
               </li>
             ))}
           </ul>
+        )}
+        {!loading && sessions.length > DEVICE_PREVIEW && (
+          <button
+            type="button"
+            onClick={() => setShowAllDevices((v) => !v)}
+            className="mt-3 text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+          >
+            {showAllDevices
+              ? "Show fewer devices"
+              : `Show all ${sessions.length} devices`}
+          </button>
         )}
 
         <div className="mt-5 border-t border-slate-100 pt-4 dark:border-white/5">
