@@ -9,8 +9,9 @@
  * - GET /api/platform/signing/settings → consent disclosure text +
  *   default link expiry (edited here, saved via PUT on the same
  *   route).
- * - GET /api/platform/signing/envelopes → the 10 most recent
- *   envelopes; a row opens the shared EnvelopeDetail dialog.
+ * (The recent-envelopes list that used to sit at the bottom of this
+ * card was removed at Ethan's direction, Oct 24, 2026 — envelope
+ * status lives with the documents themselves.)
  * When the API still reports setupRequired, the card renders the
  * API's own detail + setup steps honestly — never a fake state.
  */
@@ -18,11 +19,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, ErrorState, SkeletonRows } from "@/components/ui";
 import { fmtDate } from "@/lib/format";
-import { EnvelopeDetailDialog } from "@/components/signing/EnvelopeStatus";
 import {
   copyText,
-  envelopeBadgeClass,
-  envelopeStatusLabel,
   inputCls,
   labelCls,
   listFrom,
@@ -45,13 +43,6 @@ interface SigningStatus {
   } | null;
 }
 
-interface RecentEnvelope {
-  id: string;
-  status: string;
-  signers: Array<{ name: string; email: string; status: string }>;
-  createdAt: string;
-  completedAt: string | null;
-}
 
 export default function EsignSettingsCard() {
   const [status, setStatus] = useState<SigningStatus | null>(null);
@@ -64,8 +55,6 @@ export default function EsignSettingsCard() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState("");
 
-  const [recent, setRecent] = useState<RecentEnvelope[]>([]);
-  const [detailId, setDetailId] = useState<string | null>(null);
   const [fpCopied, setFpCopied] = useState(false);
 
   const load = useCallback(async () => {
@@ -121,30 +110,6 @@ export default function EsignSettingsCard() {
       setSettingsReadable(false);
     }
 
-    try {
-      const res = await fetch("/api/platform/signing/envelopes");
-      if (res.ok) {
-        const data = (await res.json()) as Rec;
-        const items = listFrom<Rec>(data, "items", "envelopes")
-          .slice(0, 10)
-          .map((r) => ({
-            id: str(pick(r, "id")),
-            status: str(pick(r, "status")),
-            signers: listFrom<Rec>(r, "signers").map((s) => ({
-              name: str(pick(s, "name")),
-              email: str(pick(s, "email")),
-              status: str(pick(s, "status")),
-            })),
-            createdAt: str(pick(r, "createdAt", "created_at")),
-            completedAt:
-              (pick(r, "completedAt", "completed_at") as string | null) ??
-              null,
-          }));
-        setRecent(items);
-      }
-    } catch {
-      /* recent list is auxiliary */
-    }
   }, []);
 
   useEffect(() => {
@@ -357,57 +322,10 @@ export default function EsignSettingsCard() {
               )}
             </div>
 
-            {/* Recent envelopes */}
-            <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/5">
-              <p className={labelCls}>Recent envelopes</p>
-              {recent.length === 0 ? (
-                <p className="text-sm text-slate-400 dark:text-white/40">
-                  No envelopes yet — send a document for signature from
-                  a data room, the Documents library, or a report.
-                </p>
-              ) : (
-                <ul className="divide-y divide-slate-100 dark:divide-white/5">
-                  {recent.map((e) => (
-                    <li key={e.id}>
-                      <button
-                        type="button"
-                        onClick={() => setDetailId(e.id)}
-                        className="flex min-h-[44px] w-full flex-wrap items-center gap-2 py-2 text-left"
-                      >
-                        <span className="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-white/80">
-                          {e.signers.length > 0
-                            ? e.signers
-                                .map((s) => s.name || s.email)
-                                .join(", ")
-                            : "Envelope"}
-                          <span className="text-xs text-slate-400 dark:text-white/40">
-                            {" "}
-                            · {e.createdAt ? fmtDate(e.createdAt) : ""}
-                            {e.completedAt
-                              ? ` · completed ${fmtDate(e.completedAt)}`
-                              : ""}
-                          </span>
-                        </span>
-                        <span className={`badge ${envelopeBadgeClass(e.status)}`}>
-                          {envelopeStatusLabel(e.status)}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
           </div>
         )}
       </div>
 
-      {detailId && (
-        <EnvelopeDetailDialog
-          envelopeId={detailId}
-          onClose={() => setDetailId(null)}
-          onChanged={() => void load()}
-        />
-      )}
     </div>
   );
 }

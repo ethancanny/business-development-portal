@@ -1,6 +1,5 @@
 import PageHero from "@/components/PageHero";
 import IntegrationStatus from "@/components/IntegrationStatus";
-import EntraSetup from "@/components/EntraSetup";
 import DataRoomSettings from "@/components/DataRoomSettings";
 import AccountingSettings from "@/components/portmgmt/AccountingSettings";
 import SettingsNav from "@/components/settings/SettingsNav";
@@ -32,18 +31,6 @@ export default function SettingsIntegrationsPage() {
           <IntegrationStatus />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
-          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
-            Microsoft Entra ID — calendar connection
-          </h2>
-          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
-            How the Outlook calendar integration is registered and kept
-            alive: the existing app registration, its calendar-only
-            permissions, the exact redirect URI, where credentials live,
-            and how the webhook subscription renews itself.
-          </p>
-          <EntraSetup />
-        </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">

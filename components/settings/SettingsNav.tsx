@@ -13,7 +13,6 @@ const ITEMS: { href: string; label: string }[] = [
   { href: "/settings", label: "General" },
   { href: "/settings/integrations", label: "Integrations" },
   { href: "/settings/users-roles", label: "Users & Roles" },
-  { href: "/settings/data-dictionary", label: "Data Dictionary" },
   { href: "/settings/data-explorer", label: "Data Explorer" },
   { href: "/settings/audit-trail", label: "Audit Trail" },
 ];
