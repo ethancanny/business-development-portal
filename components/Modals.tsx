@@ -16,6 +16,7 @@ import { DRIVER_DEFS, VALUATION_BANDS, VALUATION_GROUPS, bandForDeal, dealFocusS
 import SectorChip, { StageChip } from "@/components/SectorChip";
 import DealRecordHeader from "@/components/DealRecordHeader";
 import DealForm from "@/components/DealForm";
+import ConfirmDealDialog from "@/components/identity/ConfirmDealDialog";
 
 function fmtMultRange(lo: number, hi: number): string {
   return lo.toFixed(1) === hi.toFixed(1)
@@ -779,8 +780,12 @@ export function DealModal({ deal, executives = [], allDeals = [], initialType, o
     }
   };
 
+  // Wrong-deal protection (Deal Identity follow-up, Oct 24, 2026):
+  // delete goes through ConfirmDealDialog, which names the deal and
+  // its codename, instead of a bare window.confirm.
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const remove = async () => {
-    if (!deal || !window.confirm(`Delete "${deal.companyName}"?`)) return;
+    if (!deal) return;
     setBusy(true);
     const res = await fetch(`/api/deals/${deal.id}`, { method: "DELETE" });
     setBusy(false);
@@ -806,6 +811,7 @@ export function DealModal({ deal, executives = [], allDeals = [], initialType, o
   }
 
   return (
+    <>
     <ModalShell title={isNew ? "New investment" : deal!.companyName} onClose={onClose}>
       {error && (
         <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</p>
@@ -1008,7 +1014,7 @@ export function DealModal({ deal, executives = [], allDeals = [], initialType, o
               Edit
             </button>
             <button
-              onClick={remove}
+              onClick={() => setConfirmDelete(true)}
               disabled={busy}
               className="btn btn-danger"
             >
@@ -1019,6 +1025,24 @@ export function DealModal({ deal, executives = [], allDeals = [], initialType, o
         </div>
       ) : null}
     </ModalShell>
+    {deal && (
+      <ConfirmDealDialog
+        open={confirmDelete}
+        actionLabel="Delete deal"
+        companyName={deal.companyName}
+        codename={deal.codename ?? ""}
+        detail="This removes the deal record from the pipeline."
+        danger
+        busy={busy}
+        confirmLabel="Delete deal"
+        onConfirm={() => {
+          setConfirmDelete(false);
+          void remove();
+        }}
+        onCancel={() => setConfirmDelete(false)}
+      />
+    )}
+    </>
   );
 }
 
