@@ -87,6 +87,10 @@ function parseConfig(v: unknown): MetricDefinitionRow["config"] {
     group: r.group === "hold" ? "hold" : r.group === "primary" ? "primary" : undefined,
     options: Array.isArray(r.options) ? r.options.map(String) : undefined,
     types: Array.isArray(r.types) ? r.types.map(String) : undefined,
+    section:
+      typeof r.section === "string" && r.section.trim()
+        ? r.section.trim().slice(0, 40)
+        : undefined,
   };
 }
 
@@ -149,7 +153,15 @@ export async function getBdConfig(): Promise<BdConfig> {
 export async function updateBdConfig(
   patch: {
     types?: Array<{ key: string; enabled?: boolean; stages?: string[] }>;
-    definitions?: Array<{ key: string; enabled?: boolean; label?: string; sort?: number }>;
+    definitions?: Array<{
+      key: string;
+      enabled?: boolean;
+      label?: string;
+      sort?: number;
+      /** New investment form: reassign the field's form section
+       * (merged into the definition's config JSONB; null clears). */
+      section?: string | null;
+    }>;
     sectorPacks?: Array<{
       key: string;
       label?: string;
@@ -189,6 +201,24 @@ export async function updateBdConfig(
         sort = COALESCE(${typeof d.sort === "number" ? d.sort : null}, sort),
         updated_at = now()
       WHERE key = ${d.key}`;
+    if (d.section !== undefined) {
+      const section =
+        typeof d.section === "string" && d.section.trim()
+          ? d.section.trim().slice(0, 40)
+          : null;
+      if (section) {
+        await db`
+          UPDATE bd.metric_definitions
+          SET config = config || ${JSON.stringify({ section })}::jsonb,
+            updated_at = now()
+          WHERE key = ${d.key}`;
+      } else {
+        await db`
+          UPDATE bd.metric_definitions
+          SET config = config - 'section', updated_at = now()
+          WHERE key = ${d.key}`;
+      }
+    }
   }
   for (const p of patch.sectorPacks ?? []) {
     if (!p.key) continue;

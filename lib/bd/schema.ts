@@ -51,6 +51,11 @@ export interface MetricDefinitionRow {
     group?: "primary" | "hold";
     options?: string[];
     types?: string[];
+    /** New investment form (Oct 24, 2026): which form section this
+     * field renders in. Assigned by the bd-form-sections-v1 migration
+     * for the Step 1 seeds and carried in the seed config for fields
+     * added later; editable in Settings (config route merges it). */
+    section?: string;
   };
 }
 
@@ -96,6 +101,11 @@ const DEFINITION_SEEDS: DefSeed[] = [
   ["synergies_annual", "Synergies (annual)", "type:add_on", "money", 20],
   ["integration_cost", "Integration cost", "type:add_on", "money", 30],
   ["fit_score", "Fit score", "type:add_on", "number", 40],
+  /* Add-on synergy split (New investment form, Oct 24, 2026) — the
+   * form's Add-on metrics ask for cost and revenue synergies
+   * separately; synergies_annual above stays as the combined figure. */
+  ["synergies_cost", "Cost synergies (annual)", "type:add_on", "money", 25, { section: "addon_metrics" }],
+  ["synergies_revenue", "Revenue synergies (annual)", "type:add_on", "money", 27, { section: "addon_metrics" }],
 
   /* ---- Early Stage ---- */
   ["arr", "ARR", "type:early_stage", "money", 10],
@@ -109,6 +119,20 @@ const DEFINITION_SEEDS: DefSeed[] = [
   ["valuation_cap", "Valuation cap", "type:early_stage", "money", 80],
   ["ownership_pct", "Ownership %", "type:early_stage", "pct", 90],
   ["follow_on_reserves", "Follow-on reserves", "type:early_stage", "money", 100],
+  /* Early Stage form fields (New investment form, Oct 24, 2026):
+   * the Round / Traction / Team & market / Investors sections render
+   * from these definitions (section carried in the seed config). */
+  ["founders", "Founders", "type:early_stage", "text", 5, { section: "es_basics" }],
+  ["round_stage", "Round stage", "type:early_stage", "enum", 55, { section: "round", options: ["Pre-seed", "Seed", "Series A", "Series B"] }],
+  ["pre_money", "Pre-money valuation", "type:early_stage", "money", 65, { section: "round" }],
+  ["discount_pct", "Discount %", "type:early_stage", "pct", 75, { section: "round" }],
+  ["check_size", "Our check size", "type:early_stage", "money", 85, { section: "round" }],
+  ["traction_growth_pct", "Growth % (YoY)", "type:early_stage", "pct", 25, { section: "traction" }],
+  ["customers", "Customers", "type:early_stage", "number", 35, { section: "traction" }],
+  ["team_notes", "Team notes", "type:early_stage", "text", 10, { section: "team_market" }],
+  ["market_notes", "Market notes", "type:early_stage", "text", 20, { section: "team_market" }],
+  ["lead_investor", "Lead investor", "type:early_stage", "text", 10, { section: "investors_es" }],
+  ["co_investors", "Co-investors", "type:early_stage", "text", 20, { section: "investors_es" }],
 
   /* ---- Aerospace & Defense sector pack (additive, any type) ---- */
   ["backlog", "Backlog", "sector:aerospace_defense", "money", 10],
