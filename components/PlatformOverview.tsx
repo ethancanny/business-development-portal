@@ -5,9 +5,10 @@
  *
  * The ONLY data source is GET /api/platform/overview, which reads the
  * server-side summary tables (PROJECT_RULES: never recompute on page
- * load). Fetched once on mount — no interval polling. This component
- * owns the card filter state and renders <CompanyCards/> itself with
- * the filtered list, so the Overview page needs a single insertion.
+ * load). Fetched once on mount — no interval polling. The Companies
+ * grid that used to sit under the widgets was removed (Ethan,
+ * Oct 23, 2026 — no company pipeline on Overview); the cards payload
+ * still feeds the Arizona footprint and Portfolio RAG widgets.
  *
  * Defensive by contract: while the Neon DB is down the fetch fails and
  * the section degrades to a clean error state, never a crash.
@@ -21,14 +22,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Button, EmptyState, SkeletonRows, StatTile } from "@/components/ui";
-import CompanyCards, {
-  applyCardFilters,
-  ragDot,
-  STAGE_GROUP_LABELS,
-  type CompanyCard,
-  type CompanyCardFilters,
-  type CompanyStageGroup,
-} from "@/components/CompanyCards";
+import { ragDot, type CompanyCard } from "@/components/CompanyCards";
+import { useTheme } from "@/components/ThemeProvider";
 import { fmtMoney, fmtMoneyCompact, fmtRelTime } from "@/lib/format";
 import { barGradient, stageColor } from "@/lib/sector-colors";
 
@@ -244,7 +239,7 @@ function FunnelWidget({ summary }: { summary: PlatformSummary }) {
               key={stage}
               className="min-w-[6.5rem] flex-1 rounded-lg bg-slate-50 p-2.5 text-center dark:bg-white/5"
             >
-              <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-caption" title={stage}>
+              <p className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-caption" title={stage}>
                 {stage}
               </p>
               <p className="tnum mt-1 font-display text-2xl font-semibold text-navy-900 dark:text-white">
@@ -259,6 +254,8 @@ function FunnelWidget({ summary }: { summary: PlatformSummary }) {
 }
 
 function HeatmapWidget({ summary }: { summary: PlatformSummary }) {
+  const { theme } = useTheme();
+  const dark = theme === "dark";
   const { verticals, stages, cells } = summary.heatmap ?? {
     verticals: [],
     stages: [],
@@ -285,7 +282,7 @@ function HeatmapWidget({ summary }: { summary: PlatformSummary }) {
         {stages.map((s) => (
           <span
             key={s}
-            className="truncate px-1 pb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-caption"
+            className="px-0.5 pb-1 text-center text-[10px] font-semibold uppercase leading-tight tracking-wide text-caption"
             title={s}
           >
             {s}
@@ -294,7 +291,7 @@ function HeatmapWidget({ summary }: { summary: PlatformSummary }) {
         {verticals.map((v) => (
           <Fragment key={v}>
             <span
-              className="flex items-center truncate pr-2 text-xs font-medium text-slate-700 dark:text-white/80"
+              className="flex items-center pr-2 text-xs font-medium leading-tight text-slate-700 dark:text-white/80"
               title={v}
             >
               {v}
@@ -308,11 +305,29 @@ function HeatmapWidget({ summary }: { summary: PlatformSummary }) {
                   title={`${v} · ${s}: ${n} deal${n === 1 ? "" : "s"}`}
                   className="tnum flex h-9 items-center justify-center rounded-md text-xs font-semibold"
                   style={{
+                    // Every cell carries a visible border + fill in
+                    // BOTH modes (Ethan, Oct 23, 2026): the old empty
+                    // fill was navy at 5% — invisible on the navy
+                    // night-mode card, so the grid vanished.
+                    border: `1px solid ${
+                      dark ? "rgba(255,255,255,0.12)" : "rgba(13,31,60,0.12)"
+                    }`,
                     backgroundColor:
                       n === 0
-                        ? "rgba(13,31,60,0.05)"
+                        ? dark
+                          ? "rgba(232,223,200,0.07)"
+                          : "rgba(13,31,60,0.05)"
                         : `rgba(184,151,90,${intensity.toFixed(2)})`,
-                    color: intensity > 0.55 ? "#ffffff" : "#0d1f3c",
+                    color:
+                      n === 0
+                        ? dark
+                          ? "rgba(232,223,200,0.55)"
+                          : "#0d1f3c"
+                        : intensity > 0.55
+                          ? "#ffffff"
+                          : dark
+                            ? "#e8dfc8"
+                            : "#0d1f3c",
                   }}
                 >
                   {n > 0 ? n : "·"}
@@ -683,20 +698,12 @@ function EarlyWarningBlock({ items }: { items: EarlyWarningItem[] }) {
 
 /* ---------------- Main section ---------------- */
 
-const selectClass =
-  "min-h-[44px] max-w-full rounded-lg border border-slate-300 bg-white px-2.5 text-sm text-navy-900 dark:border-white/15 dark:bg-white/5 dark:text-white";
-
 export default function PlatformOverview() {
   const [payload, setPayload] = useState<OverviewPayload | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
   const [customize, setCustomize] = useState(false);
   const [layout, setLayout] = useState<WidgetLayout>(loadLayout);
-  const [filters, setFilters] = useState<CompanyCardFilters>({
-    stage: "all",
-    vertical: "all",
-    query: "",
-  });
 
   const fetchOnce = useCallback(async (signal: { cancelled: boolean }) => {
     try {
@@ -736,15 +743,6 @@ export default function PlatformOverview() {
 
   const summary = payload?.summary ?? null;
   const allCards = useMemo(() => payload?.cards ?? [], [payload]);
-  const verticals = useMemo(
-    () =>
-      Array.from(new Set(allCards.map((c) => c.vertical).filter(Boolean) as string[])).sort(),
-    [allCards],
-  );
-  const filteredCards = useMemo(
-    () => applyCardFilters(allCards, filters),
-    [allCards, filters],
-  );
 
   const moveWidget = (id: WidgetId, dir: -1 | 1) =>
     setLayout((prev) => {
@@ -805,48 +803,6 @@ export default function PlatformOverview() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="sr-only" htmlFor="po-stage">Stage</label>
-          <select
-            id="po-stage"
-            className={selectClass}
-            value={filters.stage}
-            onChange={(e) =>
-              setFilters((f) => ({
-                ...f,
-                stage: e.target.value as CompanyCardFilters["stage"],
-              }))
-            }
-          >
-            <option value="all">All stages</option>
-            {(Object.keys(STAGE_GROUP_LABELS) as CompanyStageGroup[]).map((s) => (
-              <option key={s} value={s}>
-                {STAGE_GROUP_LABELS[s]}
-              </option>
-            ))}
-          </select>
-          <label className="sr-only" htmlFor="po-vertical">Vertical</label>
-          <select
-            id="po-vertical"
-            className={selectClass}
-            value={filters.vertical}
-            onChange={(e) => setFilters((f) => ({ ...f, vertical: e.target.value }))}
-          >
-            <option value="all">All verticals</option>
-            {verticals.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
-          <label className="sr-only" htmlFor="po-query">Operator or search</label>
-          <input
-            id="po-query"
-            type="search"
-            placeholder="Operator / search cards…"
-            className={`${selectClass} min-w-0`}
-            value={filters.query}
-            onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
-          />
           <Button
             variant={customize ? "primary" : "secondary"}
             size="sm"
@@ -946,17 +902,6 @@ export default function PlatformOverview() {
             ))}
           </div>
 
-          <div className="mt-6">
-            <div className="mb-3 flex items-baseline justify-between gap-2">
-              <h3 className="font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
-                Companies
-              </h3>
-              <span className="caption">
-                {filteredCards.length} of {allCards.length}
-              </span>
-            </div>
-            <CompanyCards cards={allCards} filters={filters} />
-          </div>
         </>
       )}
     </section>
