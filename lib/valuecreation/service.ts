@@ -1,12 +1,17 @@
 import { sql, newId, str, num, numOrNull, isoOrNull } from "../platform/db";
 import { publishEvent } from "../platform/events";
 import { getCompanyFinancials } from "../financials/service";
-import { getWorkspaceByDeal, getScorecard } from "../diligence/service";
+import {
+  getWorkspaceByDeal,
+  getScorecard,
+  listFindings,
+} from "../diligence/service";
 import { SCORECARD_AREAS } from "../diligence/schema";
 import {
   ensureValueCreation,
   INITIATIVE_STATUSES,
   TARGET_METRICS,
+  DEFAULT_PLAN_PHASES,
 } from "./schema";
 
 export { ensureValueCreation };
@@ -87,6 +92,13 @@ function round1(n: number): number {
 
 /* ------------------------------ row types ---------------------------- */
 
+export interface PlanPhase {
+  key: string;
+  name: string;
+  fromDay: number;
+  toDay: number;
+}
+
 export interface PlanRow {
   id: string;
   companyId: string;
@@ -99,6 +111,11 @@ export interface PlanRow {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** VCP redesign §8: underwriting baseline / target EBITDA. */
+  baselineEbitda: number | null;
+  targetEbitda: number | null;
+  /** VCP redesign §7: editable 100-day phase structure. */
+  phases: PlanPhase[];
 }
 
 export interface InitiativeRow {
@@ -125,6 +142,17 @@ export interface InitiativeRow {
   dependsOn: string[];
   createdAt: string;
   updatedAt: string;
+  /* VCP redesign §5: KPI, budget actuals, risks, derived progress. */
+  kpiName: string;
+  kpiBaseline: number | null;
+  kpiTarget: number | null;
+  kpiUnit: string;
+  actualSpend: number | null;
+  risks: string;
+  /** 0–100, derived from status / milestones / dates (see helper). */
+  progressPct: number;
+  milestonesTotal: number;
+  milestonesDone: number;
 }
 
 export interface PlaybookStep {
@@ -147,6 +175,8 @@ export interface PlaybookRow {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** Industry tag ('' = general library; 'Aerospace & Defense' = A&D set). */
+  industry: string;
 }
 
 export interface TargetRow {
@@ -237,24 +267,81 @@ function rowToPlan(r: Record<string, unknown>): PlanRow {
     createdBy: str(r.created_by),
     createdAt: isoOrNull(r.created_at) ?? "",
     updatedAt: isoOrNull(r.updated_at) ?? "",
+    baselineEbitda: numOrNull(r.baseline_ebitda),
+    targetEbitda: numOrNull(r.target_ebitda),
+    phases: parsePhases(r.phases),
   };
+}
+
+/** Parse + sanitize a plan's phases JSONB; defaults when unusable. */
+function parsePhases(v: unknown): PlanPhase[] {
+  const raw = jsonArr<Record<string, unknown>>(v)
+    .map((p, i) => ({
+      key: str(p.key) || `phase-${i + 1}`,
+      name: str(p.name) || `Phase ${i + 1}`,
+      fromDay: Math.max(0, Math.floor(num(p.fromDay))),
+      toDay: Math.max(0, Math.floor(num(p.toDay))),
+    }))
+    .filter((p) => p.toDay >= p.fromDay)
+    .sort((a, b) => a.fromDay - b.fromDay);
+  if (!raw.length) {
+    return DEFAULT_PLAN_PHASES.map((p) => ({ ...p }));
+  }
+  return raw;
+}
+
+/**
+ * Derived initiative progress (0–100) from stored state only:
+ * done ⇒ 100; milestones present ⇒ done/total; both dates present ⇒
+ * elapsed fraction clamped to [0,100]; deferred ⇒ 0. No persistence —
+ * a presentation derivation over the row, like days-outstanding.
+ */
+function deriveProgress(
+  status: string,
+  startDate: string | null,
+  endDate: string | null,
+  mTotal: number,
+  mDone: number
+): number {
+  if (status === "done") return 100;
+  if (status === "deferred") return 0;
+  if (mTotal > 0) return Math.round((mDone / mTotal) * 100);
+  if (startDate && endDate && endDate > startDate) {
+    const today = new Date().toISOString().slice(0, 10);
+    if (today <= startDate) return 0;
+    if (today >= endDate) return 100;
+    const span =
+      new Date(`${endDate}T00:00:00Z`).getTime() -
+      new Date(`${startDate}T00:00:00Z`).getTime();
+    const elapsed =
+      new Date(`${today}T00:00:00Z`).getTime() -
+      new Date(`${startDate}T00:00:00Z`).getTime();
+    return span > 0 ? Math.round((elapsed / span) * 100) : 0;
+  }
+  return 0;
 }
 
 function rowToInitiative(
   r: Record<string, unknown>,
-  dependsOn: string[] = []
+  dependsOn: string[] = [],
+  milestoneCounts?: { total: number; done: number }
 ): InitiativeRow {
+  const startDate = dateOrNull(r.start_date);
+  const endDate = dateOrNull(r.end_date);
+  const status = str(r.status) || "planned";
+  const mTotal = milestoneCounts?.total ?? 0;
+  const mDone = milestoneCounts?.done ?? 0;
   return {
     id: str(r.id),
     planId: str(r.plan_id),
     title: str(r.title),
     description: str(r.description),
     category: str(r.category),
-    status: str(r.status) || "planned",
+    status,
     ownerName: str(r.owner_name),
     ownerPersonId: r.owner_person_id ? str(r.owner_person_id) : null,
-    startDate: dateOrNull(r.start_date),
-    endDate: dateOrNull(r.end_date),
+    startDate,
+    endDate,
     oneTimeCost: numOrNull(r.one_time_cost),
     recurringCost: numOrNull(r.recurring_cost),
     ebitdaImpact: numOrNull(r.ebitda_impact),
@@ -268,6 +355,15 @@ function rowToInitiative(
     dependsOn,
     createdAt: isoOrNull(r.created_at) ?? "",
     updatedAt: isoOrNull(r.updated_at) ?? "",
+    kpiName: str(r.kpi_name),
+    kpiBaseline: numOrNull(r.kpi_baseline),
+    kpiTarget: numOrNull(r.kpi_target),
+    kpiUnit: str(r.kpi_unit),
+    actualSpend: numOrNull(r.actual_spend),
+    risks: str(r.risks),
+    progressPct: deriveProgress(status, startDate, endDate, mTotal, mDone),
+    milestonesTotal: mTotal,
+    milestonesDone: mDone,
   };
 }
 
@@ -291,6 +387,7 @@ function rowToPlaybook(r: Record<string, unknown>): PlaybookRow {
     createdBy: str(r.created_by),
     createdAt: isoOrNull(r.created_at) ?? "",
     updatedAt: isoOrNull(r.updated_at) ?? "",
+    industry: str(r.industry),
   };
 }
 
@@ -615,11 +712,16 @@ export async function updatePlan(
     status?: string;
     thesis?: string;
     incentiveNotes?: string;
+    baselineEbitda?: number | null;
+    targetEbitda?: number | null;
+    phases?: PlanPhase[];
   },
   actor: string
 ): Promise<PlanRow> {
   void actor;
   const plan = await requirePlan(planId);
+  const phases =
+    patch.phases !== undefined ? parsePhases(patch.phases) : plan.phases;
   const db = sql();
   await db`
     UPDATE valuecreation.plans
@@ -628,6 +730,9 @@ export async function updatePlan(
         status = ${patch.status !== undefined ? patch.status : plan.status},
         thesis = ${patch.thesis !== undefined ? patch.thesis : plan.thesis},
         incentive_notes = ${patch.incentiveNotes !== undefined ? patch.incentiveNotes : plan.incentiveNotes},
+        baseline_ebitda = ${patch.baselineEbitda !== undefined ? patch.baselineEbitda : plan.baselineEbitda},
+        target_ebitda = ${patch.targetEbitda !== undefined ? patch.targetEbitda : plan.targetEbitda},
+        phases = ${JSON.stringify(phases)}::jsonb,
         updated_at = now()
     WHERE id = ${planId}`;
   return (await getPlan(planId)) as PlanRow;
@@ -747,6 +852,29 @@ async function depsForInitiatives(
   return map;
 }
 
+/** Milestone tallies per initiative (one grouped query per list). */
+async function milestoneCountsFor(
+  initiativeIds: string[]
+): Promise<Map<string, { total: number; done: number }>> {
+  const map = new Map<string, { total: number; done: number }>();
+  if (!initiativeIds.length) return map;
+  const db = sql();
+  const rows = await db`
+    SELECT initiative_id, count(*)::int AS total,
+      count(*) FILTER (WHERE done)::int AS done
+    FROM valuecreation.initiative_milestones
+    WHERE initiative_id = ANY(${initiativeIds}) AND deleted_at IS NULL
+    GROUP BY initiative_id`;
+  for (const r of rows) {
+    const rec = r as Record<string, unknown>;
+    map.set(str(rec.initiative_id), {
+      total: num(rec.total),
+      done: num(rec.done),
+    });
+  }
+  return map;
+}
+
 export async function listInitiatives(
   planId: string
 ): Promise<InitiativeRow[]> {
@@ -757,9 +885,16 @@ export async function listInitiatives(
     WHERE plan_id = ${planId} AND deleted_at IS NULL
     ORDER BY sort ASC, start_date ASC NULLS LAST, created_at ASC`;
   const deps = await depsForInitiatives(planId);
+  const counts = await milestoneCountsFor(
+    rows.map((r) => str((r as Record<string, unknown>).id))
+  );
   return rows.map((r) => {
     const rec = r as Record<string, unknown>;
-    return rowToInitiative(rec, deps.get(str(rec.id)) ?? []);
+    return rowToInitiative(
+      rec,
+      deps.get(str(rec.id)) ?? [],
+      counts.get(str(rec.id))
+    );
   });
 }
 
@@ -776,9 +911,11 @@ export async function getInitiative(
   const depRows = await db`
     SELECT depends_on_id FROM valuecreation.initiative_dependencies
     WHERE initiative_id = ${id}`;
+  const counts = await milestoneCountsFor([id]);
   return rowToInitiative(
     rec,
-    depRows.map((d) => str((d as Record<string, unknown>).depends_on_id))
+    depRows.map((d) => str((d as Record<string, unknown>).depends_on_id)),
+    counts.get(id)
   );
 }
 
@@ -800,6 +937,13 @@ export interface InitiativeInput {
   sourceKind?: string;
   sourceRef?: Record<string, unknown>;
   sort?: number;
+  /* VCP redesign §5 */
+  kpiName?: string;
+  kpiBaseline?: number | null;
+  kpiTarget?: number | null;
+  kpiUnit?: string;
+  actualSpend?: number | null;
+  risks?: string;
 }
 
 function validStatus(v: string | undefined, fallback: string): string {
@@ -827,7 +971,8 @@ export async function createInitiative(
       (id, plan_id, title, description, category, status, owner_name,
        owner_person_id, start_date, end_date, one_time_cost, recurring_cost,
        ebitda_impact, confidence, effort, playbook_id, source_kind,
-       source_ref, sort)
+       source_ref, sort, kpi_name, kpi_baseline, kpi_target, kpi_unit,
+       actual_spend, risks)
     VALUES (${id}, ${planId}, ${title}, ${(input.description ?? "").trim()},
       ${(input.category ?? "").trim()},
       ${validStatus(input.status, "planned")},
@@ -838,7 +983,10 @@ export async function createInitiative(
       ${input.effort ?? null}, ${input.playbookId ?? null},
       ${input.sourceKind ?? "manual"},
       ${JSON.stringify(input.sourceRef ?? {})}::jsonb,
-      ${input.sort ?? num((maxRows[0] as Record<string, unknown>).m) + 10})`;
+      ${input.sort ?? num((maxRows[0] as Record<string, unknown>).m) + 10},
+      ${(input.kpiName ?? "").trim()}, ${input.kpiBaseline ?? null},
+      ${input.kpiTarget ?? null}, ${(input.kpiUnit ?? "").trim()},
+      ${input.actualSpend ?? null}, ${(input.risks ?? "").trim()})`;
   const created = (await getInitiative(id)) as InitiativeRow;
   await afterInitiativeMutation({
     plan,
@@ -895,6 +1043,15 @@ export async function updateInitiative(
     playbookId:
       patch.playbookId !== undefined ? patch.playbookId : cur.playbookId,
     sort: patch.sort !== undefined ? patch.sort : cur.sort,
+    kpiName: patch.kpiName !== undefined ? patch.kpiName : cur.kpiName,
+    kpiBaseline:
+      patch.kpiBaseline !== undefined ? patch.kpiBaseline : cur.kpiBaseline,
+    kpiTarget:
+      patch.kpiTarget !== undefined ? patch.kpiTarget : cur.kpiTarget,
+    kpiUnit: patch.kpiUnit !== undefined ? patch.kpiUnit : cur.kpiUnit,
+    actualSpend:
+      patch.actualSpend !== undefined ? patch.actualSpend : cur.actualSpend,
+    risks: patch.risks !== undefined ? patch.risks : cur.risks,
   };
   if (!next.title) throw new VcError("title_required");
   await db`
@@ -908,6 +1065,9 @@ export async function updateInitiative(
         ebitda_impact = ${next.ebitdaImpact},
         confidence = ${next.confidence}, effort = ${next.effort},
         playbook_id = ${next.playbookId}, sort = ${next.sort},
+        kpi_name = ${next.kpiName}, kpi_baseline = ${next.kpiBaseline},
+        kpi_target = ${next.kpiTarget}, kpi_unit = ${next.kpiUnit},
+        actual_spend = ${next.actualSpend}, risks = ${next.risks},
         updated_at = now()
     WHERE id = ${id}`;
   const material = MATERIAL_FIELDS.some((f) => {
@@ -940,6 +1100,18 @@ export async function deleteInitiative(
   await db`
     DELETE FROM valuecreation.initiative_dependencies
     WHERE initiative_id = ${id} OR depends_on_id = ${id}`;
+  await db`
+    UPDATE valuecreation.initiative_milestones
+    SET deleted_at = now(), updated_at = now()
+    WHERE initiative_id = ${id} AND deleted_at IS NULL`;
+  await db`
+    UPDATE valuecreation.initiative_comments
+    SET deleted_at = now()
+    WHERE initiative_id = ${id} AND deleted_at IS NULL`;
+  await db`
+    UPDATE valuecreation.initiative_links
+    SET deleted_at = now()
+    WHERE initiative_id = ${id} AND deleted_at IS NULL`;
   const rows = await db`
     UPDATE valuecreation.initiatives
     SET deleted_at = now(), updated_at = now()
@@ -1868,5 +2040,801 @@ export async function getValueCreationTargets(
         updatedAt: row.updatedAt,
       };
     }),
+  };
+}
+
+/* ================= VCP redesign (Oct 2026) additions ================= */
+
+/* ------------------------- initiative milestones ------------------------ */
+
+export interface MilestoneRow {
+  id: string;
+  initiativeId: string;
+  title: string;
+  dueDate: string | null;
+  done: boolean;
+  sort: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function rowToMilestone(r: Record<string, unknown>): MilestoneRow {
+  return {
+    id: str(r.id),
+    initiativeId: str(r.initiative_id),
+    title: str(r.title),
+    dueDate: dateOrNull(r.due_date),
+    done: Boolean(r.done),
+    sort: num(r.sort),
+    createdAt: isoOrNull(r.created_at) ?? "",
+    updatedAt: isoOrNull(r.updated_at) ?? "",
+  };
+}
+
+async function requireInitiative(id: string): Promise<InitiativeRow> {
+  const init = await getInitiative(id);
+  if (!init) throw new VcError("initiative_not_found");
+  return init;
+}
+
+export async function listMilestones(
+  initiativeId: string
+): Promise<MilestoneRow[]> {
+  await ensureValueCreation();
+  await requireInitiative(initiativeId);
+  const db = sql();
+  const rows = await db`
+    SELECT * FROM valuecreation.initiative_milestones
+    WHERE initiative_id = ${initiativeId} AND deleted_at IS NULL
+    ORDER BY sort ASC, due_date ASC NULLS LAST, created_at ASC`;
+  return rows.map((r) => rowToMilestone(r as Record<string, unknown>));
+}
+
+export async function createMilestone(
+  initiativeId: string,
+  input: { title?: string; dueDate?: string | null },
+  actor: string
+): Promise<MilestoneRow> {
+  void actor;
+  await ensureValueCreation();
+  await requireInitiative(initiativeId);
+  const title = (input.title ?? "").trim();
+  if (!title) throw new VcError("title_required");
+  const db = sql();
+  const maxRows = await db`
+    SELECT coalesce(max(sort), 0)::int AS m
+    FROM valuecreation.initiative_milestones
+    WHERE initiative_id = ${initiativeId}`;
+  const id = `vcm_${newId()}`;
+  await db`
+    INSERT INTO valuecreation.initiative_milestones
+      (id, initiative_id, title, due_date, sort)
+    VALUES (${id}, ${initiativeId}, ${title},
+      ${cleanDate(input.dueDate ?? null)},
+      ${num((maxRows[0] as Record<string, unknown>).m) + 10})`;
+  const rows = await db`
+    SELECT * FROM valuecreation.initiative_milestones WHERE id = ${id}`;
+  return rowToMilestone(rows[0] as Record<string, unknown>);
+}
+
+export async function updateMilestone(
+  milestoneId: string,
+  patch: { title?: string; dueDate?: string | null; done?: boolean },
+  actor: string
+): Promise<MilestoneRow> {
+  void actor;
+  await ensureValueCreation();
+  const db = sql();
+  const rows = await db`
+    SELECT * FROM valuecreation.initiative_milestones
+    WHERE id = ${milestoneId} AND deleted_at IS NULL LIMIT 1`;
+  if (!rows.length) throw new VcError("milestone_not_found");
+  const cur = rowToMilestone(rows[0] as Record<string, unknown>);
+  await db`
+    UPDATE valuecreation.initiative_milestones
+    SET title = ${patch.title !== undefined ? patch.title.trim() : cur.title},
+        due_date = ${patch.dueDate !== undefined ? cleanDate(patch.dueDate) : cur.dueDate},
+        done = ${patch.done !== undefined ? patch.done : cur.done},
+        updated_at = now()
+    WHERE id = ${milestoneId}`;
+  const after = await db`
+    SELECT * FROM valuecreation.initiative_milestones WHERE id = ${milestoneId}`;
+  return rowToMilestone(after[0] as Record<string, unknown>);
+}
+
+export async function deleteMilestone(
+  milestoneId: string,
+  actor: string
+): Promise<boolean> {
+  void actor;
+  await ensureValueCreation();
+  const db = sql();
+  const rows = await db`
+    UPDATE valuecreation.initiative_milestones
+    SET deleted_at = now(), updated_at = now()
+    WHERE id = ${milestoneId} AND deleted_at IS NULL RETURNING id`;
+  return rows.length > 0;
+}
+
+/* -------------------------- initiative comments ------------------------- */
+
+export interface CommentRow {
+  id: string;
+  initiativeId: string;
+  author: string;
+  body: string;
+  mentions: string[];
+  createdAt: string;
+}
+
+function rowToComment(r: Record<string, unknown>): CommentRow {
+  return {
+    id: str(r.id),
+    initiativeId: str(r.initiative_id),
+    author: str(r.author),
+    body: str(r.body),
+    mentions: jsonArr<string>(r.mentions),
+    createdAt: isoOrNull(r.created_at) ?? "",
+  };
+}
+
+/** Extract @Name mention tokens (display + storage; no delivery). */
+export function parseMentions(body: string): string[] {
+  const out: string[] = [];
+  const re = /@([A-Z][A-Za-z]+(?:[ .'-][A-Za-z]+){0,3})/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    const name = m[1].trim();
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out.slice(0, 12);
+}
+
+export async function listComments(
+  initiativeId: string
+): Promise<CommentRow[]> {
+  await ensureValueCreation();
+  await requireInitiative(initiativeId);
+  const db = sql();
+  const rows = await db`
+    SELECT * FROM valuecreation.initiative_comments
+    WHERE initiative_id = ${initiativeId} AND deleted_at IS NULL
+    ORDER BY created_at ASC`;
+  return rows.map((r) => rowToComment(r as Record<string, unknown>));
+}
+
+export async function createComment(
+  initiativeId: string,
+  input: { body?: string },
+  actor: string
+): Promise<CommentRow> {
+  await ensureValueCreation();
+  await requireInitiative(initiativeId);
+  const body = (input.body ?? "").trim();
+  if (!body) throw new VcError("comment_required");
+  const db = sql();
+  const id = `vcc_${newId()}`;
+  await db`
+    INSERT INTO valuecreation.initiative_comments
+      (id, initiative_id, author, body, mentions)
+    VALUES (${id}, ${initiativeId}, ${actor}, ${body},
+      ${JSON.stringify(parseMentions(body))}::jsonb)`;
+  const rows = await db`
+    SELECT * FROM valuecreation.initiative_comments WHERE id = ${id}`;
+  return rowToComment(rows[0] as Record<string, unknown>);
+}
+
+export async function deleteComment(
+  commentId: string,
+  actor: string
+): Promise<boolean> {
+  void actor;
+  await ensureValueCreation();
+  const db = sql();
+  const rows = await db`
+    UPDATE valuecreation.initiative_comments
+    SET deleted_at = now()
+    WHERE id = ${commentId} AND deleted_at IS NULL RETURNING id`;
+  return rows.length > 0;
+}
+
+/* --------------------------- initiative links --------------------------- */
+
+export interface LinkRow {
+  id: string;
+  initiativeId: string;
+  kind: string; // url | room | library | process_map
+  refId: string | null;
+  label: string;
+  url: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+function rowToLink(r: Record<string, unknown>): LinkRow {
+  return {
+    id: str(r.id),
+    initiativeId: str(r.initiative_id),
+    kind: str(r.kind) || "url",
+    refId: r.ref_id ? str(r.ref_id) : null,
+    label: str(r.label),
+    url: str(r.url),
+    createdBy: str(r.created_by),
+    createdAt: isoOrNull(r.created_at) ?? "",
+  };
+}
+
+export async function listLinks(initiativeId: string): Promise<LinkRow[]> {
+  await ensureValueCreation();
+  await requireInitiative(initiativeId);
+  const db = sql();
+  const rows = await db`
+    SELECT * FROM valuecreation.initiative_links
+    WHERE initiative_id = ${initiativeId} AND deleted_at IS NULL
+    ORDER BY created_at ASC`;
+  return rows.map((r) => rowToLink(r as Record<string, unknown>));
+}
+
+export async function createLink(
+  initiativeId: string,
+  input: {
+    kind?: string;
+    refId?: string | null;
+    label?: string;
+    url?: string;
+  },
+  actor: string
+): Promise<LinkRow> {
+  await ensureValueCreation();
+  await requireInitiative(initiativeId);
+  const label = (input.label ?? "").trim();
+  if (!label) throw new VcError("label_required");
+  const kind = ["url", "room", "library", "process_map"].includes(
+    input.kind ?? ""
+  )
+    ? (input.kind as string)
+    : "url";
+  const db = sql();
+  const id = `vcl_${newId()}`;
+  await db`
+    INSERT INTO valuecreation.initiative_links
+      (id, initiative_id, kind, ref_id, label, url, created_by)
+    VALUES (${id}, ${initiativeId}, ${kind}, ${input.refId ?? null},
+      ${label}, ${(input.url ?? "").trim()}, ${actor})`;
+  const rows = await db`
+    SELECT * FROM valuecreation.initiative_links WHERE id = ${id}`;
+  return rowToLink(rows[0] as Record<string, unknown>);
+}
+
+export async function deleteLink(
+  linkId: string,
+  actor: string
+): Promise<boolean> {
+  void actor;
+  await ensureValueCreation();
+  const db = sql();
+  const rows = await db`
+    UPDATE valuecreation.initiative_links
+    SET deleted_at = now()
+    WHERE id = ${linkId} AND deleted_at IS NULL RETURNING id`;
+  return rows.length > 0;
+}
+
+/* ------------------------- baseline snapshots (§8) ---------------------- */
+
+export interface BaselineRow {
+  id: string;
+  planId: string;
+  version: number;
+  lockedBy: string;
+  lockedAt: string;
+  note: string;
+  baselineEbitda: number | null;
+  targetEbitda: number | null;
+  totals: Record<string, unknown>;
+  initiatives: Array<Record<string, unknown>>;
+  supersededAt: string | null;
+}
+
+function rowToBaseline(r: Record<string, unknown>): BaselineRow {
+  return {
+    id: str(r.id),
+    planId: str(r.plan_id),
+    version: num(r.version),
+    lockedBy: str(r.locked_by),
+    lockedAt: isoOrNull(r.locked_at) ?? "",
+    note: str(r.note),
+    baselineEbitda: numOrNull(r.baseline_ebitda),
+    targetEbitda: numOrNull(r.target_ebitda),
+    totals: jsonObj(r.totals),
+    initiatives: jsonArr<Record<string, unknown>>(r.initiatives),
+    supersededAt: isoOrNull(r.superseded_at),
+  };
+}
+
+export interface BaselineState {
+  /** The live (non-superseded) snapshot, or null when never locked. */
+  current: BaselineRow | null;
+  versions: BaselineRow[];
+  /** Current stored totals vs the snapshot's, when locked. */
+  variance: {
+    impactUnweighted: number;
+    impactWeighted: number;
+    totalOneTimeCost: number;
+    totalRecurringCost: number;
+    openInitiatives: number;
+    initiativeCount: number;
+  } | null;
+}
+
+export async function getBaselineState(
+  planId: string
+): Promise<BaselineState> {
+  await ensureValueCreation();
+  await requirePlan(planId);
+  const db = sql();
+  const rows = await db`
+    SELECT * FROM valuecreation.plan_baselines
+    WHERE plan_id = ${planId} ORDER BY version DESC`;
+  const versions = rows.map((r) => rowToBaseline(r as Record<string, unknown>));
+  const current = versions.find((v) => !v.supersededAt) ?? null;
+  let variance: BaselineState["variance"] = null;
+  if (current) {
+    const summary = await getPlanSummary(planId);
+    const t = current.totals as Record<string, unknown>;
+    const snapCount = Array.isArray(current.initiatives)
+      ? current.initiatives.length
+      : 0;
+    const curCount = summary
+      ? Object.values(summary.initiativeCounts).reduce((a, b) => a + b, 0)
+      : 0;
+    variance = {
+      impactUnweighted:
+        (summary?.impactUnweighted ?? 0) - (numOrNull(t.impactUnweighted) ?? 0),
+      impactWeighted:
+        (summary?.impactWeighted ?? 0) - (numOrNull(t.impactWeighted) ?? 0),
+      totalOneTimeCost:
+        (summary?.totalOneTimeCost ?? 0) - (numOrNull(t.totalOneTimeCost) ?? 0),
+      totalRecurringCost:
+        (summary?.totalRecurringCost ?? 0) -
+        (numOrNull(t.totalRecurringCost) ?? 0),
+      openInitiatives:
+        (summary?.openInitiatives ?? 0) - (numOrNull(t.openInitiatives) ?? 0),
+      initiativeCount: curCount - snapCount,
+    };
+  }
+  return { current, versions, variance };
+}
+
+/**
+ * Lock a baseline snapshot at close. The snapshot copies the plan's
+ * baseline/target, the stored plan_summary totals, and the full
+ * initiative set as of locking. Prior live snapshots are superseded,
+ * never edited; snapshot rows are immutable once written.
+ */
+export async function lockBaseline(
+  planId: string,
+  input: { note?: string },
+  actor: string
+): Promise<BaselineRow> {
+  await ensureValueCreation();
+  const plan = await requirePlan(planId);
+  const summary = await refreshPlanSummary(planId);
+  const initiatives = await listInitiatives(planId);
+  const db = sql();
+  const maxRows = await db`
+    SELECT coalesce(max(version), 0)::int AS m
+    FROM valuecreation.plan_baselines WHERE plan_id = ${planId}`;
+  const version = num((maxRows[0] as Record<string, unknown>).m) + 1;
+  await db`
+    UPDATE valuecreation.plan_baselines
+    SET superseded_at = now()
+    WHERE plan_id = ${planId} AND superseded_at IS NULL`;
+  const id = `vcb_${newId()}`;
+  const totals = {
+    initiativeCounts: summary.initiativeCounts,
+    openInitiatives: summary.openInitiatives,
+    totalOneTimeCost: summary.totalOneTimeCost,
+    totalRecurringCost: summary.totalRecurringCost,
+    impactUnweighted: summary.impactUnweighted,
+    impactWeighted: summary.impactWeighted,
+    exitOverall: summary.exitOverall,
+  };
+  const snapshot = initiatives.map((i) => ({
+    id: i.id,
+    title: i.title,
+    category: i.category,
+    status: i.status,
+    ownerName: i.ownerName,
+    startDate: i.startDate,
+    endDate: i.endDate,
+    oneTimeCost: i.oneTimeCost,
+    recurringCost: i.recurringCost,
+    ebitdaImpact: i.ebitdaImpact,
+    confidence: i.confidence,
+    effort: i.effort,
+    sourceKind: i.sourceKind,
+  }));
+  await db`
+    INSERT INTO valuecreation.plan_baselines
+      (id, plan_id, version, locked_by, note, baseline_ebitda,
+       target_ebitda, totals, initiatives)
+    VALUES (${id}, ${planId}, ${version}, ${actor},
+      ${(input.note ?? "").trim()}, ${plan.baselineEbitda},
+      ${plan.targetEbitda}, ${JSON.stringify(totals)}::jsonb,
+      ${JSON.stringify(snapshot)}::jsonb)`;
+  const rows = await db`
+    SELECT * FROM valuecreation.plan_baselines WHERE id = ${id}`;
+  return rowToBaseline(rows[0] as Record<string, unknown>);
+}
+
+/* --------------------- diligence finding import (§5/§6) ------------------ */
+
+export interface FindingCandidate {
+  workspaceId: string;
+  dealId: string;
+  findingId: string;
+  title: string;
+  detail: string;
+  category: string;
+  severity: string;
+  status: string;
+  proposedTermType: string;
+  alreadyConverted: boolean;
+}
+
+/** Deal ids for the plan's company (core reference read, same
+ *  precedent as listRemediationCandidates). */
+async function dealIdsForCompany(companyId: string): Promise<string[]> {
+  const db = sql();
+  const ids = new Set<string>();
+  const dealRows = await db`
+    SELECT id FROM core.deals WHERE company_id = ${companyId}`;
+  for (const r of dealRows) ids.add(str((r as Record<string, unknown>).id));
+  const compRows = await db`
+    SELECT legacy_deal_id FROM core.companies WHERE id = ${companyId} LIMIT 1`;
+  if (compRows.length) {
+    const legacy = (compRows[0] as Record<string, unknown>).legacy_deal_id;
+    if (legacy) ids.add(str(legacy));
+  }
+  return Array.from(ids);
+}
+
+export async function listFindingCandidates(
+  planId: string
+): Promise<FindingCandidate[]> {
+  const plan = await requirePlan(planId);
+  const db = sql();
+  const convertedRows = await db`
+    SELECT source_ref FROM valuecreation.initiatives
+    WHERE plan_id = ${planId} AND deleted_at IS NULL
+      AND source_kind = 'finding'`;
+  const converted = new Set<string>();
+  for (const r of convertedRows) {
+    const ref = jsonObj((r as Record<string, unknown>).source_ref);
+    if (ref.findingId) converted.add(str(ref.findingId));
+  }
+  const out: FindingCandidate[] = [];
+  for (const dealId of await dealIdsForCompany(plan.companyId)) {
+    const ws = await getWorkspaceByDeal(dealId).catch(() => null);
+    if (!ws) continue;
+    const findings = await listFindings(ws.id).catch(() => []);
+    for (const f of findings) {
+      out.push({
+        workspaceId: ws.id,
+        dealId,
+        findingId: f.id,
+        title: f.title,
+        detail: f.detail,
+        category: f.category,
+        severity: f.severity,
+        status: f.status,
+        proposedTermType: f.proposedTermType,
+        alreadyConverted: converted.has(f.id),
+      });
+    }
+  }
+  return out;
+}
+
+export async function convertFinding(
+  planId: string,
+  input: {
+    workspaceId: string;
+    findingId: string;
+    ownerName?: string;
+    dueDate?: string | null;
+  },
+  actor: string
+): Promise<InitiativeRow> {
+  await requirePlan(planId);
+  const findings = await listFindings(input.workspaceId).catch(() => null);
+  if (!findings) throw new VcError("finding_not_found");
+  const finding = findings.find((f) => f.id === input.findingId);
+  if (!finding) throw new VcError("finding_not_found");
+  const existing = await listFindingCandidates(planId);
+  const cand = existing.find((c) => c.findingId === input.findingId);
+  if (cand?.alreadyConverted) throw new VcError("already_converted");
+  const detailParts = [finding.detail];
+  if (finding.proposedTermDetail) {
+    detailParts.push(
+      `Proposed term (${finding.proposedTermType}): ${finding.proposedTermDetail}`
+    );
+  }
+  return createInitiative(
+    planId,
+    {
+      title: finding.title,
+      description: detailParts.filter(Boolean).join("\n\n"),
+      category: finding.category || "diligence",
+      status: "planned",
+      ownerName: input.ownerName ?? "",
+      endDate: input.dueDate ?? null,
+      ebitdaImpact: null,
+      confidence: 1,
+      effort: 3,
+      sourceKind: "finding",
+      sourceRef: {
+        workspaceId: input.workspaceId,
+        dealId: cand?.dealId ?? "",
+        findingId: finding.id,
+        severity: finding.severity,
+        proposedTermType: finding.proposedTermType,
+      },
+    },
+    actor
+  );
+}
+
+/* --------------------------- overview (§4) ------------------------------ */
+
+/** The company's vertical (industry tag) — core reference read. */
+export async function getCompanyVertical(
+  companyId: string
+): Promise<string> {
+  await ensureValueCreation();
+  const db = sql();
+  const rows = await db`
+    SELECT vertical FROM core.companies WHERE id = ${companyId} LIMIT 1`;
+  return rows.length ? str((rows[0] as Record<string, unknown>).vertical) : "";
+}
+
+export interface OverviewMilestone {
+  initiativeId: string;
+  initiativeTitle: string;
+  milestoneId: string;
+  title: string;
+  dueDate: string | null;
+  done: boolean;
+}
+
+export interface PlanOverview {
+  plan: PlanRow;
+  companyVertical: string;
+  summary: PlanSummaryRow | null;
+  baseline: BaselineState;
+  defaultScenario: {
+    id: string;
+    name: string;
+    bridge: Record<string, unknown> | null;
+    assumptions: Record<string, unknown>;
+  } | null;
+  scenarios: Array<{
+    id: string;
+    name: string;
+    isDefault: boolean;
+    totals: Record<string, unknown> | null;
+  }>;
+  atRisk: InitiativeRow[];
+  nextMilestones: OverviewMilestone[];
+  leverImpacts: Array<{
+    lever: string;
+    impact: number;
+    weightedImpact: number;
+    count: number;
+  }>;
+  activity: Array<{
+    id: string;
+    kind: string;
+    actor: string;
+    message: string;
+    createdAt: string;
+  }>;
+  monitoring: {
+    hasMonitoring: boolean;
+    monitoringUrl: string;
+    actualEbitda: number | null;
+    latestPeriodEnd: string | null;
+    realizedImpact: number | null;
+    baselineUsed: number | null;
+  };
+}
+
+/**
+ * Composed Overview read (§4 + §8). Everything comes from stored
+ * state or service layers: plan_summary (stored), the baseline
+ * snapshot (stored), scenario bridge snapshots (stored), the
+ * platform activity timeline (service), and Portfolio Monitoring's
+ * per-company summary (service — the deal_closed handoff layer).
+ * Nothing recomputes rollups here.
+ */
+export async function getPlanOverview(
+  planId: string
+): Promise<PlanOverview> {
+  const plan = await requirePlan(planId);
+  const db = sql();
+  const [summary, baseline, vertical, initiatives] = await Promise.all([
+    getPlanSummary(planId),
+    getBaselineState(planId),
+    getCompanyVertical(plan.companyId),
+    listInitiatives(planId),
+  ]);
+
+  /* Scenarios via dynamic import (scenarios.ts imports this module). */
+  let defaultScenario: PlanOverview["defaultScenario"] = null;
+  let scenarioMetas: PlanOverview["scenarios"] = [];
+  try {
+    const { listScenarios, getScenario } = await import("./scenarios");
+    const list = await listScenarios(planId);
+    scenarioMetas = list.map((s) => ({
+      id: s.id,
+      name: s.name,
+      isDefault: s.isDefault,
+      totals: (s.totals ?? null) as unknown as Record<string, unknown> | null,
+    }));
+    const def = list.find((s) => s.isDefault) ?? list[0];
+    if (def) {
+      const full = await getScenario(def.id).catch(() => null);
+      defaultScenario = {
+        id: def.id,
+        name: def.name,
+        bridge: (full?.bridge ?? null) as unknown as Record<
+          string,
+          unknown
+        > | null,
+        assumptions: (full?.assumptions ?? {}) as unknown as Record<
+          string,
+          unknown
+        >,
+      };
+    }
+  } catch {
+    /* scenarios unavailable — overview still renders */
+  }
+
+  const atRisk = initiatives.filter(
+    (i) => i.status === "at_risk" || i.status === "deferred"
+  );
+
+  /* Next milestones: incomplete, dated, soonest first (top 8), plus
+     undated incomplete milestones after dated ones. */
+  const msRows = initiatives.length
+    ? await db`
+        SELECT m.*, i.title AS initiative_title
+        FROM valuecreation.initiative_milestones m
+        JOIN valuecreation.initiatives i ON i.id = m.initiative_id
+        WHERE i.plan_id = ${planId} AND m.deleted_at IS NULL
+          AND i.deleted_at IS NULL AND m.done = false
+        ORDER BY m.due_date ASC NULLS LAST, m.created_at ASC
+        LIMIT 8`
+    : [];
+  const nextMilestones: OverviewMilestone[] = msRows.map((r) => {
+    const rec = r as Record<string, unknown>;
+    return {
+      initiativeId: str(rec.initiative_id),
+      initiativeTitle: str(rec.initiative_title),
+      milestoneId: str(rec.id),
+      title: str(rec.title),
+      dueDate: dateOrNull(rec.due_date),
+      done: Boolean(rec.done),
+    };
+  });
+
+  /* Impact by lever (category) over the loaded initiative rows. */
+  const leverMap = new Map<
+    string,
+    { impact: number; weightedImpact: number; count: number }
+  >();
+  for (const i of initiatives) {
+    if (i.status === "deferred") continue;
+    const lever = i.category || "general";
+    const cur = leverMap.get(lever) ?? {
+      impact: 0,
+      weightedImpact: 0,
+      count: 0,
+    };
+    const impact = i.ebitdaImpact ?? 0;
+    cur.impact += impact;
+    cur.weightedImpact += impact * (i.confidence ?? 1);
+    cur.count += 1;
+    leverMap.set(lever, cur);
+  }
+  const leverImpacts = Array.from(leverMap.entries())
+    .map(([lever, v]) => ({ lever, ...v }))
+    .sort((a, b) => b.impact - a.impact);
+
+  /* Recent activity via the platform service timeline (stored log). */
+  let activity: PlanOverview["activity"] = [];
+  try {
+    const { getCompanyDetail } = await import("../platform/service");
+    const detail = await getCompanyDetail(plan.companyId).catch(() => null);
+    const timeline = (detail?.timeline ?? []) as unknown as Array<
+      Record<string, unknown>
+    >;
+    activity = timeline
+      .filter((t) =>
+        [
+          "initiative_updated",
+          "initiative_created",
+          "plan_created",
+          "deal_closed",
+        ].includes(str(t.kind)) || str(t.message).length > 0
+      )
+      .slice(0, 12)
+      .map((t) => ({
+        id: str(t.id),
+        kind: str(t.kind),
+        actor: str(t.actor),
+        message: str(t.message),
+        createdAt: str(t.at ?? t.createdAt),
+      }));
+  } catch {
+    /* activity is decorative — never break the overview */
+  }
+
+  /* Realized vs planned via Portfolio Monitoring's service only. */
+  let monitoring: PlanOverview["monitoring"] = {
+    hasMonitoring: false,
+    monitoringUrl: `/portfolio-monitoring/${encodeURIComponent(plan.companyId)}`,
+    actualEbitda: null,
+    latestPeriodEnd: null,
+    realizedImpact: null,
+    baselineUsed: null,
+  };
+  try {
+    const { getMonitoringSummaryForCompany } = await import(
+      "../monitoring/service"
+    );
+    const mon = await getMonitoringSummaryForCompany(plan.companyId).catch(
+      () => null
+    );
+    if (mon) {
+      const baselineUsed =
+        baseline.current?.baselineEbitda ??
+        plan.baselineEbitda ??
+        (defaultScenario?.bridge
+          ? numOrNull(
+              (defaultScenario.bridge as Record<string, unknown>).baseEbitda
+            )
+          : null);
+      const actualEbitda = mon.kpis?.ebitda ?? null;
+      monitoring = {
+        hasMonitoring: true,
+        monitoringUrl: monitoring.monitoringUrl,
+        actualEbitda,
+        latestPeriodEnd: mon.latestPeriodEnd ?? null,
+        realizedImpact:
+          actualEbitda !== null && baselineUsed !== null
+            ? actualEbitda - baselineUsed
+            : null,
+        baselineUsed,
+      };
+    }
+  } catch {
+    /* monitoring not present for this company — planned-only view */
+  }
+
+  return {
+    plan,
+    companyVertical: vertical,
+    summary,
+    baseline,
+    defaultScenario,
+    scenarios: scenarioMetas,
+    atRisk,
+    nextMilestones,
+    leverImpacts,
+    activity,
+    monitoring,
   };
 }
