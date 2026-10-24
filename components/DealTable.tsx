@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { Deal, Executive, MiMultiple } from "@/lib/types";
 import { fmtMoney, uniqueStrings } from "@/lib/format";
-import { dealFocusSector, estimateMultiple, isFocusDeal, resolveDealValue, type MarketRates } from "@/lib/valuation";
+import { dealFocusSector, estimateMultiple, resolveDealValue, type MarketRates } from "@/lib/valuation";
 import CompanyLogo from "@/components/CompanyLogo";
 import SectorChip, { SectorLegend, StageChip } from "@/components/SectorChip";
 import {
@@ -192,9 +192,6 @@ export default function DealTable({
       d.industry ? (
         <span className="inline-flex items-center gap-1.5">
           <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
-          {!isFocusDeal(d.industry) && (
-            <span className="badge badge-neutral">Non-focus</span>
-          )}
         </span>
       ) : (
         "—"
@@ -261,11 +258,6 @@ export default function DealTable({
             {est.headlineLow.toFixed(1) === est.headlineHigh.toFixed(1)
               ? `${est.headlineLow.toFixed(1)}×`
               : `${est.headlineLow.toFixed(1)}–${est.headlineHigh.toFixed(1)}×`}
-          </span>
-          <span className="block text-[11px] text-slate-400 dark:text-white/40">
-            headline · eff. {est.effLow.toFixed(1) === est.effHigh.toFixed(1)
-              ? `${est.effLow.toFixed(1)}×`
-              : `${est.effLow.toFixed(1)}–${est.effHigh.toFixed(1)}×`}{est.structureAssumed ? " · typ. structure" : ""} · {est.gapEffectiveX >= 0 ? "+" : "−"}{Math.abs(est.gapEffectiveX).toFixed(1)} vs mkt est
           </span>
         </span>
       );
@@ -537,11 +529,6 @@ export default function DealTable({
             <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
               {d.industry && (
                 <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
-              )}
-              {!isFocusDeal(d.industry) && d.industry && (
-                <span className="inline-block rounded-full bg-slate-100 px-1.5 py-px text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-white/50">
-                  Non-focus
-                </span>
               )}
               <StageChip stage={d.stage} />
               <TypeBadge type={d.investmentType} />
