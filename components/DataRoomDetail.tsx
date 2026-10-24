@@ -16,6 +16,9 @@ interface RoomRow {
   provider: string;
   status: string;
   domainAllowlist: string[];
+  usPersonsOnly?: boolean;
+  restrictedAccess?: boolean;
+  industry?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -494,6 +497,20 @@ export default function DataRoomDetail({ roomId }: { roomId: string }) {
             <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
               Storage: {provider?.provider || room.provider} · Status: {room.status} · Created {room.createdAt ? fmtDate(room.createdAt) : "—"}
             </p>
+            {(room.usPersonsOnly || room.restrictedAccess) && (
+              <p className="mt-2 flex flex-wrap gap-1.5">
+                {room.usPersonsOnly && (
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700 dark:bg-red-500/20 dark:text-red-200">
+                    U.S. persons only
+                  </span>
+                )}
+                {room.restrictedAccess && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                    Restricted access — approved parties only
+                  </span>
+                )}
+              </p>
+            )}
             {headerMsg && <p className="mt-2 text-xs text-slate-500 dark:text-white/60">{headerMsg}</p>}
           </div>
           <Button variant="secondary" onClick={() => void toggleStatus()} className="min-h-[44px]">
@@ -510,6 +527,32 @@ export default function DataRoomDetail({ roomId }: { roomId: string }) {
             </Button>
           </div>
           <p className="mt-1 text-xs text-slate-400 dark:text-white/40">Leave empty to allow any guest email domain. Guests must still use their one-time link.</p>
+        </div>
+
+        <div className="mt-5 border-t border-slate-100 pt-4 dark:border-white/5">
+          <p className={labelCls}>Export controls</p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={room.usPersonsOnly ? "primary" : "secondary"}
+              onClick={() => void patchRoom({ usPersonsOnly: !room.usPersonsOnly }).catch(() => setHeaderMsg("Could not save export controls."))}
+              className="min-h-[44px]"
+            >
+              {room.usPersonsOnly ? "✓ " : ""}U.S. persons only
+            </Button>
+            <Button
+              variant={room.restrictedAccess ? "primary" : "secondary"}
+              onClick={() => void patchRoom({ restrictedAccess: !room.restrictedAccess }).catch(() => setHeaderMsg("Could not save export controls."))}
+              className="min-h-[44px]"
+            >
+              {room.restrictedAccess ? "✓ " : ""}Restricted access
+            </Button>
+          </div>
+          <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
+            Flagged rooms log every access — internal views included.
+            Restricted rooms refuse guest invites to anyone who is not
+            an approved party (a Directory contact, a portal login, or
+            an allowlisted domain).
+          </p>
         </div>
       </section>
 
@@ -564,7 +607,16 @@ export default function DataRoomDetail({ roomId }: { roomId: string }) {
             ))}
           </select>
           <div className="mt-3">
-            <DocumentUploader roomId={roomId} folderId={uploadFolderId || undefined} onUploaded={() => void loadDetail()} />
+            <DocumentUploader
+              roomId={roomId}
+              folderId={uploadFolderId || undefined}
+              onUploaded={() => void loadDetail()}
+              exportWarning={
+                room.industry === "Aerospace & Defense"
+                  ? "Aerospace & Defense room — do not upload ITAR-, EAR-, or CUI-controlled documents unless export controls are confirmed for everyone with access to this room."
+                  : undefined
+              }
+            />
           </div>
         </div>
 
