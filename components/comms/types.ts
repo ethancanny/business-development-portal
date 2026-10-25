@@ -298,6 +298,31 @@ export interface CheckIssue {
   message: string;
   blockKey?: string;
 }
+
+/* ------------- report redesign: presentation + meta --------------- */
+
+/** Type-only re-exports — the presentation model and the guest meta
+ * contract live in lib (pure modules); components consume the types
+ * from here per the module's mirror convention. */
+export type {
+  ReportGuestMeta,
+  ReportSubjectMark,
+} from "@/lib/comms/types";
+export type {
+  PresentModel,
+  PresentSection,
+  PresentTile,
+  PresentTakeaway,
+  HiddenSection,
+} from "@/lib/comms/present";
+
+/** Sender contact settings (report-settings route). */
+export interface ReportContactSettings {
+  senderName: string;
+  senderEmail: string;
+  senderPhone: string;
+  schedulingUrl: string;
+}
 export interface CheckResult {
   blocked: CheckIssue[];
   flagged: CheckIssue[];

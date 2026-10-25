@@ -13,6 +13,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Button, ErrorState, SkeletonRows } from "@/components/ui";
 import ReportView from "@/components/comms/ReportView";
+import ReportDocument from "@/components/comms/ReportDocument";
+import {
+  buildPresentModel,
+  previewWarnings,
+} from "@/lib/comms/present";
+import type { ReportRender as LibReportRender } from "@/lib/comms/types";
+import type { ReportGuestMeta } from "@/components/comms/types";
 import SendDialog from "@/components/comms/SendDialog";
 import ConfirmDealDialog from "@/components/identity/ConfirmDealDialog";
 import SigningActions from "@/components/signing/EnvelopeStatus";
@@ -63,6 +70,9 @@ export default function ReportDetail({ reportId }: { reportId: string }) {
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [showSend, setShowSend] = useState(false);
+  const [previewTab, setPreviewTab] = useState<"recipient" | "internal">(
+    "recipient"
+  );
   /** Wrong-deal protection (Deal Identity, Oct 24, 2026): deal/company
    *  reports pass through ConfirmDealDialog before the Send dialog. */
   const [confirmSend, setConfirmSend] = useState<{
@@ -347,16 +357,48 @@ export default function ReportDetail({ reportId }: { reportId: string }) {
         />
       )}
 
-      {/* Internal full render */}
-      <section className="card-surface mt-5 p-5" aria-label="Report preview (internal)">
-        <p className="micro-label mb-3">Internal view — all blocks, including internal-only</p>
-        {render ? (
-          <ReportView render={render} />
-        ) : (
+      {/* Preview — recipient view (exactly what recipients see, via
+          the same audience filter + presentation model) with sender
+          warnings, and the internal full view. */}
+      <section className="card-surface mt-5 p-5" aria-label="Report preview">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <p className="micro-label">Preview</p>
+          <div className="ml-auto flex gap-1.5" role="tablist" aria-label="Preview mode">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={previewTab === "recipient"}
+              className={`btn btn-sm min-h-[36px] ${previewTab === "recipient" ? "btn-primary" : "btn-secondary"}`}
+              onClick={() => setPreviewTab("recipient")}
+            >
+              Recipient view
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={previewTab === "internal"}
+              className={`btn btn-sm min-h-[36px] ${previewTab === "internal" ? "btn-primary" : "btn-secondary"}`}
+              onClick={() => setPreviewTab("internal")}
+            >
+              Internal view
+            </button>
+          </div>
+        </div>
+        {!render ? (
           <p className="text-sm text-slate-500 dark:text-white/50">
             Not generated yet. Use Generate above — assembly pulls the
             live figures for this subject.
           </p>
+        ) : previewTab === "internal" ? (
+          <ReportView render={render} />
+        ) : (
+          <RecipientPreview
+            reportId={reportId}
+            report={report}
+            deliveries={deliveries}
+            internalRender={render}
+            unreviewed={unreviewed}
+          />
         )}
       </section>
 
@@ -1057,5 +1099,148 @@ function ThreadsPanel({ reportId }: { reportId: string }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/* ------------------------- recipient preview ------------------------ */
+
+/**
+ * The sender's recipient preview (spec §9): the document EXACTLY as
+ * a recipient sees it — the preview endpoint applies the same
+ * audience filter as the guest GET and returns the same meta — plus
+ * the warnings a recipient never sees (missing sections, unreviewed
+ * figures, audience exclusions), computed from the internal render
+ * through the shared presentation model.
+ */
+function RecipientPreview({
+  reportId,
+  report,
+  deliveries,
+  internalRender,
+  unreviewed,
+}: {
+  reportId: string;
+  report: CommsReport;
+  deliveries: CommsDelivery[];
+  internalRender: ReportRender;
+  unreviewed: boolean;
+}) {
+  const r = report as Rec;
+  const purpose = str(pick(r, "purpose"));
+  const audience = str(pick(r, "audience")) || "internal";
+
+  const recipientOptions = useMemo(() => {
+    const seen = new Map<
+      string,
+      { personId: string; name: string; email: string }
+    >();
+    for (const d of deliveries) {
+      const rec = d as Rec;
+      const email = str(pick(rec, "recipientEmail", "recipient_email"));
+      if (!email || seen.has(email)) continue;
+      seen.set(email, {
+        personId: str(pick(rec, "recipientPersonId", "recipient_person_id")),
+        name: str(pick(rec, "recipientName", "recipient_name")),
+        email,
+      });
+    }
+    return Array.from(seen.values());
+  }, [deliveries]);
+
+  const [personId, setPersonId] = useState("");
+  const [data, setData] = useState<{
+    render: ReportRender;
+    meta: ReportGuestMeta | null;
+  } | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const qs = new URLSearchParams();
+        qs.set("audience", audience);
+        if (personId) qs.set("personId", personId);
+        const res = await api<Record<string, unknown>>(
+          `${COMMS_API}/reports/${encodeURIComponent(reportId)}/preview?${qs.toString()}`
+        );
+        if (!live) return;
+        setData({
+          render: res.render as ReportRender,
+          meta: (res.meta as ReportGuestMeta | undefined) ?? null,
+        });
+        setFailed(false);
+      } catch {
+        if (live) setFailed(true);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [reportId, audience, personId]);
+
+  const warnings = useMemo(() => {
+    const model = buildPresentModel(
+      internalRender as unknown as LibReportRender,
+      { purpose, internal: true }
+    );
+    return previewWarnings(model, { hasUnreviewed: unreviewed });
+  }, [internalRender, purpose, unreviewed]);
+
+  return (
+    <div>
+      {recipientOptions.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-end gap-2">
+          <div>
+            <label className={labelCls} htmlFor="preview-recipient">
+              Preview as recipient
+            </label>
+            <select
+              id="preview-recipient"
+              className={`${selectCls} min-h-[40px] w-auto`}
+              value={personId}
+              onChange={(e) => setPersonId(e.target.value)}
+            >
+              <option value="">Generic {audience} recipient</option>
+              {recipientOptions.map((o) => (
+                <option key={o.email} value={o.personId}>
+                  {o.name || o.email} ({o.email})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div className="mb-4 space-y-1.5" role="note" aria-label="Preview warnings">
+          {warnings.map((w, i) => (
+            <p
+              key={i}
+              className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-800 ring-1 ring-inset ring-amber-500/25 dark:text-amber-200"
+            >
+              <span className="font-bold">Preview only — </span>
+              {w}
+            </p>
+          ))}
+        </div>
+      )}
+      {failed ? (
+        <p className="text-sm text-slate-500 dark:text-white/50">
+          The recipient preview could not be loaded. The internal view
+          above still shows the full render.
+        </p>
+      ) : !data ? (
+        <p className="text-sm text-slate-500 dark:text-white/50">
+          Loading recipient preview…
+        </p>
+      ) : (
+        <ReportDocument
+          render={data.render}
+          meta={data.meta}
+          mode="preview"
+          purpose={purpose || undefined}
+        />
+      )}
+    </div>
   );
 }
