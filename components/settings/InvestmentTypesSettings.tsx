@@ -24,6 +24,34 @@ import type {
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-[#b8975a] focus:outline-none dark:border-white/15 dark:bg-[#0d1f3c] dark:text-[#e8dfc8]";
 
+/**
+ * Metric-fields grouping (Oct 24, 2026): the ~53 definitions render
+ * grouped by their form section key, collapsed by default, so the
+ * card opens compact. SECTION_ORDER is the display order of the
+ * known keys; SECTION_LABELS maps them to readable names (any key
+ * not listed falls back to the raw key).
+ */
+const SECTION_ORDER = [
+  "lbo_metrics",
+  "addon_metrics",
+  "round",
+  "traction",
+  "team_market",
+  "investors_es",
+  "es_basics",
+  "sector_pack",
+];
+const SECTION_LABELS: Record<string, string> = {
+  lbo_metrics: "LBO metrics",
+  addon_metrics: "Add-on metrics",
+  round: "Round",
+  traction: "Traction",
+  team_market: "Team & market",
+  investors_es: "Investors (early stage)",
+  es_basics: "Early stage basics",
+  sector_pack: "Sector pack",
+};
+
 export default function InvestmentTypesSettings() {
   const [cfg, setCfg] = useState<BdConfig | null>(null);
   const [failed, setFailed] = useState(false);
@@ -31,6 +59,11 @@ export default function InvestmentTypesSettings() {
   const [note, setNote] = useState("");
   const [stageDrafts, setStageDrafts] = useState<Record<string, string>>({});
   const [sectionDrafts, setSectionDrafts] = useState<Record<string, string>>({});
+  // Which metric-field section groups are expanded. All groups start
+  // collapsed; keyed by section key ("" = no section set).
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(
+    {}
+  );
 
   useEffect(() => {
     fetch("/api/platform/investment-types/bootstrap")
@@ -143,6 +176,30 @@ export default function InvestmentTypesSettings() {
         : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-white/50"
     }`;
 
+  // Group definitions by their SAVED section key, so a field moves
+  // groups only when its new section is saved (matching how the
+  // config PUT already worked) — never mid-typing in the row input.
+  const sectionRank = (key: string) => {
+    if (key === "") return SECTION_ORDER.length + 1;
+    const i = SECTION_ORDER.indexOf(key);
+    return i === -1 ? SECTION_ORDER.length : i;
+  };
+  const metricGroups: { key: string; defs: BdMetricDefinition[] }[] = [];
+  for (const d of cfg.definitions) {
+    const key = (d.config.section ?? "").trim();
+    let group = metricGroups.find((g) => g.key === key);
+    if (!group) {
+      group = { key, defs: [] };
+      metricGroups.push(group);
+    }
+    group.defs.push(d);
+  }
+  metricGroups.sort(
+    (a, b) => sectionRank(a.key) - sectionRank(b.key) || a.key.localeCompare(b.key)
+  );
+  const sectionLabel = (key: string) =>
+    key === "" ? "No section set" : SECTION_LABELS[key] ?? key;
+
   return (
     <div className="flex flex-col gap-6">
       {note && (
@@ -217,53 +274,92 @@ export default function InvestmentTypesSettings() {
           recorded are kept. The section key controls which section of
           the New investment form the field renders in (lbo_metrics,
           addon_metrics, round, traction, team_market, investors_es,
-          es_basics, sector_pack).
+          es_basics, sector_pack). Fields are grouped by section
+          below — expand a group to edit its fields.
         </p>
-        <ul className="divide-y divide-slate-100 dark:divide-white/5">
-          {cfg.definitions.map((d) => (
-            <li
-              key={d.key}
-              className="flex items-center justify-between gap-2 py-1.5"
-            >
-              <span className="text-sm text-slate-700 dark:text-[#e8dfc8]">
-                {d.label}
-                <span className="ml-2 text-xs text-slate-400 dark:text-white/40">
-                  {d.appliesTo.replace("type:", "").replace("sector:", "pack: ")}
-                  {" · "}
-                  {d.dataType}
-                  {d.required ? " · required" : ""}
-                </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-1.5">
-                <input
-                  aria-label={`Form section for ${d.label}`}
-                  className="w-32 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 focus:border-[#b8975a] focus:outline-none dark:border-white/15 dark:bg-[#0d1f3c] dark:text-[#e8dfc8]"
-                  value={sectionDrafts[d.key] ?? d.config.section ?? ""}
-                  onChange={(e) =>
-                    setSectionDrafts((s) => ({ ...s, [d.key]: e.target.value }))
+        <div className="flex flex-col gap-2">
+          {metricGroups.map((g) => {
+            const open = openSections[g.key] === true;
+            const enabledCount = g.defs.filter((d) => d.enabled).length;
+            return (
+              <div
+                key={g.key === "" ? "__no_section" : g.key}
+                className="rounded-xl border border-slate-200 dark:border-white/10"
+              >
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() =>
+                    setOpenSections((s) => ({ ...s, [g.key]: !open }))
                   }
-                  placeholder="section"
-                />
-                <button
-                  type="button"
-                  disabled={busyKey === `section:${d.key}`}
-                  onClick={() => saveSection(d)}
-                  className="btn btn-ghost btn-sm"
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
                 >
-                  Save
+                  <span className="text-sm font-semibold text-slate-800 dark:text-[#e8dfc8]">
+                    {sectionLabel(g.key)}
+                    <span className="ml-2 text-xs font-normal text-slate-400 dark:text-white/40">
+                      {g.defs.length} field{g.defs.length === 1 ? "" : "s"}
+                      {" · "}
+                      {enabledCount} on
+                    </span>
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 text-xs text-slate-400 dark:text-white/40"
+                  >
+                    {open ? "▾" : "▸"}
+                  </span>
                 </button>
-                <button
-                  type="button"
-                  disabled={busyKey === `def:${d.key}`}
-                  onClick={() => toggleDef(d)}
-                  className={toggleCls(d.enabled)}
-                >
-                  {d.enabled ? "On" : "Off"}
-                </button>
-              </span>
-            </li>
-          ))}
-        </ul>
+                {open && (
+                  <ul className="divide-y divide-slate-100 border-t border-slate-100 px-3 dark:divide-white/5 dark:border-white/10">
+                    {g.defs.map((d) => (
+                      <li
+                        key={d.key}
+                        className="flex items-center justify-between gap-2 py-1.5"
+                      >
+                        <span className="text-sm text-slate-700 dark:text-[#e8dfc8]">
+                          {d.label}
+                          <span className="ml-2 text-xs text-slate-400 dark:text-white/40">
+                            {d.appliesTo.replace("type:", "").replace("sector:", "pack: ")}
+                            {" · "}
+                            {d.dataType}
+                            {d.required ? " · required" : ""}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <input
+                            aria-label={`Form section for ${d.label}`}
+                            className="w-32 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 focus:border-[#b8975a] focus:outline-none dark:border-white/15 dark:bg-[#0d1f3c] dark:text-[#e8dfc8]"
+                            value={sectionDrafts[d.key] ?? d.config.section ?? ""}
+                            onChange={(e) =>
+                              setSectionDrafts((s) => ({ ...s, [d.key]: e.target.value }))
+                            }
+                            placeholder="section"
+                          />
+                          <button
+                            type="button"
+                            disabled={busyKey === `section:${d.key}`}
+                            onClick={() => saveSection(d)}
+                            className="btn btn-ghost btn-sm"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyKey === `def:${d.key}`}
+                            onClick={() => toggleDef(d)}
+                            className={toggleCls(d.enabled)}
+                          >
+                            {d.enabled ? "On" : "Off"}
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div>
