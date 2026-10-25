@@ -26,6 +26,11 @@ export interface EmailTransportStatus {
   mailSend: MailSendState;
   detail: string;
   setupSteps: string[];
+  /** ISO time of the last successful delivery send — the stored
+   * probe is written by sendDeliveryEmail on success, so an
+   * 'available' probe's timestamp IS the last success. Null until
+   * a send has actually succeeded (never inferred). */
+  lastSuccessAt: string | null;
 }
 
 const SETUP_STEPS = [
@@ -104,6 +109,8 @@ export async function getEmailTransportStatus(): Promise<EmailTransportStatus> {
     mailSend,
     detail,
     setupSteps: mailSend === "available" ? [] : SETUP_STEPS,
+    lastSuccessAt:
+      probe?.mailSend === "available" ? (probe.at ?? null) : null,
   };
 }
 

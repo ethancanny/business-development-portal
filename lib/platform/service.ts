@@ -758,7 +758,7 @@ export async function getIntegrations(): Promise<IntegrationStatus[]> {
       key: "comms_email",
       name: "Report Delivery Email (Microsoft Graph)",
       status: st.email.mailSend === "available" ? "ok" : "unknown",
-      lastSuccessAt: null,
+      lastSuccessAt: st.email.lastSuccessAt,
       lastError: null,
       detail:
         st.email.mailSend === "available"

@@ -19,6 +19,23 @@ import InvestmentTypesSettings from "@/components/settings/InvestmentTypesSettin
  * /settings/integrations and user/role management to
  * /settings/users-roles (see SettingsNav).
  */
+/** In-page section index (Ethan, Oct 24, 2026): the General tab is
+ * one long stack of cards — these chips jump to each card. Anchor
+ * jumps are smooth via the global scroll-behavior, and each section
+ * carries a scroll-margin so it lands below the sticky bars. */
+const SECTION_INDEX: { id: string; label: string }[] = [
+  { id: "settings-notifications", label: "Notifications" },
+  { id: "settings-security", label: "Security & devices" },
+  { id: "settings-hospitality", label: "Hospitality fit rules" },
+  { id: "settings-chain-filter", label: "Chain & franchise filter" },
+  { id: "settings-manual-sources", label: "Manual sources" },
+  { id: "settings-valuation", label: "Valuation parameters" },
+  { id: "settings-stage-gates", label: "Stage gates" },
+  { id: "settings-esignature", label: "E-signature" },
+  { id: "settings-investment-types", label: "Investment types" },
+  { id: "settings-background-jobs", label: "Background jobs" },
+];
+
 export default function SettingsPage() {
   return (
     <div>
@@ -29,11 +46,31 @@ export default function SettingsPage() {
       />
       <SettingsNav />
       <div className="mx-auto flex max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-6">
+        <nav
+          aria-label="Settings sections"
+          className="sticky top-14 z-20 -mx-4 -mt-6 border-b border-slate-200/80 bg-[#fbf8f2]/90 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 dark:border-white/10 dark:bg-[#0d1f3c]/90"
+        >
+          <div className="flex gap-2 overflow-x-auto sm:flex-wrap sm:overflow-x-visible">
+            {SECTION_INDEX.map((s) => (
+              <a
+                key={s.id}
+                href={`#${s.id}`}
+                className="chip min-h-[40px] shrink-0 whitespace-nowrap"
+              >
+                {s.label}
+              </a>
+            ))}
+          </div>
+        </nav>
+
         <h3 className="px-1 -mb-2 mt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/40">
           Account &amp; security
         </h3>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+        <section
+          id="settings-notifications"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Notifications
           </h2>
@@ -44,7 +81,10 @@ export default function SettingsPage() {
           <PushSettings />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+        <section
+          id="settings-security"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Security &amp; devices
           </h2>
@@ -59,7 +99,10 @@ export default function SettingsPage() {
           Sourcing &amp; fit rules
         </h3>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+        <section
+          id="settings-hospitality"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Hospitality fit rules
           </h2>
@@ -71,7 +114,10 @@ export default function SettingsPage() {
           <HospitalityFitSettings />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+        <section
+          id="settings-chain-filter"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Chain &amp; franchise filter
           </h2>
@@ -85,7 +131,10 @@ export default function SettingsPage() {
           <ChainFilterSettings />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+        <section
+          id="settings-manual-sources"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Operator sourcing — manual sources
           </h2>
@@ -103,7 +152,10 @@ export default function SettingsPage() {
           Deal workflow
         </h3>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+        <section
+          id="settings-valuation"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Valuation parameters
           </h2>
@@ -116,7 +168,10 @@ export default function SettingsPage() {
           <ValuationParamsSettings />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+        <section
+          id="settings-stage-gates"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Stage gates
           </h2>
@@ -128,7 +183,10 @@ export default function SettingsPage() {
           <StageGatesCard />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+        <section
+          id="settings-esignature"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             E-signature
           </h2>
@@ -141,7 +199,10 @@ export default function SettingsPage() {
           <EsignSettingsCard />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+        <section
+          id="settings-investment-types"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Investment types
           </h2>
@@ -159,7 +220,10 @@ export default function SettingsPage() {
           System
         </h3>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6">
+        <section
+          id="settings-background-jobs"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
           <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
             Background jobs
           </h2>

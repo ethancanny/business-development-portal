@@ -50,6 +50,60 @@ function statusBadge(status: string): string {
   return "badge-neutral";
 }
 
+/** Group ordering for status-count badges: problems first, then
+ * in-flight, then the quiet tail. */
+const STATUS_ORDER = [
+  "failed",
+  "error",
+  "running",
+  "processing",
+  "queued",
+  "pending",
+  "registered",
+  "cancelled",
+  "succeeded",
+  "done",
+  "completed",
+];
+
+interface JobGroup {
+  kind: string;
+  jobs: Job[];
+  /** Most recently updated entry — the group's headline state. */
+  latest: Job;
+  counts: { status: string; n: number }[];
+}
+
+/**
+ * Collapse repeated queue entries by kind (Ethan, Oct 24, 2026):
+ * scheduled kinds like push_meeting60 leave a row per tick, most of
+ * them cancelled, and the flat list drowned everything else. Group
+ * order follows first appearance in the API's newest-first list.
+ */
+function groupJobs(list: Job[]): JobGroup[] {
+  const byKind = new Map<string, Job[]>();
+  for (const job of list) {
+    const arr = byKind.get(job.kind);
+    if (arr) arr.push(job);
+    else byKind.set(job.kind, [job]);
+  }
+  const groups: JobGroup[] = [];
+  byKind.forEach((jobs, kind) => {
+    const latest = jobs.reduce((a: Job, b: Job) =>
+      (b.updatedAt ?? "") > (a.updatedAt ?? "") ? b : a
+    );
+    const tally = new Map<string, number>();
+    for (const j of jobs) tally.set(j.status, (tally.get(j.status) ?? 0) + 1);
+    const counts: { status: string; n: number }[] = [];
+    tally.forEach((n, status) => counts.push({ status, n }));
+    counts.sort(
+      (a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)
+    );
+    groups.push({ kind, jobs, latest, counts });
+  });
+  return groups;
+}
+
 export default function JobQueuePanel() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,6 +111,15 @@ export default function JobQueuePanel() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleGroup = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -113,11 +176,160 @@ export default function JobQueuePanel() {
   const failedCount = jobs.filter(
     (j) => j.status === "failed" || j.status === "error"
   ).length;
+  // Collapsed view (Ethan, Oct 24, 2026): within each filed section,
+  // repeated kinds render as ONE group row — kind, per-status counts,
+  // latest update — with an expander for the individual entries. The
+  // history preview counts groups, so a chatty kind costs one row.
   const HISTORY_PREVIEW = 5;
-  const visible = [
-    ...attention,
-    ...(showHistory ? history : history.slice(0, HISTORY_PREVIEW)),
-  ];
+  const attentionGroups = groupJobs(attention);
+  const historyGroups = groupJobs(history);
+  const visibleHistoryGroups = showHistory
+    ? historyGroups
+    : historyGroups.slice(0, HISTORY_PREVIEW);
+  const visibleHistoryJobs = visibleHistoryGroups.reduce(
+    (n, g) => n + g.jobs.length,
+    0
+  );
+
+  const renderJobRow = (job: Job) => {
+    const failed = job.status === "failed" || job.status === "error";
+    const queued = job.status === "queued" || job.status === "pending";
+    return (
+      <li key={job.id} className="flex flex-wrap items-center gap-3 py-3">
+        <div className="min-w-0 flex-1">
+          <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[#0d1f3c] dark:text-white">
+            {job.kind}
+            <span className={`badge ${statusBadge(job.status)}`}>
+              {job.status}
+            </span>
+          </p>
+          <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+            Attempts: {job.attempts ?? 0} · Updated {fmtWhen(job.updatedAt)}
+          </p>
+          {job.lastError && (
+            <p className="mt-0.5 text-xs text-red-600 dark:text-red-300">
+              {job.lastError}
+            </p>
+          )}
+          {Array.isArray(job.payload?.steps) &&
+            job.payload.steps.length > 0 && (
+              <ul className="mt-1.5 space-y-0.5">
+                {job.payload.steps.map((s) => (
+                  <li
+                    key={s.key}
+                    className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-white/50"
+                  >
+                    <span
+                      className={`badge ${
+                        s.status === "done"
+                          ? "badge-fit"
+                          : s.status === "failed"
+                            ? "badge-danger"
+                            : s.status === "skipped"
+                              ? "badge-neutral"
+                              : "badge-warn"
+                      }`}
+                    >
+                      {s.status}
+                    </span>
+                    <span className="font-medium">{s.label}</span>
+                    {s.detail && <span>— {s.detail}</span>}
+                    {s.error && (
+                      <span className="text-red-600 dark:text-red-300">
+                        {s.error}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+        </div>
+        {failed && (
+          <button
+            onClick={() => act(job)}
+            disabled={busyId === job.id}
+            className="btn btn-secondary btn-sm shrink-0"
+          >
+            {busyId === job.id ? "Retrying…" : "Retry"}
+          </button>
+        )}
+        {queued && (
+          <button
+            onClick={() => act(job, "run")}
+            disabled={busyId === job.id}
+            className="btn btn-secondary btn-sm shrink-0"
+          >
+            {busyId === job.id ? "Starting…" : "Run now"}
+          </button>
+        )}
+      </li>
+    );
+  };
+
+  const renderGroup = (section: string, group: JobGroup) => {
+    if (group.jobs.length === 1) return renderJobRow(group.jobs[0]);
+    const key = `${section}:${group.kind}`;
+    const isOpen = expanded.has(key);
+    // The newest queued instance keeps its Run now action on the
+    // group row — it is the live one; older entries sit inside.
+    const queuedJob = group.jobs.find(
+      (j) => j.status === "queued" || j.status === "pending"
+    );
+    // A failure never hides inside a collapsed group: the newest
+    // failure's error shows on the group row itself.
+    const failedJob = group.jobs.find(
+      (j) => (j.status === "failed" || j.status === "error") && j.lastError
+    );
+    return (
+      <li key={key} className="py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[#0d1f3c] dark:text-white">
+              {group.kind}
+              {group.counts.map((c) => (
+                <span key={c.status} className={`badge ${statusBadge(c.status)}`}>
+                  {c.status}
+                  {c.n > 1 ? ` ×${c.n}` : ""}
+                </span>
+              ))}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+              <span className="tnum">{group.jobs.length}</span> entries ·
+              latest {group.latest.status} · Updated{" "}
+              {fmtWhen(group.latest.updatedAt)}
+            </p>
+            {failedJob && (
+              <p className="mt-0.5 text-xs text-red-600 dark:text-red-300">
+                {failedJob.lastError}
+              </p>
+            )}
+          </div>
+          {queuedJob && (
+            <button
+              onClick={() => act(queuedJob, "run")}
+              disabled={busyId === queuedJob.id}
+              className="btn btn-secondary btn-sm shrink-0"
+            >
+              {busyId === queuedJob.id ? "Starting…" : "Run now"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => toggleGroup(key)}
+            aria-expanded={isOpen}
+            className="shrink-0 text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+          >
+            {isOpen ? "Hide entries" : `Show ${group.jobs.length} entries`}
+          </button>
+        </div>
+        {isOpen && (
+          <ul className="mt-1 divide-y divide-slate-100 border-t border-slate-100 pl-3 dark:divide-white/5 dark:border-white/5">
+            {group.jobs.map((job) => renderJobRow(job))}
+          </ul>
+        )}
+      </li>
+    );
+  };
 
   return (
     <div>
@@ -154,82 +366,10 @@ export default function JobQueuePanel() {
             completed
           </p>
           <ul className="divide-y divide-slate-100 dark:divide-white/5">
-            {visible.map((job) => {
-            const failed = job.status === "failed" || job.status === "error";
-            const queued = job.status === "queued" || job.status === "pending";
-            return (
-              <li key={job.id} className="flex flex-wrap items-center gap-3 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[#0d1f3c] dark:text-white">
-                    {job.kind}
-                    <span className={`badge ${statusBadge(job.status)}`}>
-                      {job.status}
-                    </span>
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
-                    Attempts: {job.attempts ?? 0} · Updated {fmtWhen(job.updatedAt)}
-                  </p>
-                  {job.lastError && (
-                    <p className="mt-0.5 text-xs text-red-600 dark:text-red-300">
-                      {job.lastError}
-                    </p>
-                  )}
-                  {Array.isArray(job.payload?.steps) &&
-                    job.payload.steps.length > 0 && (
-                      <ul className="mt-1.5 space-y-0.5">
-                        {job.payload.steps.map((s) => (
-                          <li
-                            key={s.key}
-                            className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-white/50"
-                          >
-                            <span
-                              className={`badge ${
-                                s.status === "done"
-                                  ? "badge-fit"
-                                  : s.status === "failed"
-                                    ? "badge-danger"
-                                    : s.status === "skipped"
-                                      ? "badge-neutral"
-                                      : "badge-warn"
-                              }`}
-                            >
-                              {s.status}
-                            </span>
-                            <span className="font-medium">{s.label}</span>
-                            {s.detail && <span>— {s.detail}</span>}
-                            {s.error && (
-                              <span className="text-red-600 dark:text-red-300">
-                                {s.error}
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                </div>
-                {failed && (
-                  <button
-                    onClick={() => act(job)}
-                    disabled={busyId === job.id}
-                    className="btn btn-secondary btn-sm shrink-0"
-                  >
-                    {busyId === job.id ? "Retrying…" : "Retry"}
-                  </button>
-                )}
-                {queued && (
-                  <button
-                    onClick={() => act(job, "run")}
-                    disabled={busyId === job.id}
-                    className="btn btn-secondary btn-sm shrink-0"
-                  >
-                    {busyId === job.id ? "Starting…" : "Run now"}
-                  </button>
-                )}
-              </li>
-              );
-            })}
+            {attentionGroups.map((g) => renderGroup("attention", g))}
+            {visibleHistoryGroups.map((g) => renderGroup("history", g))}
           </ul>
-          {history.length > HISTORY_PREVIEW && (
+          {(showHistory || visibleHistoryJobs < history.length) && (
             <button
               type="button"
               onClick={() => setShowHistory((v) => !v)}
