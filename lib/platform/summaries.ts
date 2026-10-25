@@ -2,7 +2,15 @@ import { sql, str, num, isoOrNull } from "./db";
 import { cacheInvalidate, cached } from "./cache";
 import { CACHE_TTLS } from "./config";
 import { logUsage } from "./usage";
-import { DEAL_STAGES } from "../types";
+import {
+  DEAL_STAGES,
+  DEFAULT_STAGES_BY_TYPE,
+  INVESTMENT_TYPE_LABELS,
+  type InvestmentTypeKey,
+} from "../types";
+import { getDeals } from "../db";
+import { getMultiples } from "../market-db";
+import { resolveDealValue, type MarketRates } from "../valuation";
 import {
   emptyOverviewSummary,
   type CapitalStack,
@@ -109,14 +117,21 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
   const openTasks = taskRows.length ? num(taskRows[0].open) : 0;
   const upcomingFollowUps = taskRows.length ? num(taskRows[0].upcoming) : 0;
 
-  /* ---- capital ---- */
+  /* ---- capital ----
+   * Stage names fixed Oct 25, 2026 (Overview redesign): the lists
+   * still carried the pre–Investment-Types names (Sourcing / Initial
+   * Contact / Negotiation / Closing / Closed Won), so after the
+   * Step 1 migration only 'Diligence' matched and both figures were
+   * materially wrong. Needed = every ACTIVE stage (new + legacy
+   * names); committed = Closed (+ legacy Closed Won). */
   const capRows = await db`
     SELECT
       coalesce(sum(CASE
-        WHEN stage IN ('Sourcing', 'Initial Contact', 'Diligence', 'Negotiation', 'Closing')
+        WHEN stage IN ('Sourced', 'IOI', 'Diligence', 'LOI', 'Financing',
+                       'Sourcing', 'Initial Contact', 'Negotiation', 'Closing')
         THEN coalesce(NULLIF(deal_value, 0), asking_price, 0) ELSE 0 END), 0) AS needed,
       coalesce(sum(CASE
-        WHEN stage = 'Closed Won'
+        WHEN stage IN ('Closed', 'Closed Won')
         THEN coalesce(NULLIF(deal_value, 0), asking_price, 0) ELSE 0 END), 0) AS committed
     FROM deals WHERE stage <> 'Passed'`;
   const capitalNeeded = capRows.length ? num(capRows[0].needed) : 0;
@@ -214,7 +229,7 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
   }
   const stalledRows = await db`
     SELECT id, company_name, stage, updated_at FROM deals
-    WHERE stage NOT IN ('Passed', 'Closed Won')
+    WHERE stage NOT IN ('Passed', 'Closed Won', 'Closed')
       AND updated_at < now() - interval '45 days'
     ORDER BY updated_at ASC LIMIT 5`;
   for (const r of stalledRows) {
@@ -276,6 +291,186 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
     ON CONFLICT (company_id) DO UPDATE
       SET data = EXCLUDED.data, updated_at = now()`;
 
+  /* ---- Overview redesign (Oct 25, 2026): pipeline value, funnel,
+   * readiness, history ----
+   * All of this runs HERE, in the summary refresh — page reads stay
+   * summary-only. Every sub-computation is failure-isolated: a
+   * missing multiples table or diligence schema degrades that field
+   * to its empty value, never the whole summary. */
+  const TERMINAL = new Set(["Closed", "Passed", "Closed Won"]);
+  let pipelineValue = 0;
+  let pipelineValuedCount = 0;
+  let dealsInDiligence = 0;
+  let funnel: OverviewSummary["funnel"];
+  let readinessByDeal: Record<string, number> = {};
+  let pipelineHistory: { day: string; value: number }[] = [];
+  try {
+    const allDeals = await getDeals();
+    let multiples: Awaited<ReturnType<typeof getMultiples>> = [];
+    try {
+      multiples = await getMultiples();
+    } catch {
+      /* multiples unavailable — stated prices still resolve */
+    }
+    let rates: MarketRates = {};
+    try {
+      const primeRows = await db`
+        SELECT value FROM mi_indicators
+        WHERE series_id = 'DPRIME' AND value IS NOT NULL
+        ORDER BY obs_date DESC LIMIT 1`;
+      if (primeRows.length) {
+        const v = num((primeRows[0] as Record<string, unknown>).value);
+        if (v > 0) rates = { prime: v, sba: v + 3 };
+      }
+    } catch {
+      /* rates unavailable — valuation falls back to its defaults */
+    }
+    const valueOf = new Map<string, number | null>();
+    for (const d of allDeals) {
+      valueOf.set(d.id, resolveDealValue(d, multiples, rates).value);
+    }
+    const active = allDeals.filter((d) => !TERMINAL.has(d.stage));
+    for (const d of active) {
+      const v = valueOf.get(d.id);
+      if (v !== null && v !== undefined) {
+        pipelineValue += v;
+        pipelineValuedCount += 1;
+      }
+      if (d.stage === "Diligence") dealsInDiligence += 1;
+    }
+
+    /* Funnel: dominant investment type by ACTIVE deal count (ties
+     * resolve in type-config order, platform_lbo first). Stages are
+     * the type's LIVE list from bd.type_config; counts/values are
+     * current-stage, zeros included; Passed is reported separately. */
+    try {
+      const typeRows = await db`
+        SELECT key, label, stages FROM bd.type_config ORDER BY sort ASC, key ASC`;
+      const configs = typeRows.map((r) => {
+        const rec = r as Record<string, unknown>;
+        let stages: string[] = [];
+        const raw = rec.stages;
+        const parsed =
+          typeof raw === "string" ? (JSON.parse(raw) as unknown) : raw;
+        if (Array.isArray(parsed)) {
+          stages = parsed.map((s) => String(s)).filter(Boolean);
+        }
+        const key = str(rec.key) as InvestmentTypeKey;
+        return {
+          key,
+          label: str(rec.label) || INVESTMENT_TYPE_LABELS[key] || key,
+          stages: stages.length
+            ? stages
+            : [...(DEFAULT_STAGES_BY_TYPE[key] ?? DEAL_STAGES)],
+        };
+      });
+      if (configs.length) {
+        const activeByType = new Map<string, number>();
+        for (const d of active) {
+          const k = d.investmentType ?? "platform_lbo";
+          activeByType.set(k, (activeByType.get(k) ?? 0) + 1);
+        }
+        let dominant = configs[0];
+        for (const c of configs) {
+          if (
+            (activeByType.get(c.key) ?? 0) >
+            (activeByType.get(dominant.key) ?? 0)
+          ) {
+            dominant = c;
+          }
+        }
+        const ofType = allDeals.filter(
+          (d) => (d.investmentType ?? "platform_lbo") === dominant.key
+        );
+        const stages = dominant.stages.map((stage) => {
+          const inStage = ofType.filter((d) => d.stage === stage);
+          return {
+            stage,
+            count: inStage.length,
+            value: inStage.reduce((s, d) => s + (valueOf.get(d.id) ?? 0), 0),
+          };
+        });
+        const passedDeals = ofType.filter((d) => d.stage === "Passed");
+        funnel = {
+          typeKey: dominant.key,
+          typeLabel: dominant.label,
+          stages: stages.filter((s) => s.stage !== "Passed"),
+          passed: {
+            count: passedDeals.length,
+            value: passedDeals.reduce(
+              (s, d) => s + (valueOf.get(d.id) ?? 0),
+              0
+            ),
+          },
+          otherTypeDeals: active.filter(
+            (d) => (d.investmentType ?? "platform_lbo") !== dominant.key
+          ).length,
+        };
+      }
+    } catch (err) {
+      console.error(
+        "[overview] funnel build failed",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+
+    /* Readiness: diligence checklist completion per deal. Terminal
+     * statuses per the dd-checklist-status-v2 migration note are
+     * 'complete' and 'na' ("Done for completion %"). Deals without a
+     * workspace or items are ABSENT from the map — no data, not 0%. */
+    try {
+      const rdRows = await db`
+        SELECT w.deal_id AS deal_id,
+          count(*)::int AS total,
+          count(*) FILTER (WHERE ci.status IN ('complete', 'na'))::int AS done
+        FROM diligence.workspaces w
+        JOIN diligence.checklist_items ci
+          ON ci.workspace_id = w.id AND ci.deleted_at IS NULL
+        WHERE w.deleted_at IS NULL
+        GROUP BY w.deal_id`;
+      const map: Record<string, number> = {};
+      for (const r of rdRows) {
+        const rec = r as Record<string, unknown>;
+        const total = num(rec.total);
+        if (total > 0) {
+          map[str(rec.deal_id)] = Math.round((num(rec.done) / total) * 100);
+        }
+      }
+      readinessByDeal = map;
+    } catch {
+      /* diligence schema not built yet — readiness simply absent */
+    }
+
+    /* Daily pipeline-value snapshot: upsert TODAY's value (the last
+     * refresh of the day wins) and read the trailing 30 days. This
+     * is the sparkline's only source — real snapshots from today
+     * forward, never backfilled. */
+    try {
+      await db`
+        INSERT INTO core.overview_history (day, pipeline_value, active_deals)
+        VALUES (${today}, ${pipelineValue}, ${active.length})
+        ON CONFLICT (day) DO UPDATE
+          SET pipeline_value = EXCLUDED.pipeline_value,
+            active_deals = EXCLUDED.active_deals`;
+      const histRows = await db`
+        SELECT day, pipeline_value FROM core.overview_history
+        ORDER BY day DESC LIMIT 30`;
+      pipelineHistory = histRows
+        .map((r) => {
+          const rec = r as Record<string, unknown>;
+          return { day: str(rec.day), value: num(rec.pipeline_value) };
+        })
+        .reverse();
+    } catch {
+      /* history table not created yet (older schema) — no trend */
+    }
+  } catch (err) {
+    console.error(
+      "[overview] redesign fields build failed",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+
   /* ---- store the summary ---- */
   const summary: OverviewSummary = {
     dealsByStage,
@@ -290,6 +485,12 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
     capitalStacks,
     needsAttention,
     updatedAt: new Date().toISOString(),
+    pipelineValue,
+    pipelineValuedCount,
+    dealsInDiligence,
+    funnel,
+    readinessByDeal,
+    pipelineHistory,
   };
   await db`
     INSERT INTO core.overview_summary (id, data, updated_at)

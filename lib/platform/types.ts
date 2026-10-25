@@ -63,6 +63,39 @@ export interface OverviewSummary {
   capitalNeeded: number;
   portfolioCount: number;
   ragCounts: { green: number; amber: number; red: number };
+  /* ---- Overview redesign (Oct 25, 2026) — all computed by
+   * refreshOverviewSummary from stored data; reads never recompute.
+   * Optional on the type so summaries written before this deploy
+   * still parse (getOverview merges over emptyOverviewSummary). */
+  /** Sum of resolved values (stated price, else market-multiple
+   * estimate — lib/valuation resolveDealValue) over ACTIVE deals
+   * (stage not Closed/Passed). */
+  pipelineValue?: number;
+  /** How many active deals carried a resolvable value. */
+  pipelineValuedCount?: number;
+  /** Active deals currently in the Diligence stage. */
+  dealsInDiligence?: number;
+  /** Pipeline funnel for the DOMINANT investment type (most active
+   * deals): its live stage list from bd.type_config, current-stage
+   * counts + resolved values per stage (zeros included), Passed
+   * kept separate, and how many active deals belong to other types. */
+  funnel?: {
+    typeKey: string;
+    typeLabel: string;
+    stages: { stage: string; count: number; value: number }[];
+    passed: { count: number; value: number };
+    otherTypeDeals: number;
+  };
+  /** Diligence readiness per deal: % of checklist items in a
+   * terminal state (complete / na). Only deals with a diligence
+   * workspace + at least one item appear — absence means "no data",
+   * never 0%. */
+  readinessByDeal?: Record<string, number>;
+  /** REAL daily snapshots of pipeline value (core.overview_history),
+   * ascending, last 30 days. Written by the summary refresh from the
+   * day the table shipped — never backfilled. Fewer than 2 points =
+   * no trend is shown. */
+  pipelineHistory?: { day: string; value: number }[];
   heatmap: {
     verticals: string[];
     stages: string[];
@@ -210,5 +243,11 @@ export function emptyOverviewSummary(): OverviewSummary {
     capitalStacks: [],
     needsAttention: [],
     updatedAt: null,
+    pipelineValue: 0,
+    pipelineValuedCount: 0,
+    dealsInDiligence: 0,
+    funnel: undefined,
+    readinessByDeal: {},
+    pipelineHistory: [],
   };
 }

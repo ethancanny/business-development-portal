@@ -367,6 +367,17 @@ export function ensurePlatformSchema(): Promise<void> {
           data JSONB NOT NULL DEFAULT '{}',
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`;
+      // Overview redesign (Oct 25, 2026): one REAL snapshot row per
+      // Phoenix day of the active pipeline value, written by
+      // refreshOverviewSummary. Powers the command-strip sparkline —
+      // history starts the day this ships; it is never backfilled.
+      await db`
+        CREATE TABLE IF NOT EXISTS core.overview_history (
+          day TEXT PRIMARY KEY,
+          pipeline_value NUMERIC NOT NULL DEFAULT 0,
+          active_deals INT NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
 
       await db`
         CREATE TABLE IF NOT EXISTS core.usage_log (
