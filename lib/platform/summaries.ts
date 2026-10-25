@@ -123,7 +123,13 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
    * Contact / Negotiation / Closing / Closed Won), so after the
    * Step 1 migration only 'Diligence' matched and both figures were
    * materially wrong. Needed = every ACTIVE stage (new + legacy
-   * names); committed = Closed (+ legacy Closed Won). */
+   * names); committed = Closed (+ legacy Closed Won).
+   * Needed is RECOMPUTED from resolveDealValue in the redesign
+   * block below (Ethan, Oct 25, 2026: align Capital needed to
+   * resolved deal values); the SQL figure here is only the
+   * fallback if that block fails. Committed keeps this legacy
+   * column sum — it shares the same expression, but Ethan's
+   * call covered needed only. */
   const capRows = await db`
     SELECT
       coalesce(sum(CASE
@@ -134,7 +140,7 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
         WHEN stage IN ('Closed', 'Closed Won')
         THEN coalesce(NULLIF(deal_value, 0), asking_price, 0) ELSE 0 END), 0) AS committed
     FROM deals WHERE stage <> 'Passed'`;
-  const capitalNeeded = capRows.length ? num(capRows[0].needed) : 0;
+  let capitalNeeded = capRows.length ? num(capRows[0].needed) : 0;
   const capitalCommitted = capRows.length ? num(capRows[0].committed) : 0;
 
   const stackRows = await db`
@@ -329,6 +335,36 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
     for (const d of allDeals) {
       valueOf.set(d.id, resolveDealValue(d, multiples, rates).value);
     }
+    /* Capital needed on resolved values (Ethan, Oct 25, 2026):
+     * the legacy capital SQL above sums only the deal_value /
+     * asking_price columns, so structure-priced deals (Brightline)
+     * were missing from "needed" while pipelineValue counted
+     * them. Same stage set the SQL used — active stages, new +
+     * legacy names (the SQL's outer filter already excluded
+     * Passed) — but each deal contributes its resolved value,
+     * exactly as in pipelineValue below; deals whose value does
+     * not resolve contribute nothing (never $0-forced). Runs
+     * inside this failure-isolated block: if resolution is
+     * unavailable, capitalNeeded keeps the SQL fallback above.
+     * Committed is deliberately NOT recomputed (needed only). */
+    const NEEDED_STAGES = new Set([
+      "Sourced",
+      "IOI",
+      "Diligence",
+      "LOI",
+      "Financing",
+      "Sourcing",
+      "Initial Contact",
+      "Negotiation",
+      "Closing",
+    ]);
+    let resolvedNeeded = 0;
+    for (const d of allDeals) {
+      if (!NEEDED_STAGES.has(d.stage)) continue;
+      const v = valueOf.get(d.id);
+      if (v !== null && v !== undefined) resolvedNeeded += v;
+    }
+    capitalNeeded = resolvedNeeded;
     const active = allDeals.filter((d) => !TERMINAL.has(d.stage));
     for (const d of active) {
       const v = valueOf.get(d.id);
