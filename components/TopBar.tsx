@@ -11,27 +11,18 @@
  * state) + pathname-derived breadcrumbs. Right: Search (opens the
  * global search), a standalone day/night toggle (Ethan, Oct 23, 2026:
  * on the top bar itself, NOT inside the user dropdown), the
- * notification bell, Quick-add (the Fab's four actions), and the user
- * menu (name, log out).
+ * notification bell, and the user menu (name, log out). (The Quick-add
+ * pill that duplicated the floating action button was removed
+ * Oct 25, 2026 — the Fab is the single quick-add entry point.)
  */
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Breadcrumbs } from "@/components/EntityBits";
 import NotificationCenter from "@/components/NotificationCenter";
 import { openGlobalSearch } from "@/components/Sidebar";
 import { useTheme } from "@/components/ThemeProvider";
-import {
-  IconAddContact,
-  IconAddDeal,
-  IconFollowUp,
-  IconLogTouch,
-  IconLogOut,
-  IconMoon,
-  IconPlus,
-  IconSun,
-} from "@/components/icons";
+import { IconLogOut, IconMoon, IconSun } from "@/components/icons";
 
 function lineIcon(children: React.ReactNode) {
   return function LineIcon({ className }: { className?: string }) {
@@ -173,18 +164,10 @@ export function crumbsForPath(pathname: string): Crumb[] {
   }
 }
 
-/* ------------------------------ quick add ------------------------------ */
-
-const QUICK_ADD: {
-  label: string;
-  href: string;
-  Icon: (p: { className?: string }) => React.ReactNode;
-}[] = [
-  { label: "Add follow-up", href: "/overview?newtask=1", Icon: IconFollowUp },
-  { label: "Log touch", href: "/directory?touch=1", Icon: IconLogTouch },
-  { label: "Add deal", href: "/pipeline?new=deal", Icon: IconAddDeal },
-  { label: "Add contact", href: "/directory?new=contact", Icon: IconAddContact },
-];
+/* Quick add: the top-bar pill that duplicated the floating action
+ * button's four actions was removed Oct 25, 2026 (Ethan, with
+ * screenshot) — the bottom/floating Quick add (components/Fab.tsx)
+ * is the single entry point. */
 
 /* ------------------------------ top bar ------------------------------ */
 
@@ -193,13 +176,10 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
   const router = useRouter();
   const { theme, toggle } = useTheme();
   const [userName, setUserName] = useState("");
-  const [quickOpen, setQuickOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
-  const quickRef = useRef<HTMLDivElement | null>(null);
   const userRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setQuickOpen(false);
     setUserOpen(false);
   }, [pathname]);
 
@@ -215,22 +195,16 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
       .catch(() => {});
   }, [pathname]);
 
-  // Outside click + Escape close the menus.
+  // Outside click + Escape close the user menu.
   useEffect(() => {
-    if (!quickOpen && !userOpen) return;
+    if (!userOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (quickRef.current && !quickRef.current.contains(e.target as Node)) {
-        setQuickOpen(false);
-      }
       if (userRef.current && !userRef.current.contains(e.target as Node)) {
         setUserOpen(false);
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setQuickOpen(false);
-        setUserOpen(false);
-      }
+      if (e.key === "Escape") setUserOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -238,7 +212,7 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [quickOpen, userOpen]);
+  }, [userOpen]);
 
   const logout = async () => {
     setUserOpen(false);
@@ -304,50 +278,10 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
 
         <NotificationCenter />
 
-        <div className="relative" ref={quickRef}>
-          <button
-            type="button"
-            onClick={() => {
-              setQuickOpen((v) => !v);
-              setUserOpen(false);
-            }}
-            aria-haspopup="menu"
-            aria-expanded={quickOpen}
-            className="flex min-h-[44px] items-center gap-1.5 rounded-full bg-[#0d1f3c] px-3.5 text-sm font-semibold text-white transition hover:bg-[#16305a] dark:bg-[#b8975a] dark:text-[#0d1f3c] dark:hover:bg-[#d4b37a]"
-          >
-            <IconPlus className="h-4 w-4" />
-            <span className="hidden sm:inline">Quick add</span>
-          </button>
-          {quickOpen && (
-            <div
-              role="menu"
-              className="absolute right-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl dark:border-white/10 dark:bg-[#12294d]"
-            >
-              {QUICK_ADD.map((a) => (
-                <Link
-                  key={a.label}
-                  href={a.href}
-                  role="menuitem"
-                  onClick={() => setQuickOpen(false)}
-                  className="flex min-h-[44px] items-center gap-2.5 px-3.5 text-sm font-medium text-slate-700 transition hover:bg-[#f0f4fa] dark:text-[#e8dfc8] dark:hover:bg-white/5"
-                >
-                  <span className="text-[#b8975a]">
-                    <a.Icon className="h-5 w-5" />
-                  </span>
-                  {a.label}
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
         <div className="relative" ref={userRef}>
           <button
             type="button"
-            onClick={() => {
-              setUserOpen((v) => !v);
-              setQuickOpen(false);
-            }}
+            onClick={() => setUserOpen((v) => !v)}
             aria-haspopup="menu"
             aria-expanded={userOpen}
             aria-label={userName ? `Account — ${userName}` : "Account"}

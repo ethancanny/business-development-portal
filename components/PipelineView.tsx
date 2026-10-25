@@ -139,6 +139,16 @@ export default function PipelineView({
       setTab("execs");
       setExecModal({ exec: null });
     }
+    // Overview heat map (Oct 25, 2026): a cell click lands here with
+    // ?stage= + ?industry= — seed the stage filter and the text
+    // search (which matches industry) so the pipeline opens filtered.
+    const stageParam = sp.get("stage");
+    if (stageParam) {
+      setTab("deals");
+      setStageFilter(stageParam);
+    }
+    const industryParam = sp.get("industry");
+    if (industryParam) setSearch(industryParam);
   }, []);
 
   const owners = useMemo(() => {

@@ -10,6 +10,7 @@ import {
   type TaskPriority,
   type TaskType,
 } from "@/lib/types";
+import CompanyMark from "@/components/identity/CompanyMark";
 
 interface TaskListProps {
   tasks: Task[];
@@ -18,6 +19,11 @@ interface TaskListProps {
   onChanged: () => void;
   /** When set, new tasks are pre-linked and the link picker is hidden. */
   presetLink?: { kind: "deal" | "executive"; id: string; name: string } | null;
+  /** Overview redesign (Oct 25, 2026): when true, the add form hides
+   * behind a "+ Add follow-up" toggle (spec §9 drawer pattern). The
+   * FAB deep link (?newtask=1) still auto-opens it. Other surfaces
+   * (deal page) leave this off and keep the always-visible form. */
+  collapsibleForm?: boolean;
 }
 
 /* -------- Phoenix date/time helpers (America/Phoenix, no DST) -------- */
@@ -96,6 +102,7 @@ export default function TaskList({
   execs,
   onChanged,
   presetLink = null,
+  collapsibleForm = false,
 }: TaskListProps) {
   const today = phxToday();
   // Add form — the date defaults to today on every load, never a stale date.
@@ -117,6 +124,14 @@ export default function TaskList({
   const [completedOpen, setCompletedOpen] = useState(false);
   const [notePrompt, setNotePrompt] = useState<Task | null>(null);
   const [noteText, setNoteText] = useState("");
+  // Collapsible add form (Overview §9): closed by default; the
+  // ?newtask=1 deep link opens it (the Overview page also scrolls
+  // here and focuses the title input, exactly as before).
+  const [formOpen, setFormOpen] = useState(() => {
+    if (!collapsibleForm) return true;
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("newtask") === "1";
+  });
 
   // Deep link from a reminder notification: /overview?task=<id> expands
   // that follow-up and scrolls it into view.
@@ -336,7 +351,20 @@ export default function TaskList({
 
   return (
     <div>
-      {/* Add form */}
+      {/* Add form — behind a "+ Add follow-up" toggle when the host
+          surface opts into collapsibleForm (Overview §9); the form
+          itself is unchanged. */}
+      {collapsibleForm && !formOpen && (
+        <button
+          type="button"
+          onClick={() => setFormOpen(true)}
+          className="btn btn-primary btn-sm mb-3"
+          aria-expanded={false}
+        >
+          + Add follow-up
+        </button>
+      )}
+      {formOpen && (
       <div className="mb-3 flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-[#0d1f3c]">
         <input
           value={title}
@@ -472,12 +500,24 @@ export default function TaskList({
             ＋ Add a note
           </button>
         )}
+        {collapsibleForm && (
+          <button
+            type="button"
+            onClick={() => setFormOpen(false)}
+            className="self-start text-xs font-medium text-caption transition hover:text-gold-700 dark:hover:text-gold-400"
+          >
+            Close form
+          </button>
+        )}
       </div>
+      )}
 
       {/* Grouped list */}
       {tasks.length === 0 ? (
         <p className="py-6 text-center text-sm text-caption">
-          No follow-ups. Add one above so nothing slips.
+          {collapsibleForm
+            ? "No follow-ups yet — add one so nothing slips."
+            : "No follow-ups. Add one above so nothing slips."}
         </p>
       ) : (
         <div>
@@ -524,6 +564,19 @@ export default function TaskList({
                             onClick={() => setExpandedId(expanded ? null : t.id)}
                           >
                             <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-slate-900 dark:text-white">
+                              {t.relatedKind === "deal" &&
+                                t.relatedId &&
+                                (() => {
+                                  const rd = deals.find((d) => d.id === t.relatedId);
+                                  return rd ? (
+                                    <CompanyMark
+                                      companyId={rd.companyId ?? ""}
+                                      name={rd.companyName}
+                                      logoVersion={rd.logoVersion ?? 0}
+                                      size={18}
+                                    />
+                                  ) : null;
+                                })()}
                               <span className="min-w-0">{t.title}</span>
                               {t.priority === "high" && (
                                 <span className="badge badge-danger">
