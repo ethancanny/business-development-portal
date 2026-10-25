@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import TaskList from "@/components/TaskList";
-import PageHero from "@/components/PageHero";
-import { StatTile } from "@/components/ui";
 import PlatformOverview from "@/components/PlatformOverview";
+import TodayHero from "@/components/overview/TodayHero";
+import ActiveDealsRow, {
+  type DealMetricsLite,
+} from "@/components/overview/ActiveDealsRow";
 import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiIndicatorObs, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
@@ -24,7 +26,10 @@ import { SectorLegend } from "@/components/SectorChip";
  * and last-updated date under it. */
 const FIT_SECTORS: readonly string[] = FOCUS_SECTOR_NAMES;
 
-const TERMINAL_STAGES = ["Closed Won", "Passed"];
+// Terminal stages (Oct 25, 2026): the Investment Types stage lists
+// name the terminal win "Closed" — the legacy "Closed Won" is kept
+// for any pre-migration row that still carries it.
+const TERMINAL_STAGES = ["Closed", "Closed Won", "Passed"];
 
 const daysSince = (iso: string): number =>
   Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
@@ -86,6 +91,14 @@ export default function Overview() {
   const [rateStrip, setRateStrip] = useState<
     { label: string; value: number; change: number | null; date: string }[]
   >([]);
+  // Overview redesign (Oct 25, 2026): the platform payload is fetched
+  // ONCE here and passed down to PlatformOverview (which renders the
+  // command strip + widgets from it), and the BD bootstrap supplies
+  // per-deal structured metrics for the Active deals key metric.
+  const [platformPayload, setPlatformPayload] = useState<unknown>(null);
+  const [metricsByDeal, setMetricsByDeal] = useState<
+    Record<string, DealMetricsLite>
+  >({});
   const [weekTab, setWeekTab] = useState<"this" | "last">("this");
   // Oct 17, 2026 (Ethan): the "Other calendar items" list starts
   // EXPANDED — every synced calendar event must be visible in the
@@ -100,7 +113,7 @@ export default function Overview() {
     try {
       const calFrom = new Date(Date.now() - 16 * 86400000).toISOString();
       const calTo = new Date(Date.now() + 28 * 86400000).toISOString();
-      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes, calRes, invRes, multRes, ratesRes, indRes, candRes] = await Promise.all([
+      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes, calRes, invRes, multRes, ratesRes, indRes, candRes, platRes, bdRes] = await Promise.all([
         fetch("/api/auth/me"),
         fetch("/api/deals"),
         fetch("/api/executives"),
@@ -113,6 +126,8 @@ export default function Overview() {
         fetch("/api/market/rates"),
         fetch("/api/market/indicators?series=DPRIME,SOFR,DGS10,DGS2"),
         fetch("/api/operators/candidates"),
+        fetch("/api/platform/overview"),
+        fetch("/api/platform/investment-types/bootstrap"),
       ]);
       if (
         meRes.status === 401 ||
@@ -142,6 +157,18 @@ export default function Overview() {
       if (candRes.ok) {
         const cs = await candRes.json();
         if (Array.isArray(cs)) setCandidates(cs as OperatorCandidate[]);
+      }
+      if (platRes.ok) {
+        const plat = await platRes.json().catch(() => null);
+        if (plat && typeof plat === "object" && plat.summary) {
+          setPlatformPayload(plat);
+        }
+      }
+      if (bdRes.ok) {
+        const bd = await bdRes.json().catch(() => null);
+        if (bd && typeof bd === "object" && bd.metricsByDeal) {
+          setMetricsByDeal(bd.metricsByDeal as Record<string, DealMetricsLite>);
+        }
       }
       if (multRes.ok) {
         const mult = await multRes.json();
@@ -280,27 +307,8 @@ export default function Overview() {
   // Active pipeline value: sum of resolved values — stated price,
   // else the market-multiple estimate — over ACTIVE deals in scope
   // (Passed / Closed Won excluded). 0 of 0 qualifying deals → "—".
-  const scopedActiveDeals = useMemo(
-    () => scopedDeals.filter((d) => !TERMINAL_STAGES.includes(d.stage)),
-    [scopedDeals]
-  );
-  const pipelineValued = useMemo(
-    () =>
-      scopedActiveDeals
-        .map((d) => resolveDealValue(d, multiples, rates).value)
-        .filter((v): v is number => v !== null),
-    [scopedActiveDeals, multiples, rates]
-  );
-  const pipelineValue = useMemo(
-    () => pipelineValued.reduce((s, v) => s + v, 0),
-    [pipelineValued]
-  );
-  const myClaims = useMemo(
-    () =>
-      deals.filter((d) => d.owner === userName).length +
-      execs.filter((e) => e.owner === userName).length,
-    [deals, execs, userName]
-  );
+  // Pipeline value now comes from the stored summary (command
+  // strip, §3) — the page no longer recomputes it from raw deals.
   const openTasks = useMemo(() => tasks.filter((t) => !t.done), [tasks]);
   const overdueTasks = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -348,7 +356,7 @@ export default function Overview() {
       flowAdded: flow.filter((f) => f.status === "added" && inWin(f.updatedAt)).length,
       touches: interactions.filter((i) => inWin(i.occurredAt)).length,
       tasksDone: tasks.filter((t) => t.done && inWin(t.updatedAt)).length,
-      closedWon: deals.filter((d) => d.stage === "Closed Won" && inWin(d.updatedAt)).length,
+      closedWon: deals.filter((d) => (d.stage === "Closed Won" || d.stage === "Closed") && inWin(d.updatedAt)).length,
       passed: deals.filter((d) => d.stage === "Passed" && inWin(d.updatedAt)).length,
     };
   }, [weekWindow, deals, execs, flow, interactions, tasks, multiples, rates]);
@@ -450,28 +458,6 @@ export default function Overview() {
     }
   };
 
-  const renderLoc = (loc: string) => {
-    if (!loc) return null;
-    if (/^https?:\/\//i.test(loc)) {
-      return (
-        <a href={loc} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-[#8a6f3e]">
-          {locText(loc)}
-        </a>
-      );
-    }
-    if (/teams|zoom|online|phone|call/i.test(loc)) return <span>{loc}</span>;
-    return (
-      <a
-        href={`https://www.google.com/maps/search/${encodeURIComponent(loc)}`}
-        target="_blank"
-        rel="noreferrer"
-        className="hover:underline"
-      >
-        {loc}
-      </a>
-    );
-  };
-
   const staleDeals = useMemo(() => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
@@ -509,7 +495,7 @@ export default function Overview() {
     const ebitdaDeals = scopedActive.filter((d) => d.ebitda != null);
     const ebitdaSum = ebitdaDeals.reduce((s, d) => s + (d.ebitda || 0), 0);
     const closedPassed = scopedDeals.filter((d) => TERMINAL_STAGES.includes(d.stage));
-    const won = closedPassed.filter((d) => d.stage === "Closed Won").length;
+    const won = closedPassed.filter((d) => d.stage === "Closed Won" || d.stage === "Closed").length;
     const winRate =
       closedPassed.length >= 5 ? Math.round((won / closedPassed.length) * 100) : null;
 
@@ -520,7 +506,7 @@ export default function Overview() {
     const ACTIVE_STAGES = DEAL_STAGES.filter((s) => !TERMINAL_STAGES.includes(s));
     const reached = ACTIVE_STAGES.map((_, i) =>
       scopedDeals.filter((d) => {
-        if (d.stage === "Closed Won") return true;
+        if (d.stage === "Closed Won" || d.stage === "Closed") return true;
         const idx = (ACTIVE_STAGES as readonly string[]).indexOf(d.stage);
         return idx >= i;
       }).length
@@ -716,12 +702,6 @@ export default function Overview() {
   // summary built ONLY from counts this page already loads (meetings
   // today from the calendar mirror, follow-ups due today, overdue) —
   // any component that can't be derived is omitted, never estimated.
-  const briefDate = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    timeZone: "America/Phoenix",
-  });
   const phoenixDay = (iso: string) =>
     new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Phoenix" });
   const todayStr = phoenixDay(new Date().toISOString());
@@ -771,207 +751,101 @@ export default function Overview() {
     year: "numeric",
   });
 
-  return (
-    <>
-      <PageHero
-        eyebrow="Canny Capital Partners"
-        title="Overview"
-        subtitle="The state of the firm's pipeline at a glance."
+  /* ---- Overview redesign nodes (Oct 25, 2026) ----
+   * Active deals (§4) goes into PlatformOverview's main column; the
+   * Follow-ups + Important dates cards (§§5, 9) go into its right
+   * rail. All state/handlers are the ones this page already owned —
+   * the calendar inclusion rule is unchanged (every non-dismissed
+   * event from now−1h through +14 days; Other items expanded). */
+  const platSummary = (
+    platformPayload as { summary?: { readinessByDeal?: Record<string, number> } } | null
+  )?.summary;
+  const firstName = (userName || "").split(" ").filter(Boolean)[0] ?? "";
+
+  const activeDealsNode = (
+    <ActiveDealsRow
+      deals={deals}
+      multiples={multiples}
+      rates={rates}
+      tasks={tasks}
+      metricsByDeal={metricsByDeal}
+      readinessByDeal={platSummary?.readinessByDeal ?? {}}
+    />
+  );
+
+  const followUpsNode = (
+    <div id="overview-tasks" className="card-surface scroll-mt-4 p-4 sm:p-5">
+      <div className="mb-3">
+        <h3 className="font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
+          Follow-ups
+        </h3>
+        <div aria-hidden className="mt-1.5 h-0.5 w-10 rounded bg-[#b8975a]" />
+      </div>
+      <TaskList
+        tasks={tasks}
+        deals={deals}
+        execs={execs}
+        onChanged={load}
+        collapsibleForm
       />
-      <main className="mx-auto max-w-[1400px] overflow-x-clip px-4 py-6 sm:px-6">
-      {(pull > 8 || refreshing) && (
-        <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center">
-          <span className="rounded-full bg-[#0d1f3c] px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg">
-            {pullPillLabel(pull, refreshing)}
-          </span>
-        </div>
+      {staleDeals.length > 0 && (
+        <Link
+          href="/pipeline"
+          className="mt-4 block rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/15"
+        >
+          ⚠ {staleDeals.length}{" "}
+          {staleDeals.length === 1 ? "deal is" : "deals are"} stale — no
+          touch in 30+ days →
+        </Link>
       )}
+    </div>
+  );
 
-      {/* Morning Brief (premium redesign Wave 1, Oct 14, 2026) —
-          replaces the stat-tile row: today's date, a one-line summary
-          from real counts only, and the key numbers as large serif
-          figures with small uppercase labels. Scope: ALL deals (the
-          count-all rule) — the old "All sectors." caption now rides
-          in the pipeline-value label line. */}
-      <section className="card-surface card-accent mb-6 p-5 sm:p-6">
-        <p className="font-display text-3xl font-semibold text-[#0d1f3c] dark:text-white">
-          {briefDate}
-        </p>
-        {briefParts.length > 0 && (
-          <p className="mt-1 text-sm text-slate-500 dark:text-white/60">
-            {briefParts.join(" · ")}
-          </p>
-        )}
-        <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 lg:grid-cols-5">
-          <StatTile
-            label="Active pipeline value"
-            display={pipelineValued.length === 0 ? "—" : fmtMoneyCompact(pipelineValue)}
-            numericValue={pipelineValued.length === 0 ? undefined : pipelineValue}
-            format={fmtMoneyCompact}
-            caption="All sectors"
-            href="/pipeline"
-            title={pipelineValued.length === 0 ? undefined : fmtMoney(pipelineValue)}
-          />
-          <StatTile
-            label="Active targets"
-            display={String(activeDeals.length)}
-            numericValue={activeDeals.length}
-            format={(n) => n.toLocaleString()}
-            caption="In the pipeline now"
-            href="/pipeline"
-          />
-          <StatTile
-            label="Fit targets"
-            display={fitTotalReady ? fitTotal.toLocaleString() : "…"}
-            numericValue={fitTotalReady ? fitTotal : undefined}
-            format={(n) => n.toLocaleString()}
-            caption="Across the five focus sectors"
-            href="/market-intel#fit-targets"
-          />
-          <StatTile
-            label="Open follow-ups"
-            display={String(openTasks.length)}
-            numericValue={openTasks.length}
-            format={(n) => n.toLocaleString()}
-            caption={overdueTasks.length > 0 ? `${overdueTasks.length} overdue` : "None overdue"}
-            valueClassName={overdueTasks.length > 0 ? "!text-[#B03A2E]" : ""}
-          />
-          <div className="col-span-2 lg:col-span-1">
-            <StatTile
-              label="Claimed by me"
-              display={String(myClaims)}
-              numericValue={myClaims}
-              format={(n) => n.toLocaleString()}
-              caption="Deals & operators"
-              href="/pipeline"
-            />
-          </div>
-        </div>
-        {showFullAnalytics && (
-          <div className="mt-5 hidden border-t border-slate-100 pt-3 md:block dark:border-white/10">
-            <Link
-              href="/analytics"
-              className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
-            >
-              View full analytics →
-            </Link>
-          </div>
-        )}
-      </section>
+  const weekEndStr = (() => {
+    const d = new Date(`${todayStr}T12:00:00`);
+    d.setDate(d.getDate() + 7);
+    return d.toLocaleDateString("en-CA", { timeZone: "America/Phoenix" });
+  })();
+  const isThisWeek = (iso: string) => {
+    const day = phoenixDay(iso);
+    return day >= todayStr && day <= weekEndStr;
+  };
 
-      {/* Platform summary (Phase 1, Oct 21, 2026) — summary-table
-          widgets + company cards, self-fetching from
-          /api/platform/overview; degrades to an error state while
-          the database is unavailable. */}
-      <PlatformOverview />
-
-      {/* Today & this week (Oct 14, 2026) — Tasks & follow-ups and
-          the Weekly summary combined into one section directly under
-          the Morning Brief, at Ethan's request: what's going on and
-          what needs to be done, instead of two sections buried at
-          the bottom of the page. Left zone: Needs attention — the
-          add-a-follow-up form + task list (the /api/tasks sort puts
-          overdue first, then due today, then upcoming), with stale
-          deals folded in as one compact line to the pipeline. Right
-          zone: What's happening — the Weekly summary (week toggle,
-          counts, important dates). The section keeps
-          id="overview-tasks" so the FAB's ?newtask=1 deep link
-          lands here and focuses the form exactly as before. All
-          state, memos, and handlers are unchanged — a relocation
-          and merge of the two sections' JSX only. */}
-      <section id="overview-tasks" className="card-surface mb-6 scroll-mt-4 p-5 sm:p-6">
-        <h2 className="text-xl font-bold text-[#0d1f3c] dark:text-white">
-          Today &amp; this week
-        </h2>
-        <div className="mt-4 grid gap-6 lg:grid-cols-5">
-          <div className="min-w-0 lg:col-span-3">
-            <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
-              Needs attention
-            </h3>
-            <TaskList
-              tasks={tasks}
-              deals={deals}
-              execs={execs}
-              onChanged={load}
-            />
-            {staleDeals.length > 0 && (
-              <Link
-                href="/pipeline"
-                className="mt-4 block rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/15"
-              >
-                ⚠ {staleDeals.length}{" "}
-                {staleDeals.length === 1 ? "deal is" : "deals are"} stale — no
-                touch in 30+ days →
-              </Link>
-            )}
-          </div>
-          <div className="min-w-0 border-t border-slate-100 pt-6 dark:border-white/10 lg:col-span-2 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
-                What&apos;s happening
-              </h3>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400 dark:text-white/40">
-                  {weekWindow.start.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  {" – "}
-                  {weekTab === "this"
-                    ? "today"
-                    : new Date(weekWindow.end.getTime() - 86400000).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                </span>
-                {(["this", "last"] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setWeekTab(t)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
-                      weekTab === t
-                        ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
-                        : "text-slate-500 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/5"
-                    }`}
-                  >
-                    {t === "this" ? "This week" : "Last week"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="mb-4 flex flex-wrap gap-2">
-              {[
-                `${weekly.newDeals.length} new target${weekly.newDeals.length === 1 ? "" : "s"}${
-                  weekly.newDealsValue > 0 ? ` · ${fmtMoney(weekly.newDealsValue)}` : ""
-                }`,
-                `${weekly.newExecs.length} new operator${weekly.newExecs.length === 1 ? "" : "s"}`,
-                `${weekly.flowForSale + weekly.flowOperators + weekly.flowNotes} new in Activity (${weekly.flowForSale} for sale · ${weekly.flowOperators} operators · ${weekly.flowNotes} notes)`,
-                `${weekly.flowAdded} moved to pipeline`,
-                `${weekly.touches} touches logged`,
-                `${weekly.tasksDone} follow-ups completed`,
-                ...(weekly.closedWon > 0 ? [`${weekly.closedWon} closed won 🎉`] : []),
-                ...(weekly.passed > 0 ? [`${weekly.passed} passed`] : []),
-              ].map((chip) => (
-                <span
-                  key={chip}
-                  className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
-                >
-                  {chip}
-                </span>
-              ))}
-            </div>
-            {weekTab === "this" && (calSummary.linked.length > 0 || calSummary.other.length > 0) && (
-              <div className="mt-4">
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-                  Important dates
+  const importantDatesNode = (
+    <div className="relative overflow-hidden rounded-2xl bg-[#0d1f3c] p-4 text-white sm:p-5">
+      <div
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-[#dec084] via-[#b8975a] to-[#9c7c3f]"
+      />
+      <div className="mb-3">
+        <h3 className="font-display text-xl font-semibold text-white">
+          Important dates
+        </h3>
+        <div aria-hidden className="mt-1.5 h-0.5 w-10 rounded bg-[#b8975a]" />
+      </div>
+      {calSummary.linked.length > 0 ? (
+        <>
+          {[
+            { label: "This week", items: calSummary.linked.filter(({ e }) => isThisWeek(e.startsAt)) },
+            { label: "Coming up", items: calSummary.linked.filter(({ e }) => !isThisWeek(e.startsAt)) },
+          ]
+            .filter((g) => g.items.length > 0)
+            .map((g) => (
+              <div key={g.label} className="mb-3 last:mb-0">
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#d4b37a]">
+                  {g.label}
                 </p>
-                {calSummary.linked.length > 0 ? (
-                  <ul className="space-y-1.5">
-                    {calSummary.linked.map(({ e, href, label }) => {
-                      const d = new Date(e.startsAt);
-                      return (
-                        <li
-                          key={e.eventId}
-                          className="group flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-2.5 py-2 dark:border-white/5 dark:bg-white/[0.03]"
-                        >
-                          <div className="flex h-10 w-11 shrink-0 flex-col items-center justify-center rounded-md bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
+                <ul className="relative space-y-1.5 border-l border-white/15 pl-3">
+                  {g.items.map(({ e, href, label }) => {
+                    const d = new Date(e.startsAt);
+                    return (
+                      <li key={e.eventId} className="group relative">
+                        <span
+                          aria-hidden
+                          className="absolute -left-[15.5px] top-3 h-1.5 w-1.5 rounded-full bg-[#b8975a]"
+                        />
+                        <div className="flex items-center gap-3 rounded-lg bg-white/[0.05] px-2.5 py-2 ring-1 ring-white/10">
+                          <div className="flex h-10 w-11 shrink-0 flex-col items-center justify-center rounded-md bg-[#b8975a] text-[#0d1f3c]">
                             <span className="text-[9px] font-bold uppercase leading-none tracking-wider">
                               {d.toLocaleDateString("en-US", { month: "short", timeZone: "America/Phoenix" })}
                             </span>
@@ -982,15 +856,15 @@ export default function Overview() {
                           <div className="min-w-0 flex-1">
                             <Link
                               href={href}
-                              className="block truncate text-sm font-semibold text-[#0d1f3c] hover:underline dark:text-white"
+                              className="block truncate text-sm font-semibold text-white hover:underline"
                             >
                               {e.title}
                             </Link>
-                            <p className="truncate text-xs text-slate-400 dark:text-white/40">
+                            <p className="truncate text-xs text-white/50">
                               {fmtWhen(e.startsAt, e.allDay)}
-                              {e.location ? <> · {renderLoc(e.location)}</> : null}
+                              {e.location ? <> · {locText(e.location)}</> : null}
                               {" · "}
-                              <Link href={href} className="font-medium text-[#8a6f3c] hover:underline dark:text-[#d4b37a]">
+                              <Link href={href} className="font-medium text-[#d4b37a] hover:underline">
                                 {label} ↗
                               </Link>
                             </p>
@@ -999,66 +873,88 @@ export default function Overview() {
                             onClick={() => dismissEvent(e.eventId)}
                             title="Dismiss"
                             aria-label="Dismiss event"
-                            className="shrink-0 rounded px-1.5 text-lg leading-none text-slate-300 opacity-0 transition hover:text-red-400 group-hover:opacity-100 dark:text-white/25"
+                            className="shrink-0 rounded px-1.5 text-lg leading-none text-white/30 opacity-0 transition hover:text-red-300 group-hover:opacity-100"
                           >
                             ×
                           </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="text-xs text-slate-400 dark:text-white/40">
-                    No upcoming meetings linked to a Directory contact or deal.
-                  </p>
-                )}
-                {calSummary.other.length > 0 && (
-                  <div className="mt-2">
-                    <button
-                      onClick={() => setShowOtherCal((v) => !v)}
-                      className="text-xs font-semibold text-slate-500 hover:underline dark:text-white/50"
-                      aria-expanded={showOtherCal}
-                    >
-                      {showOtherCal ? "▾" : "▸"} Other calendar items ({calSummary.other.length})
-                    </button>
-                    {showOtherCal && (
-                      <ul className="mt-1.5 space-y-1">
-                        {calSummary.other.map((e) => (
-                          <li
-                            key={e.eventId}
-                            className="flex items-baseline justify-between gap-3 px-1 py-0.5 text-xs text-slate-500 dark:text-white/50"
-                          >
-                            <span className="min-w-0 truncate">{e.title}</span>
-                            <span className="shrink-0">{fmtWhen(e.startsAt, e.allDay)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
-            )}
-          </div>
+            ))}
+        </>
+      ) : (
+        <p className="text-xs text-white/50">
+          No upcoming meetings linked to a Directory contact or deal.{" "}
+          <Link href="/calendar" className="font-semibold text-[#d4b37a] hover:underline">
+            Open Calendar →
+          </Link>
+        </p>
+      )}
+      {calSummary.other.length > 0 && (
+        <div className="mt-3 border-t border-white/10 pt-2">
+          <button
+            onClick={() => setShowOtherCal((v) => !v)}
+            className="text-xs font-semibold text-white/60 hover:underline"
+            aria-expanded={showOtherCal}
+          >
+            {showOtherCal ? "▾" : "▸"} Other calendar items ({calSummary.other.length})
+          </button>
+          {showOtherCal && (
+            <ul className="mt-1.5 space-y-1">
+              {calSummary.other.map((e) => (
+                <li
+                  key={e.eventId}
+                  className="flex items-baseline justify-between gap-3 px-1 py-0.5 text-xs text-white/55"
+                >
+                  <span className="min-w-0 truncate">{e.title}</span>
+                  <span className="shrink-0">{fmtWhen(e.startsAt, e.allDay)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      </section>
+      )}
+    </div>
+  );
 
-      {/* Sector overview + Latest intelligence panels unmounted
-          Oct 24, 2026 (Ethan: "get rid of these for now"). The
-          LatestIntel component, the /api/market/* endpoints, and
-          the fit-count / tailwind / hospMeta data flow above are
-          all retained and the Market Intel page is unaffected —
-          restore by re-mounting the section + <LatestIntel /> here. */}
-      {/* Market strip — FRED reference rates only (Prime, SOFR,
-          10-Yr, 2-Yr) with the move vs the previous observation and
-          an as-of date. No sector ETF/reference quotes: no licensed
-          source exists, and unlabeled data is off-limits. */}
+  const railNode = (
+    <>
+      {followUpsNode}
+      {importantDatesNode}
+    </>
+  );
+
+  return (
+    <>
+      <main className="mx-auto max-w-[1400px] overflow-x-clip px-4 py-6 sm:px-6">
+      {(pull > 8 || refreshing) && (
+        <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center">
+          <span className="rounded-full bg-[#0d1f3c] px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg">
+            {pullPillLabel(pull, refreshing)}
+          </span>
+        </div>
+      )}
+
+      {/* Today header (§2) — greeting by Phoenix time of day, full
+          date, and the one-line brief merged into the desert hero. */}
+      <TodayHero firstName={firstName} briefParts={briefParts} />
+
+      {/* Markets strip (§10) — slim ticker directly under the hero:
+          Prime, SOFR, 10-Yr, 2-Yr from stored Market Intel econ data
+          only; the as-of date rides in the tooltip. */}
       {rateStrip.length > 0 && (
-        <section className="card-surface mb-6 flex flex-wrap items-center gap-x-8 gap-y-3 px-5 py-3.5">
+        <section
+          className="card-surface mb-6 flex flex-wrap items-center gap-x-8 gap-y-3 px-5 py-3.5"
+          title={rateAsOf ? `As of ${new Date(`${rateAsOf}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · FRED via Market Intel` : "FRED via Market Intel"}
+        >
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-white/50">
             Markets
           </p>
           {rateStrip.map((r) => (
-            <div key={r.label} className="flex items-baseline gap-2">
+            <div key={r.label} className="flex items-baseline gap-2" title={`${r.label} as of ${r.date}`}>
               <span className="text-xs font-medium text-slate-500 dark:text-white/60">
                 {r.label}
               </span>
@@ -1091,6 +987,85 @@ export default function Overview() {
           )}
         </section>
       )}
+
+      {/* Platform summary + command strip + asymmetric grid (§§3, 5):
+          the payload was fetched once in load() and is passed down;
+          Active deals (§4) fills the main column, Follow-ups +
+          Important dates (§9) fill the right rail. */}
+      <PlatformOverview
+        initialPayload={platformPayload as never}
+        fitTotal={fitTotal}
+        fitReady={fitTotalReady}
+        activeDealsNode={activeDealsNode}
+        railNode={railNode}
+      />
+
+      {/* What's happening — the weekly summary, kept as its own slim
+          card under the grid (its counts and week toggle are
+          unchanged; Important dates moved into the rail above). */}
+      <section className="card-surface mb-6 p-5 sm:p-6">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+            What&apos;s happening
+          </h2>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400 dark:text-white/40">
+              {weekWindow.start.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              {" – "}
+              {weekTab === "this"
+                ? "today"
+                : new Date(weekWindow.end.getTime() - 86400000).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+            </span>
+            {(["this", "last"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setWeekTab(t)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                  weekTab === t
+                    ? "bg-[#0d1f3c] text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]"
+                    : "text-slate-500 hover:bg-slate-100 dark:text-white/60 dark:hover:bg-white/5"
+                }`}
+              >
+                {t === "this" ? "This week" : "Last week"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {[
+            `${weekly.newDeals.length} new target${weekly.newDeals.length === 1 ? "" : "s"}${
+              weekly.newDealsValue > 0 ? ` · ${fmtMoney(weekly.newDealsValue)}` : ""
+            }`,
+            `${weekly.newExecs.length} new operator${weekly.newExecs.length === 1 ? "" : "s"}`,
+            `${weekly.flowForSale + weekly.flowOperators + weekly.flowNotes} new in Activity (${weekly.flowForSale} for sale · ${weekly.flowOperators} operators · ${weekly.flowNotes} notes)`,
+            `${weekly.flowAdded} moved to pipeline`,
+            `${weekly.touches} touches logged`,
+            `${weekly.tasksDone} follow-ups completed`,
+            ...(weekly.closedWon > 0 ? [`${weekly.closedWon} closed won 🎉`] : []),
+            ...(weekly.passed > 0 ? [`${weekly.passed} passed`] : []),
+          ].map((chip) => (
+            <span
+              key={chip}
+              className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+        {showFullAnalytics && (
+          <div className="mt-4 border-t border-slate-100 pt-3 dark:border-white/10">
+            <Link
+              href="/analytics"
+              className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+            >
+              View full analytics →
+            </Link>
+          </div>
+        )}
+      </section>
 
       {/* Operators tile (restyled Wave 1: card surface + serif figures) */}
       <section className="card-surface mb-6 p-5">
@@ -1368,8 +1343,7 @@ export default function Overview() {
               })}
             </div>
             <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
-              Live fit-target counts from Market Intel. Data as of {dataDate} · n ={" "}
-              {FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0).toLocaleString()}
+              Live fit-target counts from Market Intel. Data as of {dataDate}.
             </p>
 
             <div className="mt-5 grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 sm:grid-cols-4 dark:border-white/10">
