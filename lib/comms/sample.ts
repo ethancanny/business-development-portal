@@ -138,6 +138,7 @@ const FINDINGS_FIGURES: AppendixFigure[] = [
   fig("find_open_medium", "Open findings — medium severity", 3, "number"),
   fig("find_open_low", "Open findings — low severity", 2, "number"),
   fig("find_red_flags_confirmed", "Confirmed red flags", 1, "number"),
+  fig("find_impact_total", "Quantified impact (open findings)", 385000, "money"),
 ];
 
 export const SAMPLE_DATASET: SampleDataset = {
@@ -253,18 +254,18 @@ export const SAMPLE_DATASET: SampleDataset = {
     status: "ok",
     figures: FINDINGS_FIGURES,
     table: {
-      columns: ["Finding", "Severity", "Category", "Status"],
+      columns: ["Finding", "Severity", "Category", "Status", "Impact"],
       rows: [
-        ["Customer concentration — top customer 18% of revenue", "high", "Revenue quality", "open"],
-        ["Two lathes beyond expected useful life", "medium", "Operations", "open"],
-        ["Month-end close takes 12 business days", "medium", "Finance", "open"],
-        ["No written succession plan for plant manager", "medium", "Management", "proposed"],
-        ["Insurance limits below peer benchmark", "low", "Risk", "open"],
-        ["Aged receivables over 90 days at 4.1% of AR", "low", "Working capital", "open"],
-        ["Red flag: owner salary above market (confirmed)", "high", "Adjustments", "confirmed"],
+        ["Customer concentration — top customer 18% of revenue", "high", "Revenue quality", "open", 240000],
+        ["Two lathes beyond expected useful life", "medium", "Operations", "open", 85000],
+        ["Month-end close takes 12 business days", "medium", "Finance", "open", null],
+        ["No written succession plan for plant manager", "medium", "Management", "proposed", null],
+        ["Insurance limits below peer benchmark", "low", "Risk", "open", 18000],
+        ["Aged receivables over 90 days at 4.1% of AR", "low", "Working capital", "open", 42000],
+        ["Red flag: owner salary above market (confirmed)", "high", "Adjustments", "confirmed", null],
       ],
     },
-    text: "Open findings: 6 (high 1, medium 3, low 2). Confirmed red flags: 1.",
+    text: "Open findings: 6 (high 1, medium 3, low 2). Confirmed red flags: 1. Quantified impact of open findings: $385,000.",
   },
   memo: {
     status: "ok",

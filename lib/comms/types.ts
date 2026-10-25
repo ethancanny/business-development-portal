@@ -120,6 +120,53 @@ export interface CheckIssue {
   blockKey?: string;
 }
 
+/* --------------------- recipient document meta --------------------- */
+
+/** How the subject's mark may appear on a report surface, AFTER the
+ * codename rules for the surface's audience have been applied. */
+export interface ReportSubjectMark {
+  kind: "logo" | "monogram" | "none";
+  /** Token-scoped guest logo path (kind === "logo" only). */
+  logoPath?: string;
+  initials?: string;
+  /** Monogram background color (kind === "monogram" only). */
+  color?: string;
+  /** Company accent for charts / tile accents. Absent under an
+   * active external codename (the default palette applies). */
+  accentColor?: string;
+}
+
+/** Everything the redesigned report document needs beyond the render
+ * itself (Report redesign, Oct 24, 2026). Built server-side by the
+ * delivery service for recipients, and by the preview endpoint for
+ * the sender's "as this recipient" view. */
+export interface ReportGuestMeta {
+  reportId: string;
+  /** Template name, e.g. "Diligence summary". */
+  reportType: string;
+  purpose: string;
+  version: number;
+  /** Display name after codename rules; "" when no subject. */
+  subjectName: string;
+  subjectSecondary: string | null;
+  codenameActive: boolean;
+  mark: ReportSubjectMark;
+  preparedFor: { name: string; email: string; organization: string };
+  preparedBy: string;
+  sender: { name: string; email: string; phone: string };
+  asOf: string;
+  periodLabel: string;
+  expiresAt: string;
+  /** "Available until November 24, 2026". */
+  expiresLabel: string;
+  hasNewerVersion: boolean;
+  /** Configured scheduling link, or null — never invented. */
+  schedulingUrl: string | null;
+  audience: string;
+  /** Structural confidentiality line for this audience/recipient. */
+  confidentiality: string;
+}
+
 /* ------------------------- template + subject ------------------------ */
 
 /** The template shape assemble / routineAllowed / the service layer

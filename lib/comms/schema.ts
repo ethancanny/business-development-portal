@@ -32,7 +32,12 @@ interface SystemTemplateSeed {
   purpose: string;
   audience: string;
   subjectKinds: string[];
-  blocks: Array<{ key: string; type: string; heading: string }>;
+  blocks: Array<{
+    key: string;
+    type: string;
+    heading: string;
+    config?: { text?: string };
+  }>;
   tone: string;
   disclaimers: string[];
 }
@@ -50,9 +55,13 @@ export const SYSTEM_TEMPLATES: SystemTemplateSeed[] = [
     audience: "investor",
     subjectKinds: ["company", "deal", "investor", "portfolio_company"],
     blocks: [
-      { key: "financial_summary", type: "financial_summary", heading: "Financial summary" },
+      { key: "highlights", type: "narrative", heading: "Highlights" },
+      { key: "financial_summary", type: "financial_summary", heading: "Performance summary" },
+      { key: "variance_table", type: "variance_table", heading: "Performance vs plan" },
+      { key: "plan_status", type: "plan_status", heading: "Value creation progress" },
+      { key: "covenant_status", type: "covenant_status", heading: "Cash and covenants" },
       { key: "capital_status", type: "capital_status", heading: "Capital status" },
-      { key: "narrative", type: "narrative", heading: "Update" },
+      { key: "outlook", type: "narrative", heading: "Outlook and asks" },
     ],
     tone: "Clear, factual and concise. Lead with performance against plan, then capital activity; no promotional language.",
     disclaimers: [CONFIDENTIAL, FIGURES_BASIS],
@@ -64,10 +73,11 @@ export const SYSTEM_TEMPLATES: SystemTemplateSeed[] = [
     audience: "investor",
     subjectKinds: ["deal", "company"],
     blocks: [
-      { key: "financial_summary", type: "financial_summary", heading: "Financial summary" },
-      { key: "findings", type: "findings", heading: "Diligence findings" },
-      { key: "plan_status", type: "plan_status", heading: "Value creation plan" },
-      { key: "narrative", type: "narrative", heading: "Investment narrative" },
+      { key: "thesis", type: "narrative", heading: "Investment thesis" },
+      { key: "memo", type: "memo", heading: "Business overview and market" },
+      { key: "financial_summary", type: "financial_summary", heading: "Financials" },
+      { key: "findings", type: "findings", heading: "Risks and diligence findings" },
+      { key: "recommendation", type: "narrative", heading: "Valuation, terms and recommendation" },
     ],
     tone: "Analytical and balanced. State the thesis, the evidence for it, and the principal risks with equal weight.",
     disclaimers: [
@@ -118,8 +128,17 @@ export const SYSTEM_TEMPLATES: SystemTemplateSeed[] = [
     audience: "seller",
     subjectKinds: ["company", "deal"],
     blocks: [
-      { key: "financial_summary", type: "financial_summary", heading: "Financial summary" },
-      { key: "narrative", type: "narrative", heading: "Feedback" },
+      {
+        key: "analyzed",
+        type: "text",
+        heading: "What we analyzed",
+        config: {
+          text: "We reviewed the financial information and operating records made available to us — every figure in this report is listed with its source in the appendix — and assessed the business against the criteria a buyer will apply.",
+        },
+      },
+      { key: "financial_summary", type: "financial_summary", heading: "Financial review" },
+      { key: "findings", type: "findings", heading: "Key findings" },
+      { key: "recommendations", type: "narrative", heading: "Recommendations and next steps" },
     ],
     tone: "Respectful and constructive. Be specific about strengths and about the questions a buyer will ask; avoid valuation commitments.",
     disclaimers: [
@@ -168,9 +187,18 @@ export const SYSTEM_TEMPLATES: SystemTemplateSeed[] = [
     audience: "internal",
     subjectKinds: ["deal", "company"],
     blocks: [
-      { key: "findings", type: "findings", heading: "Diligence findings" },
+      {
+        key: "scope",
+        type: "text",
+        heading: "Scope and status",
+        config: {
+          text: "This summary covers the diligence workstreams completed to date for the subject company, the findings they produced, and the items that remain open. Sources for every figure are listed in the appendix.",
+        },
+      },
+      { key: "findings", type: "findings", heading: "Findings by severity" },
       { key: "financial_summary", type: "financial_summary", heading: "Financial summary" },
       { key: "memo", type: "memo", heading: "Deal memo" },
+      { key: "next_steps", type: "narrative", heading: "Risks, open items and next steps" },
     ],
     tone: "Evidence-led and neutral. Report what was verified, what could not be verified, and what remains open.",
     disclaimers: [
@@ -398,6 +426,7 @@ export function ensureComms(): Promise<void> {
           type: b.type,
           heading: b.heading,
           visibility: "all" as const,
+          ...(b.config ? { config: b.config } : {}),
         }));
         const asTemplate: CommsTemplate = {
           id: tpl.id,
@@ -423,6 +452,73 @@ export function ensureComms(): Promise<void> {
             ${JSON.stringify(tpl.disclaimers)}::jsonb,
             ${routine}, true, 'system', 'system')
           ON CONFLICT (id) DO NOTHING`;
+      }
+
+      // Report redesign (Oct 24, 2026): upgrade the four named
+      // system templates to the spec section maps — ONLY when the
+      // stored blocks still exactly match the pre-redesign seed
+      // (key|type|heading fingerprint). Any partner edit to a
+      // template makes the fingerprint differ and the template is
+      // left untouched. Marker-guarded, runs once.
+      const redesignMarker = await db`
+        SELECT value FROM comms.settings WHERE key = 'report_redesign_v1' LIMIT 1`;
+      if (!redesignMarker.length) {
+        const LEGACY_BLOCKS: Record<string, string> = {
+          tpl_investor_update:
+            "financial_summary|financial_summary|Financial summary;capital_status|capital_status|Capital status;narrative|narrative|Update",
+          tpl_investment_memo:
+            "financial_summary|financial_summary|Financial summary;findings|findings|Diligence findings;plan_status|plan_status|Value creation plan;narrative|narrative|Investment narrative",
+          tpl_seller_feedback:
+            "financial_summary|financial_summary|Financial summary;narrative|narrative|Feedback",
+          tpl_diligence_summary:
+            "findings|findings|Diligence findings;financial_summary|financial_summary|Financial summary;memo|memo|Deal memo",
+        };
+        for (const tpl of SYSTEM_TEMPLATES) {
+          const legacy = LEGACY_BLOCKS[tpl.id];
+          if (!legacy) continue;
+          const rows = await db`
+            SELECT blocks FROM comms.templates WHERE id = ${tpl.id} LIMIT 1`;
+          if (!rows.length) continue;
+          const stored = (rows[0] as Record<string, unknown>).blocks;
+          const storedList = Array.isArray(stored)
+            ? stored
+            : typeof stored === "string"
+              ? (JSON.parse(stored) as unknown[])
+              : [];
+          const fingerprint = (storedList as Array<Record<string, unknown>>)
+            .map((b) => `${b.key}|${b.type}|${b.heading}`)
+            .join(";");
+          if (fingerprint !== legacy) continue;
+          const blocks = tpl.blocks.map((b) => ({
+            key: b.key,
+            type: b.type,
+            heading: b.heading,
+            visibility: "all" as const,
+            ...(b.config ? { config: b.config } : {}),
+          }));
+          const asTemplate: CommsTemplate = {
+            id: tpl.id,
+            name: tpl.name,
+            purpose: tpl.purpose,
+            audience: tpl.audience as CommsTemplate["audience"],
+            subjectKinds: tpl.subjectKinds,
+            blocks,
+            tone: tpl.tone,
+            disclaimers: tpl.disclaimers,
+            routine: false,
+            isSystem: true,
+          };
+          await db`
+            UPDATE comms.templates
+            SET blocks = ${JSON.stringify(blocks)}::jsonb,
+                routine = ${routineAllowed(asTemplate)},
+                updated_at = now()
+            WHERE id = ${tpl.id}`;
+        }
+        await db`
+          INSERT INTO comms.settings (key, value, updated_at)
+          VALUES ('report_redesign_v1', ${JSON.stringify({ appliedAt: new Date().toISOString() })}::jsonb, now())
+          ON CONFLICT (key) DO NOTHING`;
       }
 
       kickStaleHandlerRegistration();
