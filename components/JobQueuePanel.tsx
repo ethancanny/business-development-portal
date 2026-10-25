@@ -75,6 +75,121 @@ interface JobGroup {
 }
 
 /**
+ * Plain-English names for every job kind (Ethan, Oct 24, 2026):
+ * the panel showed raw kind strings (push_meeting60, db_backup…)
+ * and "we know what's going on" requires real names. Each entry
+ * was verified against the kind's handler in lib/platform/jobs.ts
+ * (executeJob) and its enqueue sites — this map covers every kind
+ * the system can produce. An unmapped kind falls back to its raw
+ * string with no blurb; the raw kind always stays visible in the
+ * muted meta line for debugging.
+ */
+const JOB_KIND_INFO: Record<string, { name: string; blurb: string }> = {
+  refresh_overview_summary: {
+    name: "Overview summary refresh",
+    blurb:
+      "Rebuilds the Overview page's stored totals after deals, companies, or events change.",
+  },
+  db_backup: {
+    name: "Daily backup check",
+    blurb:
+      "Daily checkpoint for database backups — the snapshots themselves are Neon's point-in-time recovery; this records the verification in the audit log.",
+  },
+  refresh_generated_events: {
+    name: "Calendar items refresh",
+    blurb:
+      "Regenerates the calendar's built-in items — task due dates, deadlines, reporting dates, closings — from their source records.",
+  },
+  push_reminder: {
+    name: "Follow-up & event reminders",
+    blurb:
+      "Push alert for one follow-up task or calendar event at its chosen reminder time, including snooze re-fires.",
+  },
+  push_meeting60: {
+    name: "Meeting reminder — 1 hour before",
+    blurb: "Push alert sent an hour before a calendar meeting starts.",
+  },
+  push_morning_digest: {
+    name: "Morning digest — 8:00 AM daily",
+    blurb:
+      "The daily 8:00 AM Phoenix bundle: morning digest, stalled deals, quiet contacts, and feed checks in one push.",
+  },
+  extract_financials: {
+    name: "Financial statement extraction",
+    blurb:
+      "Extracts the figures from a large uploaded financial statement (over the 5 MB quick limit) in the background.",
+  },
+  analyze_financials: {
+    name: "Financial analysis",
+    blurb:
+      "Runs a company's financial analysis after new financials are posted or adjustment decisions are made.",
+  },
+  extract_document_terms: {
+    name: "Contract terms extraction",
+    blurb:
+      "Reads an uploaded document and pulls its key contract terms into the diligence contract register.",
+  },
+  extract_document_text: {
+    name: "Document text extraction",
+    blurb:
+      "Extracts an uploaded document's text so its contents become searchable.",
+  },
+  generate_memo: {
+    name: "Diligence memo draft",
+    blurb:
+      "Regenerates a deal's diligence summary / IC memo draft from its current records.",
+  },
+  compute_risk_score: {
+    name: "Deal risk score",
+    blurb:
+      "Recomputes a deal's risk score and adds the result to its score history.",
+  },
+  refresh_record_checks: {
+    name: "Public record checks — monthly",
+    blurb:
+      "Monthly refresh of the automatable public record checks for tracked companies.",
+  },
+  deal_close_cascade: {
+    name: "Deal closing sequence",
+    blurb:
+      "Runs a closed deal's follow-through steps: monitoring record and baseline financials, value-creation plan shell, reporting calendar, data-room archive, and the close-out notification.",
+  },
+  monitoring_handoff: {
+    name: "Portfolio monitoring handoff",
+    blurb: "Copies a closed deal's closing baseline into Portfolio Monitoring.",
+  },
+  monitoring_period_due: {
+    name: "Reporting period due check",
+    blurb:
+      "Checks one portfolio reporting period; if it is overdue it flips to Late and raises the alert.",
+  },
+  dedupe_scan: {
+    name: "Duplicate auto-merge — daily",
+    blurb:
+      "Daily scan that automatically merges exact-duplicate companies and people.",
+  },
+  comms_generate_report: {
+    name: "Report generation",
+    blurb: "Builds one report in Reporting from its source data.",
+  },
+  comms_schedule_run: {
+    name: "Scheduled report run",
+    blurb:
+      "One occurrence of a recurring report schedule: data checks, draft generation, and delivery when the schedule is approved for it.",
+  },
+  comms_purge_discarded: {
+    name: "Discarded report cleanup — daily",
+    blurb:
+      "Permanently deletes reports that have sat in Discarded for more than 30 days.",
+  },
+};
+
+function kindInfo(kind: string): { name: string; blurb?: string } {
+  const info = JOB_KIND_INFO[kind];
+  return info ? info : { name: kind };
+}
+
+/**
  * Collapse repeated queue entries by kind (Ethan, Oct 24, 2026):
  * scheduled kinds like push_meeting60 leave a row per tick, most of
  * them cancelled, and the flat list drowned everything else. Group
@@ -176,6 +291,14 @@ export default function JobQueuePanel() {
   const failedCount = jobs.filter(
     (j) => j.status === "failed" || j.status === "error"
   ).length;
+  // Truthful header counts (Ethan, Oct 24, 2026): "active or queued"
+  // used to count every non-terminal row, so cancelled reminders
+  // and standing 'registered' placeholders inflated it. Active now
+  // means genuinely queued or running; cancelled/registered rows
+  // get their own count instead of masquerading as live work.
+  const ACTIVE = ["queued", "pending", "running", "processing"];
+  const activeCount = jobs.filter((j) => ACTIVE.includes(j.status)).length;
+  const filedCount = attention.length - activeCount - failedCount;
   // Collapsed view (Ethan, Oct 24, 2026): within each filed section,
   // repeated kinds render as ONE group row — kind, per-status counts,
   // latest update — with an expander for the individual entries. The
@@ -191,20 +314,27 @@ export default function JobQueuePanel() {
     0
   );
 
-  const renderJobRow = (job: Job) => {
+  const renderJobRow = (job: Job, standalone = false) => {
     const failed = job.status === "failed" || job.status === "error";
     const queued = job.status === "queued" || job.status === "pending";
+    const info = kindInfo(job.kind);
     return (
       <li key={job.id} className="flex flex-wrap items-center gap-3 py-3">
         <div className="min-w-0 flex-1">
           <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[#0d1f3c] dark:text-white">
-            {job.kind}
+            {info.name}
             <span className={`badge ${statusBadge(job.status)}`}>
               {job.status}
             </span>
           </p>
+          {standalone && info.blurb && (
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-white/50">
+              {info.blurb}
+            </p>
+          )}
           <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
-            Attempts: {job.attempts ?? 0} · Updated {fmtWhen(job.updatedAt)}
+            {job.kind} · Attempts: {job.attempts ?? 0} · Updated{" "}
+            {fmtWhen(job.updatedAt)}
           </p>
           {job.lastError && (
             <p className="mt-0.5 text-xs text-red-600 dark:text-red-300">
@@ -267,7 +397,8 @@ export default function JobQueuePanel() {
   };
 
   const renderGroup = (section: string, group: JobGroup) => {
-    if (group.jobs.length === 1) return renderJobRow(group.jobs[0]);
+    if (group.jobs.length === 1) return renderJobRow(group.jobs[0], true);
+    const info = kindInfo(group.kind);
     const key = `${section}:${group.kind}`;
     const isOpen = expanded.has(key);
     // The newest queued instance keeps its Run now action on the
@@ -285,7 +416,7 @@ export default function JobQueuePanel() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[#0d1f3c] dark:text-white">
-              {group.kind}
+              {info.name}
               {group.counts.map((c) => (
                 <span key={c.status} className={`badge ${statusBadge(c.status)}`}>
                   {c.status}
@@ -293,9 +424,14 @@ export default function JobQueuePanel() {
                 </span>
               ))}
             </p>
+            {info.blurb && (
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-white/50">
+                {info.blurb}
+              </p>
+            )}
             <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
-              <span className="tnum">{group.jobs.length}</span> entries ·
-              latest {group.latest.status} · Updated{" "}
+              {group.kind} · <span className="tnum">{group.jobs.length}</span>{" "}
+              entries · latest {group.latest.status} · Updated{" "}
               {fmtWhen(group.latest.updatedAt)}
             </p>
             {failedJob && (
@@ -350,7 +486,7 @@ export default function JobQueuePanel() {
       ) : (
         <>
           <p className="mb-1 text-xs text-slate-400 dark:text-white/40">
-            <span className="tnum font-semibold">{attention.length}</span>{" "}
+            <span className="tnum font-semibold">{activeCount}</span>{" "}
             active or queued
             {failedCount > 0 && (
               <>
@@ -364,6 +500,13 @@ export default function JobQueuePanel() {
             {" · "}
             <span className="tnum font-semibold">{history.length}</span>{" "}
             completed
+            {filedCount > 0 && (
+              <>
+                {" · "}
+                <span className="tnum font-semibold">{filedCount}</span>{" "}
+                cancelled or registered
+              </>
+            )}
           </p>
           <ul className="divide-y divide-slate-100 dark:divide-white/5">
             {attentionGroups.map((g) => renderGroup("attention", g))}
