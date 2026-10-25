@@ -1,10 +1,12 @@
 "use client";
 
 /**
- * Investors & Capital index (Phase 7) — the investor panel
- * (Directory people + capital profiles) and the deal grid: every
- * deal with its raise summary chips (target / hard / funded /
- * investors), linking into the per-deal capital workspace.
+ * Investors & Capital index (Phase 7) — the deal grid first (every
+ * deal with its raise summary chips: target / hard / funded /
+ * investors, linking into the per-deal capital workspace), then the
+ * investor panel (Directory people + capital profiles). Section
+ * order flipped Oct 24, 2026 at Ethan's direction: Deals & raises
+ * above Investors.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -32,7 +34,7 @@ export default function InvestorsCapitalPage() {
     setError(false);
     try {
       const data = await api<Record<string, unknown>>(`${API}/deals`);
-      setDeals(listFrom<CapitalDeal>(data, "deals"));
+      setDeals(listFrom<CapitalDeal>(data, "items", "deals"));
     } catch {
       setError(true);
     } finally {
@@ -52,9 +54,7 @@ export default function InvestorsCapitalPage() {
         subtitle="Investor profiles, capital raises, deal economics, investment committee and investor reporting"
       />
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
-        <InvestorsPanel />
-
-        <h2 className="mt-8 font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+        <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
           Deals &amp; raises
         </h2>
         <p className="mt-0.5 text-sm text-slate-500 dark:text-white/50">
@@ -162,6 +162,10 @@ export default function InvestorsCapitalPage() {
               })}
             </div>
           )}
+        </div>
+
+        <div className="mt-8">
+          <InvestorsPanel />
         </div>
       </div>
     </div>

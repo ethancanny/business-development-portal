@@ -22,6 +22,7 @@ import {
   inputCls,
   investorStatusBadge,
   labelCls,
+  listFrom,
   labelOf,
   parseNum,
   selectCls,
@@ -70,10 +71,10 @@ export default function InvestorsPanel() {
       });
       if (q.trim()) params.set("q", q.trim());
       if (status) params.set("status", status);
-      const data = await api<{ investors: InvestorListItem[]; total: number }>(
+      const data = await api<Record<string, unknown>>(
         `${API}/investors?${params.toString()}`
       );
-      setItems(Array.isArray(data.investors) ? data.investors : []);
+      setItems(listFrom<InvestorListItem>(data, "items", "investors"));
       setTotal(typeof data.total === "number" ? data.total : 0);
     } catch {
       setError(true);

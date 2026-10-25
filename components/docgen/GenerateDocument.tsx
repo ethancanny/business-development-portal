@@ -180,8 +180,17 @@ function GenerateDocumentDrawer({
       try {
         const res = await fetch("/api/platform/capital/investors?limit=50");
         if (!res.ok) return;
-        const data = (await res.json()) as { investors?: InvestorOpt[] };
-        setInvestors(Array.isArray(data.investors) ? data.investors : []);
+        const data = (await res.json()) as {
+          items?: InvestorOpt[];
+          investors?: InvestorOpt[];
+        };
+        setInvestors(
+          Array.isArray(data.items)
+            ? data.items
+            : Array.isArray(data.investors)
+              ? data.investors
+              : []
+        );
       } catch {
         /* picker stays empty; id can still be fixed by selection */
       }

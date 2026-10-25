@@ -45,7 +45,7 @@ export default function DealWorkspace({ dealId }: { dealId: string }) {
 
   const loadHeader = useCallback(async () => {
     const data = await api<Record<string, unknown>>(`${API}/deals`);
-    const deals = listFrom<CapitalDeal>(data, "deals");
+    const deals = listFrom<CapitalDeal>(data, "items", "deals");
     const match = deals.find((d) => d.dealId === dealId) ?? null;
     setDeal(match);
     return match;
