@@ -3,6 +3,7 @@ import { sql, newId, str } from "../platform/db";
 import { createComment, ensureNotificationsSchema } from "../platform/collab";
 import { ensureComms } from "./schema";
 import {
+  getReportContactSettings,
   getReportRow,
   rowToDelivery,
   writeAudit,
@@ -16,7 +17,17 @@ import {
 } from "./filter";
 import { buildReportPdf, getStoredReportPdf, storeReportPdf } from "./pdf";
 import { sendDeliveryEmail } from "./mail";
-import type { ReportRender } from "./types";
+import { initialsFor, monogramColor } from "../identity/shared";
+import {
+  confidentialityLine,
+  fmtDateLong,
+  periodLabel,
+} from "./present";
+import type {
+  AppendixFigure,
+  ReportGuestMeta,
+  ReportRender,
+} from "./types";
 
 /**
  * Report delivery (Part 12) — token grants, email attempts, access
@@ -158,16 +169,30 @@ export async function deliverReport(
     const delivery = rowToDelivery(rows[0] as Record<string, unknown>);
 
     // Email attempt: notification + login link only; the PDF rides
-    // along ONLY for allow_pdf recipients.
+    // along ONLY for allow_pdf recipients. The attached PDF is built
+    // per recipient (watermark + "Prepared for") — the stored copy
+    // above remains the shared internal snapshot of the version.
     const link = `${SITE_BASE}/report/${token}`;
+    let attachBytes: Buffer | null = null;
+    if (recipient.allowPdf) {
+      try {
+        attachBytes = await buildPersonalPdf(report, filtered, {
+          name: delivery.recipientName,
+          email: delivery.recipientEmail,
+          personId: delivery.recipientPersonId,
+          audience: report.audience,
+          version: report.currentVersion,
+        });
+      } catch {
+        attachBytes = stored.buffer;
+      }
+    }
     const result = await sendDeliveryEmail({
       to: delivery.recipientEmail,
       name: delivery.recipientName,
       reportTitle: report.title,
       link,
-      pdf: recipient.allowPdf
-        ? { filename: pdfFilename, bytes: stored.buffer }
-        : null,
+      pdf: attachBytes ? { filename: pdfFilename, bytes: attachBytes } : null,
     });
     await db`
       UPDATE comms.deliveries
@@ -281,10 +306,345 @@ export async function revokeDelivery(
 
 /* --------------------------- recipient views ---------------------------- */
 
+/** Figures of an (already audience-filtered) render, deduped by key
+ * in first-use order — the recipient-visible appendix. Deriving it
+ * from the filtered render guarantees internal-only figures can
+ * never leak through a separately stored appendix. */
+export function dedupeFigures(render: ReportRender): AppendixFigure[] {
+  const seen = new Set<string>();
+  const out: AppendixFigure[] = [];
+  for (const b of render.blocks ?? []) {
+    for (const f of b.figures ?? []) {
+      if (!f.key || seen.has(f.key)) continue;
+      seen.add(f.key);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
+interface ResolvedSubject {
+  displayName: string;
+  secondaryName: string | null;
+  codenameActive: boolean;
+  companyId: string | null;
+  accentColor: string;
+  hasLogo: boolean;
+}
+
+/** Subject identity for a report surface, resolved ONLY through the
+ * identity module (deal identity system, Oct 24, 2026): codename
+ * rules applied for the surface's audience; logo + accent come from
+ * the company's identity record. Best-effort — any failure degrades
+ * to the stored render's subject label with no mark. */
+async function resolveReportSubject(
+  report: ReportRow,
+  audience: string
+): Promise<ResolvedSubject> {
+  const fallback: ResolvedSubject = {
+    displayName: report.render?.subjectLabel ?? "",
+    secondaryName: null,
+    codenameActive: false,
+    companyId: report.companyId ?? null,
+    accentColor: "",
+    hasLogo: false,
+  };
+  try {
+    const { getIdentity, dealIdentityForDeal, dealIdentityForCompany } =
+      await import("../identity/service");
+    const { resolveDisplayIdentity } = await import("../identity/shared");
+    const context = audience === "internal" ? "internal" : "external";
+    let companyId = report.companyId ?? null;
+    let input: { name: string; codename?: string | null; codenameExternal?: boolean | null } | null =
+      null;
+    if (report.dealId) {
+      const deal = await dealIdentityForDeal(report.dealId).catch(() => null);
+      if (deal) {
+        input = {
+          name: deal.companyName || deal.name,
+          codename: deal.codename,
+          codenameExternal: deal.codenameExternal,
+        };
+        companyId = deal.companyId || companyId;
+      }
+    }
+    if (!input && companyId) {
+      const viaCompany = await dealIdentityForCompany(companyId).catch(
+        () => null
+      );
+      if (viaCompany) {
+        input = {
+          name: viaCompany.name,
+          codename: viaCompany.codename,
+          codenameExternal: viaCompany.codenameExternal,
+        };
+      }
+    }
+    let identity: Awaited<ReturnType<typeof getIdentity>> = null;
+    if (companyId) {
+      identity = await getIdentity(companyId).catch(() => null);
+    }
+    if (!input) {
+      if (identity?.name) input = { name: identity.name };
+      else if (fallback.displayName) input = { name: fallback.displayName };
+    }
+    if (!input) return fallback;
+    const resolved = resolveDisplayIdentity(input, context);
+    return {
+      displayName: resolved.displayName,
+      secondaryName: resolved.secondaryName,
+      codenameActive: resolved.codenameActive,
+      companyId,
+      // The company accent never ships under an active codename.
+      accentColor: resolved.codenameActive
+        ? ""
+        : (identity?.accentColor ?? ""),
+      hasLogo: Boolean(
+        resolved.showLogo && identity && identity.logoVersion > 0
+      ),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+async function recipientOrganization(
+  personId: string | null
+): Promise<string> {
+  if (!personId) return "";
+  try {
+    const { getDirectoryDetail } = await import("../directory/service");
+    const detail = await getDirectoryDetail("person", personId);
+    const rec = (detail?.record ?? {}) as Record<string, unknown>;
+    const org = rec.organizationName;
+    return typeof org === "string" ? org : "";
+  } catch {
+    return "";
+  }
+}
+
+interface MetaDeliveryLike {
+  audience: string;
+  recipientName: string;
+  recipientEmail: string;
+  recipientPersonId: string | null;
+  version: number;
+  expiresAt: string;
+}
+
+/** The full recipient meta block for the redesigned document. */
+async function buildGuestMeta(
+  report: ReportRow,
+  delivery: MetaDeliveryLike,
+  token: string,
+  checkNewer = true
+): Promise<ReportGuestMeta> {
+  const [subject, organization, contact] = await Promise.all([
+    resolveReportSubject(report, delivery.audience),
+    recipientOrganization(delivery.recipientPersonId),
+    getReportContactSettings(),
+  ]);
+  let maxVersion = 0;
+  if (checkNewer && delivery.recipientEmail) {
+    const db = sql();
+    const newerRows = await db`
+      SELECT max(version)::int AS v FROM comms.deliveries
+      WHERE report_id = ${report.id}
+        AND recipient_email = ${delivery.recipientEmail}
+        AND status <> 'revoked'`;
+    maxVersion = newerRows.length
+      ? Number((newerRows[0] as Record<string, unknown>).v ?? 0)
+      : 0;
+  }
+  const expiresAt = delivery.expiresAt ?? "";
+  const mark: ReportGuestMeta["mark"] = subject.codenameActive
+    ? { kind: "none" }
+    : subject.hasLogo && subject.companyId
+      ? {
+          kind: "logo",
+          logoPath: `/api/report-guest/${encodeURIComponent(token)}/logo`,
+          accentColor: subject.accentColor || undefined,
+        }
+      : subject.displayName
+        ? {
+            kind: "monogram",
+            initials: initialsFor(subject.displayName),
+            color: monogramColor(subject.companyId ?? subject.displayName),
+            accentColor: subject.accentColor || undefined,
+          }
+        : { kind: "none", accentColor: subject.accentColor || undefined };
+  return {
+    reportId: report.id,
+    reportType: report.templateName || report.title,
+    purpose: report.purpose,
+    version: delivery.version,
+    subjectName: subject.displayName,
+    subjectSecondary: subject.secondaryName,
+    codenameActive: subject.codenameActive,
+    mark,
+    preparedFor: {
+      name: delivery.recipientName,
+      email: delivery.recipientEmail,
+      organization,
+    },
+    preparedBy: "Canny Capital Partners",
+    sender: {
+      name: contact.senderName,
+      email: contact.senderEmail,
+      phone: contact.senderPhone,
+    },
+    asOf: report.render?.asOf ?? "",
+    periodLabel: periodLabel(report.purpose, report.render?.asOf),
+    expiresAt,
+    expiresLabel: expiresAt
+      ? `Available until ${fmtDateLong(expiresAt)}`
+      : "",
+    hasNewerVersion: maxVersion > delivery.version,
+    schedulingUrl: contact.schedulingUrl || null,
+    audience: delivery.audience,
+    confidentiality: confidentialityLine(
+      delivery.audience,
+      delivery.recipientName
+    ),
+  };
+}
+
+/** Sender-preview meta: the same block a recipient gets, built for
+ * a hypothetical recipient of the report's current version (no
+ * delivery, no expiry, no newer-version check). The logo path points
+ * at the session-gated platform rendition — preview is internal. */
+export async function buildPreviewMeta(
+  report: ReportRow,
+  opts: {
+    audience: string;
+    personId?: string | null;
+    recipientName?: string;
+    recipientEmail?: string;
+  }
+): Promise<ReportGuestMeta> {
+  const meta = await buildGuestMeta(
+    report,
+    {
+      audience: opts.audience,
+      recipientName: opts.recipientName ?? "",
+      recipientEmail: opts.recipientEmail ?? "",
+      recipientPersonId: opts.personId ?? null,
+      version: report.currentVersion,
+      expiresAt: "",
+    },
+    "",
+    false
+  );
+  if (meta.mark.kind === "logo") {
+    let companyId = report.companyId;
+    if (!companyId && report.dealId) {
+      try {
+        const { dealIdentityForDeal } = await import("../identity/service");
+        const deal = await dealIdentityForDeal(report.dealId);
+        companyId = deal?.companyId ?? null;
+      } catch {
+        companyId = null;
+      }
+    }
+    if (companyId) {
+      meta.mark = {
+        ...meta.mark,
+        logoPath: `/api/platform/companies/${encodeURIComponent(companyId)}/logo/256`,
+      };
+    }
+  }
+  return meta;
+}
+
+/** Subject logo bytes for the guest logo route: token-validated,
+ * codename-aware (no logo under an active external codename). */
+export async function getRecipientLogo(
+  token: string
+): Promise<{ data: Buffer; mime: string } | { error: string }> {
+  const v = await validateReportToken(token);
+  if ("error" in v) return { error: v.error };
+  const subject = await resolveReportSubject(v.report, v.delivery.audience);
+  if (!subject.hasLogo || !subject.companyId) return { error: "not_found" };
+  const { getLogoObject } = await import("../identity/service");
+  const logo = await getLogoObject(subject.companyId, 256).catch(() => null);
+  if (!logo) return { error: "not_found" };
+  return logo;
+}
+
+/** Build the personalized PDF for one recipient (watermark +
+ * "Prepared for" + subject logo bytes when the codename rules allow
+ * a logo). Used for email attachments and recipient downloads. */
+export async function buildPersonalPdf(
+  report: ReportRow,
+  filtered: ReportRender,
+  recipient: {
+    name: string;
+    email: string;
+    personId?: string | null;
+    audience: string;
+    version: number;
+  }
+): Promise<Buffer> {
+  const [subject, organization, contact] = await Promise.all([
+    resolveReportSubject(report, recipient.audience),
+    recipientOrganization(recipient.personId ?? null),
+    getReportContactSettings(),
+  ]);
+  let subjectLogoPng: Buffer | null = null;
+  if (subject.hasLogo && subject.companyId) {
+    try {
+      const { getLogoObject } = await import("../identity/service");
+      const logo = await getLogoObject(subject.companyId, 256);
+      if (logo) {
+        const sharp = (await import("sharp")).default;
+        subjectLogoPng = await sharp(logo.data).png().toBuffer();
+      }
+    } catch {
+      subjectLogoPng = null;
+    }
+  }
+  return buildReportPdf(
+    {
+      id: report.id,
+      title: report.title,
+      currentVersion: recipient.version,
+      isSample: report.isSample,
+    },
+    filtered,
+    dedupeFigures(filtered),
+    {
+      recipientName: recipient.name,
+      recipientEmail: recipient.email,
+      preparedForOrg: organization,
+      reportType: report.templateName || report.title,
+      purpose: report.purpose,
+      version: recipient.version,
+      subjectName: subject.displayName,
+      subjectSecondary: subject.secondaryName,
+      codenameActive: subject.codenameActive,
+      subjectLogoPng,
+      subjectMonogram:
+        !subject.codenameActive && subject.displayName
+          ? {
+              initials: initialsFor(subject.displayName),
+              seed: subject.companyId ?? subject.displayName,
+            }
+          : null,
+      accentColor: subject.accentColor || undefined,
+      senderName: contact.senderName,
+      senderEmail: contact.senderEmail,
+      senderPhone: contact.senderPhone,
+      confidentiality: confidentialityLine(recipient.audience, recipient.name),
+    }
+  );
+}
+
 /**
  * The recipient-facing render: validate → track opened+viewed → the
  * STORED render passed through the same audience filter the preview
- * endpoint uses. Only the filtered render leaves this function.
+ * endpoint uses, plus the recipient meta (identity, prepared-for,
+ * expiry, contact) the redesigned document renders. Only the
+ * filtered render leaves this function.
  */
 export async function getRecipientRender(
   token: string
@@ -296,8 +656,12 @@ export async function getRecipientRender(
         audience: string;
         version: number;
         isSample: boolean;
+        purpose: string;
+        templateName: string;
       };
       render: ReportRender;
+      appendix: AppendixFigure[];
+      meta: ReportGuestMeta;
     }
   | { error: string }
 > {
@@ -307,6 +671,7 @@ export async function getRecipientRender(
   await trackAccess(v.delivery.id, "opened");
   await trackAccess(v.delivery.id, "viewed");
   const render = filterRenderForAudience(v.report.render, v.delivery.audience);
+  const meta = await buildGuestMeta(v.report, v.delivery, token);
   return {
     report: {
       id: v.report.id,
@@ -314,12 +679,18 @@ export async function getRecipientRender(
       audience: v.report.audience,
       version: v.delivery.version,
       isSample: v.report.isSample,
+      purpose: v.report.purpose,
+      templateName: v.report.templateName,
     },
     render,
+    appendix: dedupeFigures(render),
+    meta,
   };
 }
 
-/** Build the PDF bytes for the version a delivery points at. */
+/** The PDF for the version a delivery points at — rebuilt per
+ * recipient at download time so the watermark and "Prepared for"
+ * are personal; the stored shared copy is only a fallback. */
 export async function getRecipientPdf(
   token: string
 ): Promise<{ buffer: Buffer; filename: string } | { error: string }> {
@@ -328,26 +699,33 @@ export async function getRecipientPdf(
   if (!v.report.render) return { error: "not_found" };
   await trackAccess(v.delivery.id, "downloaded");
   const filename = `${(v.report.title || "report").replace(/[^a-z0-9-_]+/gi, "-").slice(0, 80)}.pdf`;
-  const stored = await getStoredReportPdf(v.report.id, v.delivery.version);
-  if (stored) return { buffer: stored, filename };
   const filtered = filterRenderForAudience(v.report.render, v.delivery.audience);
-  const buffer = await buildReportPdf(
-    {
-      id: v.report.id,
-      title: v.report.title,
-      currentVersion: v.delivery.version,
-      isSample: v.report.isSample,
-    },
-    filtered
-  );
-  return { buffer, filename };
+  try {
+    const buffer = await buildPersonalPdf(v.report, filtered, {
+      name: v.delivery.recipientName,
+      email: v.delivery.recipientEmail,
+      personId: v.delivery.recipientPersonId,
+      audience: v.delivery.audience,
+      version: v.delivery.version,
+    });
+    return { buffer, filename };
+  } catch {
+    // The stored copy is the internal snapshot (it may contain
+    // internal-only blocks) — it is a safe fallback ONLY for
+    // internal-audience deliveries.
+    if (v.delivery.audience === "internal") {
+      const stored = await getStoredReportPdf(v.report.id, v.delivery.version);
+      if (stored) return { buffer: stored, filename };
+    }
+    throw new Error("pdf_unavailable");
+  }
 }
 
 /* --------------------------- recipient replies -------------------------- */
 
 export async function postRecipientReply(
   token: string,
-  input: { name?: string; body: string }
+  input: { name?: string; body: string; sectionKey?: string }
 ): Promise<{ ok: true } | { error: string }> {
   const v = await validateReportToken(token);
   if ("error" in v) return { error: v.error };
@@ -355,12 +733,29 @@ export async function postRecipientReply(
   if (!body) return { error: "reply_required" };
   const author =
     (input.name ?? "").trim() || v.delivery.recipientName || "Report recipient";
+  // Contextual replies (spec §8): a section key is accepted only when
+  // it names a section of THIS report's render; the section context
+  // rides the report audit trail + the notification, and the reply
+  // itself joins the report thread unchanged.
+  let sectionHeading = "";
+  if (input.sectionKey && v.report.render) {
+    const block = (v.report.render.blocks ?? []).find(
+      (b) => b.key === input.sectionKey
+    );
+    if (block) sectionHeading = block.heading || block.type;
+  }
   await createComment({
     entityKind: "comms_report",
     entityId: v.report.id,
     body,
     author,
     actorEmail: "",
+  });
+  await writeAudit(v.report.id, author, "recipient_reply", {
+    deliveryId: v.delivery.id,
+    ...(sectionHeading
+      ? { sectionKey: input.sectionKey, sectionHeading }
+      : {}),
   });
   if (v.report.companyId) {
     await writeActivity(
@@ -381,7 +776,7 @@ export async function postRecipientReply(
         (id, user_email, kind, title, body, href, entity_kind, entity_id)
       VALUES (${newId()}, ${ETHAN_EMAIL}, 'comms_report_reply',
         'Report reply received',
-        ${`A recipient replied to: ${v.report.title}`.slice(0, 300)},
+        ${`A recipient replied to: ${v.report.title}${sectionHeading ? ` (section: ${sectionHeading})` : ""}`.slice(0, 300)},
         ${`/communications/reports/${v.report.id}`},
         'comms_report', ${v.report.id})`;
   } catch (err) {

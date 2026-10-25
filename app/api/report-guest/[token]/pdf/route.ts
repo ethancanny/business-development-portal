@@ -8,10 +8,10 @@ import { getRecipientPdf } from "@/lib/comms/delivery";
  * read at the top, Cache-Control private, no-store on EVERY response.
  *
  * The bytes come from delivery.getRecipientPdf: it re-validates the
- * token on every call, tracks the 'downloaded' access, and returns
- * the stored PDF for the delivered version (built from the
- * audience-filtered render when none is stored) — so a recipient
- * never receives internal-only content.
+ * token on every call, tracks the 'downloaded' access, and rebuilds
+ * the PDF per recipient from the audience-filtered render (personal
+ * watermark + "Prepared for") — so a recipient never receives
+ * internal-only content.
  *
  * allow_pdf semantics (per the Part 12 contract): the delivery's
  * allow_pdf flag governs the EMAIL ATTACHMENT only. Portal viewing is

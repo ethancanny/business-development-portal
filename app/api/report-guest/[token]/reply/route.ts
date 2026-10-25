@@ -43,9 +43,14 @@ export async function POST(
       typeof body.name === "string" && body.name.trim()
         ? body.name.trim()
         : undefined;
+    const sectionKey =
+      typeof body.sectionKey === "string" && body.sectionKey.trim()
+        ? body.sectionKey.trim().slice(0, 120)
+        : undefined;
     const result = (await postRecipientReply(params.token, {
       name,
       body: text,
+      sectionKey,
     })) as unknown as Record<string, unknown> | null;
     if (result && typeof result.error === "string" && result.error) {
       const e = result.error;
