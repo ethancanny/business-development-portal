@@ -14,9 +14,8 @@ import type { Investor } from "@/lib/investors-db";
 import type { OperatorCandidate } from "@/lib/candidates-db";
 import { fmtMoney, fmtMoneyCompact } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
-import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, sectorIcon, stageColor } from "@/lib/sector-colors";
+import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
 import { SectorLegend } from "@/components/SectorChip";
-import LatestIntel from "@/components/LatestIntel";
 
 /** Fit-target sectors — all five focus sectors (Oct 14, 2026: the
  * density view includes Hospitality even at 0). The hospitality spine
@@ -1043,101 +1042,12 @@ export default function Overview() {
         </div>
       </section>
 
-      {/* Sector Overview — a bar chart, one bar per focus sector
-          (Ethan, Oct 23, 2026: a chart like the rest of the Overview,
-          replacing the tile grid; it also takes the slot the Capital
-          Stacks widget had — capital stacks now live in Business
-          Development). Fit counts come from the same per-sector
-          fetches as the density view; the tailwind score renders only
-          for sectors with a computed score — ≥2 live components — per
-          Phase 5 / §4. Bars link to the Fit Targets tab.
-          Moved up into the Top signals slot on Oct 23, 2026 — Top
-          signals was removed at Ethan's request and the industries
-          fill its place. */}
-      <section className="mb-6">
-        <div className="mb-3 flex items-baseline justify-between gap-2">
-          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
-            Sector overview
-          </h2>
-          <Link
-            href="/market-intel#fit-targets"
-            className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
-          >
-            Open Market Intel →
-          </Link>
-        </div>
-        <div className="card-surface p-4 sm:p-5">
-          <ul className="space-y-4">
-            {FIT_SECTORS.map((sector) => {
-              const count = fitCounts[sector];
-              const maxFit = Math.max(
-                1,
-                ...FIT_SECTORS.map((x) => fitCounts[x] ?? 0)
-              );
-              const tw = tailwind[sector];
-              return (
-                <li key={sector}>
-                  <Link
-                    href="/market-intel#fit-targets"
-                    className="group block"
-                  >
-                    <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
-                      <span className="font-medium text-slate-700 dark:text-white/80">
-                        <span className="mr-1.5" aria-hidden>
-                          {sectorIcon(sector)}
-                        </span>
-                        {sector}
-                      </span>
-                      <span className="tnum shrink-0 font-semibold text-[#0d1f3c] dark:text-white">
-                        {count === null || count === undefined
-                          ? "…"
-                          : count.toLocaleString()}{" "}
-                        <span className="font-normal text-slate-400 dark:text-white/40">
-                          fit targets
-                        </span>
-                        {tw?.score !== null && tw?.score !== undefined && (
-                          <span className="ml-2 font-normal text-slate-400 dark:text-white/40">
-                            Tailwind{" "}
-                            <span className="font-semibold text-[#0d1f3c] dark:text-white">
-                              {tw.score}
-                            </span>
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${count ? Math.max(3, (count / maxFit) * 100) : 0}%`,
-                          background: barGradient(sectorColor(sector)),
-                        }}
-                      />
-                    </div>
-                    {tw?.score !== null && tw?.score !== undefined && tw.whatChanged && (
-                      <p className="mt-1 text-[11px] leading-snug text-slate-400 dark:text-white/35">
-                        {tw.whatChanged}
-                      </p>
-                    )}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-          {hospMeta && (
-            <p className="mt-3 text-[11px] leading-snug text-slate-400 dark:text-white/40">
-              Hospitality sources: {hospMeta.sources} · Updated{" "}
-              {hospMeta.updated}
-            </p>
-          )}
-        </div>
-      </section>
-
-      {/* Latest intelligence — top 3 News & Intelligence stories,
-          directly under Sector overview. Self-fetching; renders nothing
-          when the feed is empty or unavailable. */}
-      <LatestIntel />
-
+      {/* Sector overview + Latest intelligence panels unmounted
+          Oct 24, 2026 (Ethan: "get rid of these for now"). The
+          LatestIntel component, the /api/market/* endpoints, and
+          the fit-count / tailwind / hospMeta data flow above are
+          all retained and the Market Intel page is unaffected —
+          restore by re-mounting the section + <LatestIntel /> here. */}
       {/* Market strip — FRED reference rates only (Prime, SOFR,
           10-Yr, 2-Yr) with the move vs the previous observation and
           an as-of date. No sector ETF/reference quotes: no licensed

@@ -1065,7 +1065,10 @@ export default function PlatformOverview() {
 
           <EarlyWarningBlock items={payload?.earlyWarning ?? []} />
 
-          <FlywheelBlock data={payload?.flywheel ?? null} />
+          {/* Flywheel panel unmounted from Overview Oct 24, 2026
+              (Ethan: "get rid of these for now"). FlywheelBlock and
+              the getFlywheel() payload are retained — re-mount here
+              to restore. */}
 
           {customize && layout.hidden.length > 0 && (
             <div className="mb-4 flex flex-wrap items-center gap-2">
