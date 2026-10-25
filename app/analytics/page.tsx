@@ -17,7 +17,7 @@ import {
 import type { Investor } from "@/lib/investors-db";
 import { fmtMoney } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
-import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
+import { FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
 
 /**
  * Full analytics (Ethan, Oct 14, 2026): linked from Overview only once
@@ -492,40 +492,6 @@ export default function AnalyticsPage() {
                   <p className="text-xs uppercase tracking-wide text-slate-400 dark:text-white/50">Dismissed</p>
                 </div>
               </div>
-              {sourcing.sourceRows.length > 0 && (
-                <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-                    Source quality — Activity feed
-                  </p>
-                  <div className="overflow-x-auto">
-                    <table className="tbl-grad w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-xs uppercase tracking-wide text-slate-400 dark:text-white/40">
-                          <th className="py-1 pr-3 font-semibold">Source</th>
-                          <th className="py-1 pr-3 font-semibold">Sent</th>
-                          <th className="py-1 pr-3 font-semibold">Added</th>
-                          <th className="py-1 pr-3 font-semibold">Dismissed</th>
-                          <th className="py-1 font-semibold">Fit rate</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sourcing.sourceRows.map((r) => (
-                          <tr key={r.source} className="border-t border-slate-100 dark:border-white/5">
-                            <td className="py-1.5 pr-3 font-medium text-slate-700 dark:text-[#e8dfc8]">{r.source}</td>
-                            <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.sent}</td>
-                            <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.added}</td>
-                            <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.dismissed}</td>
-                            <td className="py-1.5 text-slate-600 dark:text-white/70">{r.fitRate === null ? "—" : `${r.fitRate}%`}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
-                    Fit rate = added ÷ sent in the last {winDays} days.
-                  </p>
-                </div>
-              )}
               {sourcing.brokerRows.length > 0 && (
                 <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
@@ -571,35 +537,6 @@ export default function AnalyticsPage() {
               <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
                 Data as of {dataDate} · n = {execs.length} operators
               </p>
-              <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-                  Going quiet — no touch in 45+ days
-                </p>
-                {relationships.quiet.length > 0 ? (
-                  <ul className="space-y-1">
-                    {relationships.quiet.map((x) => (
-                      <li key={`${x.kind}-${x.name}`} className="flex items-center gap-2 text-sm text-slate-700 dark:text-[#e8dfc8]">
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{
-                            backgroundColor:
-                              x.days >= 90 ? AGING_COLORS.bad : x.days >= 60 ? AGING_COLORS.warn : AGING_COLORS.ok,
-                          }}
-                        />
-                        <span className="font-medium">{x.name}</span>
-                        <span className="text-xs text-slate-400 dark:text-white/40">
-                          {x.kind} · {x.days} days
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-slate-400 dark:text-white/40">Nobody is past 45 days without a touch.</p>
-                )}
-                <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
-                  Amber at 60 days without a touch, red at 90.
-                </p>
-              </div>
             </div>
           )}
 

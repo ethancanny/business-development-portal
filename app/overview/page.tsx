@@ -14,7 +14,7 @@ import type { Investor } from "@/lib/investors-db";
 import type { OperatorCandidate } from "@/lib/candidates-db";
 import { fmtMoney, fmtMoneyCompact } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
-import { AGING_COLORS, FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
+import { FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
 import { SectorLegend } from "@/components/SectorChip";
 
 /** Fit-target sectors — all five focus sectors (Oct 14, 2026: the
@@ -1394,41 +1394,6 @@ export default function Overview() {
               Businesses-for-sale items in the Activity feed, by current status. Data as of {dataDate} · n = {sourcing.reviewed}
             </p>
 
-            {sourcing.sourceRows.length > 0 && (
-              <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-                  Source quality — Activity feed
-                </p>
-                <div className="overflow-x-auto">
-                  <table className="tbl-grad w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-xs uppercase tracking-wide text-slate-400 dark:text-white/40">
-                        <th className="py-1 pr-3 font-semibold">Source</th>
-                        <th className="py-1 pr-3 font-semibold">Sent</th>
-                        <th className="py-1 pr-3 font-semibold">Added</th>
-                        <th className="py-1 pr-3 font-semibold">Dismissed</th>
-                        <th className="py-1 font-semibold">Fit rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sourcing.sourceRows.map((r) => (
-                        <tr key={r.source} className="border-t border-slate-100 dark:border-white/5">
-                          <td className="py-1.5 pr-3 font-medium text-slate-700 dark:text-[#e8dfc8]">{r.source}</td>
-                          <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.sent}</td>
-                          <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.added}</td>
-                          <td className="py-1.5 pr-3 text-slate-600 dark:text-white/70">{r.dismissed}</td>
-                          <td className="py-1.5 text-slate-600 dark:text-white/70">{r.fitRate === null ? "—" : `${r.fitRate}%`}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
-                  Fit rate = added ÷ sent, over the last {winDays} days, all Activity kinds.
-                </p>
-              </div>
-            )}
-
             {sourcing.brokerRows.length > 0 && (
               <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
@@ -1496,91 +1461,6 @@ export default function Overview() {
             <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
               Data as of {dataDate} · n = {execs.length} operators
             </p>
-
-            <div className="mt-5 border-t border-slate-100 pt-4 dark:border-white/10">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-                Intermediaries by activity
-              </p>
-              {relationships.intermediaryRows.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {relationships.intermediaryRows.map((r) => (
-                    <span
-                      key={r.name}
-                      className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
-                    >
-                      {r.name} · {r.n}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-slate-400 dark:text-white/40">No intermediary activity recorded yet.</p>
-              )}
-              <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
-                Activity-feed items plus the broker field on pipeline deals. A dedicated
-                Intermediaries directory arrives in a later phase.
-              </p>
-            </div>
-
-            <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-                Investors by last touch
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {relationships.invBuckets.map((b) => (
-                  <span
-                    key={b.label}
-                    className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-white/70"
-                  >
-                    {b.label}: <strong>{b.n}</strong>
-                  </span>
-                ))}
-              </div>
-              <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
-                Investors have no touch log — recency uses each record's last update.
-                Data as of {dataDate} · n = {investors.length}
-              </p>
-            </div>
-
-            <div className="mt-4 border-t border-slate-100 pt-4 dark:border-white/10">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-white/50">
-                Going quiet — no touch in 45+ days
-              </p>
-              {relationships.quiet.length > 0 ? (
-                <ul className="space-y-1">
-                  {relationships.quiet.map((x) => (
-                    <li
-                      key={`${x.kind}-${x.name}`}
-                      className="flex items-center gap-2 text-sm text-slate-700 dark:text-[#e8dfc8]"
-                    >
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{
-                          backgroundColor:
-                            x.days >= 90
-                              ? AGING_COLORS.bad
-                              : x.days >= 60
-                                ? AGING_COLORS.warn
-                                : AGING_COLORS.ok,
-                        }}
-                      />
-                      <span className="font-medium">{x.name}</span>
-                      <span className="text-xs text-slate-400 dark:text-white/40">
-                        {x.kind} · {x.days} days
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-slate-400 dark:text-white/40">
-                  Nobody is past 45 days without a touch.
-                </p>
-              )}
-              <p className="mt-1.5 text-[11px] text-slate-400 dark:text-white/40">
-                Amber at 60 days without a touch, red at 90. {relationships.quiet60} contacts
-                are at 60–89 days, {relationships.quiet90} at 90+. Operators use their last
-                logged interaction; investors use last record update. n = {relationships.quietTotal}
-              </p>
-            </div>
           </div>
         )}
       </section>
