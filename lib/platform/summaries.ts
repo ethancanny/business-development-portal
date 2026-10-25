@@ -124,12 +124,11 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
    * Step 1 migration only 'Diligence' matched and both figures were
    * materially wrong. Needed = every ACTIVE stage (new + legacy
    * names); committed = Closed (+ legacy Closed Won).
-   * Needed is RECOMPUTED from resolveDealValue in the redesign
-   * block below (Ethan, Oct 25, 2026: align Capital needed to
-   * resolved deal values); the SQL figure here is only the
-   * fallback if that block fails. Committed keeps this legacy
-   * column sum — it shares the same expression, but Ethan's
-   * call covered needed only. */
+   * Needed AND committed are RECOMPUTED from resolveDealValue
+   * in the redesign block below (Ethan, Oct 25, 2026: align
+   * Capital needed to resolved deal values; committed aligned
+   * the same way later that day); the SQL figures here are
+   * only the fallbacks if that block fails. */
   const capRows = await db`
     SELECT
       coalesce(sum(CASE
@@ -141,7 +140,7 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
         THEN coalesce(NULLIF(deal_value, 0), asking_price, 0) ELSE 0 END), 0) AS committed
     FROM deals WHERE stage <> 'Passed'`;
   let capitalNeeded = capRows.length ? num(capRows[0].needed) : 0;
-  const capitalCommitted = capRows.length ? num(capRows[0].committed) : 0;
+  let capitalCommitted = capRows.length ? num(capRows[0].committed) : 0;
 
   const stackRows = await db`
     SELECT d.id AS deal_id, d.company_name, d.deal_value, d.asking_price,
@@ -346,7 +345,9 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
      * not resolve contribute nothing (never $0-forced). Runs
      * inside this failure-isolated block: if resolution is
      * unavailable, capitalNeeded keeps the SQL fallback above.
-     * Committed is deliberately NOT recomputed (needed only). */
+     * Committed is recomputed identically right after this —
+     * resolved values over Closed / Closed Won (Ethan, Oct 25,
+     * 2026: align committed the same way). */
     const NEEDED_STAGES = new Set([
       "Sourced",
       "IOI",
@@ -365,6 +366,26 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
       if (v !== null && v !== undefined) resolvedNeeded += v;
     }
     capitalNeeded = resolvedNeeded;
+    /* Capital committed on resolved values (Ethan, Oct 25,
+     * 2026: align committed the same way as needed): the legacy
+     * SQL above sums only the deal_value / asking_price columns
+     * over Closed / Closed Won, so a structure-priced deal that
+     * closes would drop out of "committed" even though its
+     * resolved value counted toward pipelineValue while it was
+     * active. Same stage set the SQL used; each closed deal
+     * contributes its resolved value; deals whose value does
+     * not resolve contribute nothing (never $0-forced). Inside
+     * this failure-isolated block, so if resolution is
+     * unavailable, capitalCommitted keeps the SQL fallback
+     * above. No live effect until a deal actually closes. */
+    const COMMITTED_STAGES = new Set(["Closed", "Closed Won"]);
+    let resolvedCommitted = 0;
+    for (const d of allDeals) {
+      if (!COMMITTED_STAGES.has(d.stage)) continue;
+      const v = valueOf.get(d.id);
+      if (v !== null && v !== undefined) resolvedCommitted += v;
+    }
+    capitalCommitted = resolvedCommitted;
     const active = allDeals.filter((d) => !TERMINAL.has(d.stage));
     for (const d of active) {
       const v = valueOf.get(d.id);
