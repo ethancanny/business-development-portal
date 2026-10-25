@@ -171,9 +171,6 @@ export default function DealsDataTools({
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-white/60">
-          Data
-        </span>
         <FormatMenu label="Export" onPick={download} />
         <button
           type="button"

@@ -27,7 +27,6 @@ import Comments from "@/components/Comments";
 import ActivityFeed from "@/components/ActivityFeed";
 import DealBanner from "@/components/identity/DealBanner";
 import LogoManager from "@/components/identity/LogoManager";
-import RecordRecent from "@/components/identity/RecordRecent";
 import CompanyMark from "@/components/identity/CompanyMark";
 import { accentForSurface } from "@/lib/identity/shared";
 import DataRoomButton from "@/components/hubs/DataRoomButton";
@@ -204,7 +203,6 @@ export default function CompanyProfilePage() {
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
       <DealBanner companyId={c.id} />
-      <RecordRecent companyId={c.id} dealId={linked.deals[0]?.id} />
       {/* Breadcrumbs */}
       <nav aria-label="Breadcrumb" className="mb-4 flex flex-wrap items-center gap-1.5 text-xs text-caption">
         <Link href="/overview" className="font-semibold hover:text-gold-700 dark:hover:text-gold-400">

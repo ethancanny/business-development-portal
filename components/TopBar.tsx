@@ -20,7 +20,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Breadcrumbs } from "@/components/EntityBits";
 import NotificationCenter from "@/components/NotificationCenter";
-import RecentDealsMenu from "@/components/identity/RecentDealsMenu";
 import { openGlobalSearch } from "@/components/Sidebar";
 import { useTheme } from "@/components/ThemeProvider";
 import {
@@ -302,8 +301,6 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
             <IconMoon className="h-5 w-5" />
           )}
         </button>
-
-        <RecentDealsMenu />
 
         <NotificationCenter />
 
