@@ -7,6 +7,7 @@ import ManualSourcesSettings from "@/components/ManualSourcesSettings";
 import JobQueuePanel from "@/components/JobQueuePanel";
 import ValuationParamsSettings from "@/components/ValuationParamsSettings";
 import SettingsNav from "@/components/settings/SettingsNav";
+import SettingsSectionNav from "@/components/settings/SettingsSectionNav";
 import StageGatesCard from "@/components/settings/StageGatesCard";
 import EsignSettingsCard from "@/components/docgen/EsignSettingsCard";
 import InvestmentTypesSettings from "@/components/settings/InvestmentTypesSettings";
@@ -19,23 +20,14 @@ import InvestmentTypesSettings from "@/components/settings/InvestmentTypesSettin
  * /settings/integrations and user/role management to
  * /settings/users-roles (see SettingsNav).
  */
-/** In-page section index (Ethan, Oct 24, 2026): the General tab is
- * one long stack of cards — these chips jump to each card. Anchor
- * jumps are smooth via the global scroll-behavior, and each section
- * carries a scroll-margin so it lands below the sticky bars. */
-const SECTION_INDEX: { id: string; label: string }[] = [
-  { id: "settings-notifications", label: "Notifications" },
-  { id: "settings-security", label: "Security & devices" },
-  { id: "settings-hospitality", label: "Hospitality fit rules" },
-  { id: "settings-chain-filter", label: "Chain & franchise filter" },
-  { id: "settings-manual-sources", label: "Manual sources" },
-  { id: "settings-valuation", label: "Valuation parameters" },
-  { id: "settings-stage-gates", label: "Stage gates" },
-  { id: "settings-esignature", label: "E-signature" },
-  { id: "settings-investment-types", label: "Investment types" },
-  { id: "settings-background-jobs", label: "Background jobs" },
-];
-
+/** Layout (Ethan, Oct 24, 2026): two columns on desktop — a sticky
+ * left rail (SettingsSectionNav: the page's groups as dropdowns over
+ * anchor links to each card) beside the card column; on mobile the
+ * rail collapses to a single jump-to select at the top of the
+ * column. Anchor jumps are smooth via the global scroll-behavior,
+ * and each section carries a scroll-margin so it lands below the
+ * sticky bars. This replaces the same-day chip index row, which
+ * stacked three rows under the tab bar. */
 export default function SettingsPage() {
   return (
     <div>
@@ -45,24 +37,10 @@ export default function SettingsPage() {
         subtitle="Notifications, passkeys, devices, and security for your account"
       />
       <SettingsNav />
-      <div className="mx-auto flex max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-6">
-        <nav
-          aria-label="Settings sections"
-          className="sticky top-14 z-20 -mx-4 -mt-6 border-b border-slate-200/80 bg-[#fbf8f2]/90 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 dark:border-white/10 dark:bg-[#0d1f3c]/90"
-        >
-          <div className="flex gap-2 overflow-x-auto sm:flex-wrap sm:overflow-x-visible">
-            {SECTION_INDEX.map((s) => (
-              <a
-                key={s.id}
-                href={`#${s.id}`}
-                className="chip min-h-[40px] shrink-0 whitespace-nowrap"
-              >
-                {s.label}
-              </a>
-            ))}
-          </div>
-        </nav>
-
+      <div className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+          <SettingsSectionNav />
+          <div className="flex min-w-0 flex-1 flex-col gap-6">
         <h3 className="px-1 -mb-2 mt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/40">
           Account &amp; security
         </h3>
@@ -233,6 +211,8 @@ export default function SettingsPage() {
           </p>
           <JobQueuePanel />
         </section>
+          </div>
+        </div>
       </div>
     </div>
   );
