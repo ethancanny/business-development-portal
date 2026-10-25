@@ -585,19 +585,35 @@ class RealSources implements Sources {
       mkFig({ key: "find_open_low", label: "Open findings — low severity", value: bySeverity("low"), format: "number", ...src }),
       mkFig({ key: "find_red_flags_confirmed", label: "Confirmed red flags", value: confirmedFlags.length, format: "number", ...src }),
     ];
+    // Dollar impact (Report redesign, Oct 24, 2026): findings carry a
+    // quantified impact from the diligence workspace; surface the
+    // open-findings total as a figure and a per-row column when any
+    // open finding is quantified.
+    const impactTotal = open.reduce((sum, f) => sum + (f.impactAmount ?? 0), 0);
+    const anyImpact = open.some((f) => f.impactAmount !== null && f.impactAmount !== undefined);
+    if (anyImpact) {
+      figures.push(
+        mkFig({ key: "find_impact_total", label: "Quantified impact (open findings)", value: impactTotal, format: "money", ...src })
+      );
+    }
     // Titles / labels only for findings and flags (contract) — the
     // finding detail and flag mitigation text never enter a report.
     const rows: (string | number | null)[][] = [
-      ...open.map((f) => [f.title, f.severity, f.category, f.status] as (string | number | null)[]),
-      ...confirmedFlags.map((f) => [`${f.title} (red flag)`, f.severity, "Red flag", f.status] as (string | number | null)[]),
+      ...open.map((f) => [f.title, f.severity, f.category, f.status, anyImpact ? (f.impactAmount ?? null) : undefined].filter((c) => c !== undefined) as (string | number | null)[]),
+      ...confirmedFlags.map((f) => [`${f.title} (red flag)`, f.severity, "Red flag", f.status, ...(anyImpact ? [null] : [])] as (string | number | null)[]),
     ];
     return {
       status: "ok",
       figures,
       table: rows.length
-        ? { columns: ["Finding", "Severity", "Category", "Status"], rows }
+        ? {
+            columns: anyImpact
+              ? ["Finding", "Severity", "Category", "Status", "Impact"]
+              : ["Finding", "Severity", "Category", "Status"],
+            rows,
+          }
         : undefined,
-      text: `Open findings: ${open.length} (high ${bySeverity("high")}, medium ${bySeverity("medium")}, low ${bySeverity("low")}). Confirmed red flags: ${confirmedFlags.length}.`,
+      text: `Open findings: ${open.length} (high ${bySeverity("high")}, medium ${bySeverity("medium")}, low ${bySeverity("low")}). Confirmed red flags: ${confirmedFlags.length}.${anyImpact ? ` Quantified impact of open findings: $${Math.round(impactTotal).toLocaleString("en-US")}.` : ""}`,
     };
   }
 
@@ -746,7 +762,10 @@ export async function assembleReport(
       companyId = ctx?.companyId ?? null;
     }
     sources = new RealSources(companyId, dealId);
-    subjectLabel = subject.subjectLabel || "Untitled subject";
+    // No subject attached -> empty label, NEVER a placeholder name:
+    // the header renders the report type alone (Report redesign,
+    // Oct 24, 2026 — "Untitled subject" must never reach a recipient).
+    subjectLabel = subject.subjectLabel || "";
   }
 
   const blocks: RenderBlock[] = [];
@@ -812,7 +831,7 @@ export async function assembleReport(
     .digest("hex");
 
   const render: ReportRender = {
-    title: `${template.name} — ${subjectLabel}`,
+    title: subjectLabel ? `${template.name} — ${subjectLabel}` : template.name,
     subjectLabel,
     asOf: sources.asOf,
     sample: input.sample,

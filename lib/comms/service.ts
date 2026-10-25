@@ -1170,6 +1170,75 @@ export async function setDealSettings(
 
 /* ------------------------------- status -------------------------------- */
 
+/* --------------------- report contact settings --------------------- */
+
+/** Sender identity shown on delivered reports (header contact block,
+ * footer, "Request a call"). Stored in comms.settings under
+ * 'report_contact'. All fields optional — the report surface omits
+ * whatever is not configured and NEVER invents a value (in
+ * particular, no scheduling URL is ever fabricated). */
+export interface ReportContactSettings {
+  senderName: string;
+  senderEmail: string;
+  senderPhone: string;
+  schedulingUrl: string;
+}
+
+const EMPTY_CONTACT: ReportContactSettings = {
+  senderName: "",
+  senderEmail: "",
+  senderPhone: "",
+  schedulingUrl: "",
+};
+
+export async function getReportContactSettings(): Promise<ReportContactSettings> {
+  await ready();
+  try {
+    const db = sql();
+    const rows = await db`
+      SELECT value FROM comms.settings WHERE key = 'report_contact' LIMIT 1`;
+    if (!rows.length) return { ...EMPTY_CONTACT };
+    const raw = (rows[0] as Record<string, unknown>).value;
+    const v = (
+      typeof raw === "string" ? JSON.parse(raw) : raw
+    ) as Record<string, unknown>;
+    return {
+      senderName: typeof v.senderName === "string" ? v.senderName : "",
+      senderEmail: typeof v.senderEmail === "string" ? v.senderEmail : "",
+      senderPhone: typeof v.senderPhone === "string" ? v.senderPhone : "",
+      schedulingUrl: typeof v.schedulingUrl === "string" ? v.schedulingUrl : "",
+    };
+  } catch {
+    return { ...EMPTY_CONTACT };
+  }
+}
+
+export async function setReportContactSettings(
+  input: Partial<ReportContactSettings>
+): Promise<ReportContactSettings> {
+  await ready();
+  const clean = (s: unknown, max: number): string =>
+    typeof s === "string" ? s.trim().slice(0, max) : "";
+  const next: ReportContactSettings = {
+    senderName: clean(input.senderName, 120),
+    senderEmail: clean(input.senderEmail, 200),
+    senderPhone: clean(input.senderPhone, 60),
+    schedulingUrl: clean(input.schedulingUrl, 500),
+  };
+  if (next.schedulingUrl && !/^https:\/\//i.test(next.schedulingUrl)) {
+    throw new Error("invalid_scheduling_url");
+  }
+  if (next.senderEmail && !next.senderEmail.includes("@")) {
+    throw new Error("invalid_sender_email");
+  }
+  const db = sql();
+  await db`
+    INSERT INTO comms.settings (key, value, updated_at)
+    VALUES ('report_contact', ${JSON.stringify(next)}::jsonb, now())
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
+  return next;
+}
+
 export async function getCommsStatus(): Promise<{
   ai: AiStatus;
   email: EmailTransportStatus;
