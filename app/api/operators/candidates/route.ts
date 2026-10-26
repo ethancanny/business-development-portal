@@ -3,12 +3,14 @@ import { getSessionUser } from "@/lib/auth";
 import {
   CANDIDATE_STATUSES,
   createOrMergeCandidate,
+  getCandidateSummary,
   isCandidateStatus,
   listCandidates,
   validateSource,
   type CandidateInput,
   type OperatorCandidate,
 } from "@/lib/candidates-db";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 import { candidateSector } from "@/lib/candidates-scoring";
 import { evalCandidatesByIds } from "@/lib/push-evals";
 
@@ -37,6 +39,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const sp = req.nextUrl.searchParams;
+  // Performance Fix Pass: both modes carry the candidates dataset
+  // version + a private cache header; ?summary=1 returns server-side
+  // counts only (status + date_found), never full candidate rows.
+  if (sp.get("summary") === "1") {
+    const summary = await getCandidateSummary();
+    return NextResponse.json(summary, {
+      headers: {
+        "Cache-Control": "private, max-age=300",
+        ...(await datasetVersionHeader("candidates")),
+      },
+    });
+  }
   const boolParam = (v: string | null): boolean | undefined =>
     v === "true" ? true : v === "false" ? false : undefined;
   const candidates = await listCandidates({
@@ -46,7 +60,12 @@ export async function GET(req: NextRequest) {
     q: sp.get("q") ?? undefined,
     sort: sp.get("sort") ?? undefined,
   });
-  return NextResponse.json(candidates.map(withSector));
+  return NextResponse.json(candidates.map(withSector), {
+    headers: {
+      "Cache-Control": "private, max-age=300",
+      ...(await datasetVersionHeader("candidates")),
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {

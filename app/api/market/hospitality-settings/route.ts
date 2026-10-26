@@ -10,6 +10,7 @@ import {
   rescoreCompanies,
   countFits,
 } from "@/lib/market-db";
+import { bumpDatasets, datasetVersionHeader } from "@/lib/platform/versions";
 
 /**
  * Hospitality fit settings + spine meta (hospitality build §2,
@@ -31,7 +32,15 @@ export async function GET() {
       getHospitalityFitSettings(),
       getHospitalityMeta(),
     ]);
-    return NextResponse.json({ settings, meta });
+    return NextResponse.json(
+      { settings, meta },
+      {
+        headers: {
+          "Cache-Control": "private, max-age=300",
+          ...(await datasetVersionHeader("hospitality_settings")),
+        },
+      }
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });
@@ -68,6 +77,7 @@ export async function POST(req: NextRequest) {
       offset = r.nextOffset;
     }
     const fitTotal = await countFits("Hospitality");
+    await bumpDatasets("hospitality_settings");
     return NextResponse.json({ ok: true, settings, fitTotal });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

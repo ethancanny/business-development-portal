@@ -15,6 +15,7 @@ import {
   type InvestorProfileInput,
 } from "@/lib/capital/service";
 import { getAccessContext } from "@/lib/platform/permissions";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 /** checkByType body field: { [typeKey]: { min, max } } sanitized. */
 function sCheckByType(
@@ -81,7 +82,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       limit: isFinite(limitRaw) ? limitRaw : 25,
       offset: isFinite(offsetRaw) ? offsetRaw : 0,
     });
-    return ok(result);
+    const res = ok(result);
+    const hdr = await datasetVersionHeader("capital");
+    if (hdr["X-Dataset-Version"]) res.headers.set("X-Dataset-Version", hdr["X-Dataset-Version"]);
+    return res;
   } catch (err) {
     return serviceError(err, "investors-list");
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authed, ok, serviceError } from "@/lib/capital/http";
 import { getMatchingMatrix } from "@/lib/capital/service";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 /** GET the cross-raise matching matrix: investors × open raises with
  * per-cell stage/exposure, per-investor capacity, and the top-3
@@ -17,7 +18,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       limit: isFinite(limitRaw) ? limitRaw : 50,
       offset: isFinite(offsetRaw) ? offsetRaw : 0,
     });
-    return ok(matrix);
+    const res = ok(matrix);
+    const hdr = await datasetVersionHeader("capital");
+    if (hdr["X-Dataset-Version"]) res.headers.set("X-Dataset-Version", hdr["X-Dataset-Version"]);
+    return res;
   } catch (err) {
     return serviceError(err, "matching-matrix");
   }

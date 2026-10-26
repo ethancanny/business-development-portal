@@ -5,6 +5,7 @@ import { getAccessContext } from "@/lib/platform/permissions";
 import { geocodeCity } from "@/lib/geo";
 import { ALL_DEAL_STAGES, type Deal, type DealDrivers, type DealLink, type DealMetrics, type DealStructureInput, type InvestmentTypeKey } from "@/lib/types";
 import { parseInvestmentType, parseSourcedFromType } from "@/lib/bd/service";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 const DRIVER_KEYS = ["concentration", "recurring", "ownerDependence", "growth", "margins", "management", "financials"] as const;
 
@@ -106,7 +107,13 @@ export async function GET() {
   if (ctx.companyIds !== null) {
     return NextResponse.json({ error: "internal_only" }, { status: 403 });
   }
-  return NextResponse.json(await getDeals());
+  const deals = await getDeals();
+  return NextResponse.json(deals, {
+    headers: {
+      "Cache-Control": "private, max-age=300",
+      ...(await datasetVersionHeader("deals")),
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {

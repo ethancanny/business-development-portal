@@ -1,4 +1,6 @@
 import { sql, str, num } from "../platform/db";
+import { cached, cacheInvalidate } from "../platform/cache";
+import { bumpDatasets } from "../platform/versions";
 import { getDeals } from "../db";
 import type { Deal, InvestmentTypeKey } from "../types";
 import { DEFAULT_STAGES_BY_TYPE } from "../types";
@@ -291,6 +293,39 @@ export async function getAllDealMetrics(): Promise<Record<string, DealMetricsMap
   return out;
 }
 
+/**
+ * Scoped metrics read (Performance Fix Pass): only the given deals'
+ * rows, explicit columns (deal_id + metric_key + exactly what
+ * rowToMetric reads). Cached in-process for 60s under a key built
+ * from the sorted id set (`dealmetrics:<ids>`); setDealMetrics
+ * invalidates the whole `dealmetrics:` prefix on write.
+ */
+export async function getDealMetricsForDeals(
+  dealIds: string[]
+): Promise<Record<string, DealMetricsMap>> {
+  const ids = Array.from(
+    new Set(dealIds.map((d) => String(d ?? "")).filter(Boolean))
+  );
+  if (!ids.length) return {};
+  const key = `dealmetrics:${[...ids].sort().join(",")}`;
+  return cached(key, 60_000, async () => {
+    await ensureBd();
+    const db = sql();
+    const rows = await db.query(
+      `SELECT deal_id, metric_key, value_num, value_text, period, source, updated_at
+       FROM bd.deal_metrics
+       WHERE deal_id = ANY($1)`,
+      [ids]
+    );
+    const out: Record<string, DealMetricsMap> = {};
+    for (const r of rows as Record<string, unknown>[]) {
+      const dealId = str(r.deal_id);
+      (out[dealId] ??= {})[str(r.metric_key)] = rowToMetric(r);
+    }
+    return out;
+  });
+}
+
 const NUMERIC_TYPES = new Set(["money", "multiple", "pct", "number"]);
 
 /** Upsert a batch of metric values for one deal. Values are validated
@@ -352,6 +387,10 @@ export async function setDealMetrics(
     }
     saved.push(key);
   }
+  // Writes committed — drop every scoped-metrics cache entry and
+  // bump the bootstrap dataset so version-gated clients refetch.
+  cacheInvalidate("dealmetrics:");
+  await bumpDatasets("bd_bootstrap");
   return { saved, rejected };
 }
 
@@ -411,9 +450,10 @@ export interface BdBootstrap {
 }
 
 export async function getBdBootstrap(): Promise<BdBootstrap> {
+  const deals = await getDeals();
   const [config, metricsByDeal] = await Promise.all([
     getBdConfig(),
-    getAllDealMetrics(),
+    getDealMetricsForDeals(deals.map((d) => d.id)),
   ]);
   const db = sql();
   let portfolioCompanies: Array<{ id: string; label: string }> = [];
@@ -498,11 +538,13 @@ export async function buildDealExport(
 ): Promise<{ columns: TabularColumn[]; rows: Record<string, unknown>[] }> {
   const cfg = await getBdConfig();
   const deals = await getDeals();
-  const metricsByDeal = await getAllDealMetrics();
   const byId = new Map(deals.map((d) => [d.id, d]));
   const filtered = typeKey
     ? deals.filter((d) => (d.investmentType ?? "platform_lbo") === typeKey)
     : deals;
+  const metricsByDeal = await getDealMetricsForDeals(
+    filtered.map((d) => d.id)
+  );
   const columns = typeKey
     ? dealTypeColumns(cfg, typeKey)
     : [
@@ -563,9 +605,9 @@ export async function getFlywheel(): Promise<FlywheelData> {
     /* monitoring unavailable — honest nulls, panel shows empty state */
   }
   const deals = await getDeals();
-  const metricsByDeal = await getAllDealMetrics().catch(
-    () => ({}) as Record<string, DealMetricsMap>
-  );
+  const metricsByDeal = await getDealMetricsForDeals(
+    deals.map((d) => d.id)
+  ).catch(() => ({}) as Record<string, DealMetricsMap>);
   const closed = deals.filter(
     (d) => (d.investmentType ?? "platform_lbo") === "early_stage" && d.stage === "Closed"
   );

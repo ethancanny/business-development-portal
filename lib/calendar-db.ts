@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { bumpDatasets } from "./platform/versions";
 
 /**
  * Outlook Calendar events mirrored into the portal (Ethan, Oct 9, 2026).
@@ -137,7 +138,12 @@ export async function importCalendarEvents(
     await q`DELETE FROM calendar_events WHERE starts_at >= ${windowStart} AND starts_at < ${windowEnd} AND NOT (event_id = ANY(${ids}))`;
   }
   const after = await q`SELECT COUNT(*)::int AS n FROM calendar_events WHERE starts_at >= ${windowStart} AND starts_at < ${windowEnd}`;
-  return { imported: events.length, pruned: Number(before[0]?.n ?? 0) - Number(after[0]?.n ?? 0) + 0, newIds };
+  const pruned = Number(before[0]?.n ?? 0) - Number(after[0]?.n ?? 0) + 0;
+  // Performance Fix Pass (DESIGN.md §2): bump only when the mirror
+  // actually changed — imported counts the upserted (inserted/updated)
+  // rows, pruned the rows deleted from the window.
+  if (events.length > 0 || pruned > 0) await bumpDatasets("calendar");
+  return { imported: events.length, pruned, newIds };
 }
 
 /** Single-event upsert (Graph writes) — never prunes, preserves dismissed. */
@@ -159,6 +165,7 @@ export async function upsertCalendarEvent(e: CalendarEvent): Promise<boolean> {
       graph_reminder_on = COALESCE(EXCLUDED.graph_reminder_on, calendar_events.graph_reminder_on),
       graph_reminder_minutes = CASE WHEN EXCLUDED.graph_reminder_on IS NULL THEN calendar_events.graph_reminder_minutes ELSE EXCLUDED.graph_reminder_minutes END,
       updated_at = now()`;
+  await bumpDatasets("calendar");
   return isNew;
 }
 
@@ -167,6 +174,7 @@ export async function deleteCalendarEvent(eventId: string): Promise<void> {
   const q = sql();
   await q`DELETE FROM calendar_events WHERE event_id = ${eventId}`;
   await q`DELETE FROM calendar_event_reminders WHERE event_id = ${eventId}`;
+  await bumpDatasets("calendar");
 }
 
 /** Resolve the reminder choice an event should display: an explicit
@@ -415,6 +423,7 @@ export async function setCalendarEventDismissed(
   await ensure();
   const q = sql();
   await q`UPDATE calendar_events SET dismissed = ${dismissed}, updated_at = now() WHERE event_id = ${eventId}`;
+  await bumpDatasets("calendar");
 }
 
 /* ---------------- Two-way bridge outbox ----------------

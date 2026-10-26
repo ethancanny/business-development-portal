@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { ensurePlatform } from "@/lib/platform/service";
 import { getBdBootstrap } from "@/lib/bd/service";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 /** Investment Types bootstrap (Step 1, Oct 23, 2026): type/stage
  * config + metric definitions + sector packs + every deal's metric
@@ -14,6 +15,9 @@ export async function GET() {
   await ensurePlatform();
   const data = await getBdBootstrap();
   return NextResponse.json(data, {
-    headers: { "Cache-Control": "private, max-age=60" },
+    headers: {
+      "Cache-Control": "private, max-age=60",
+      ...(await datasetVersionHeader("bd_bootstrap")),
+    },
   });
 }

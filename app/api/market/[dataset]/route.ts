@@ -37,6 +37,30 @@ import {
   addMultiple,
 } from "@/lib/market-db";
 import { markNotInstitutional } from "@/lib/institutional-db";
+import {
+  datasetVersionHeader,
+  type DatasetName,
+} from "@/lib/platform/versions";
+
+/**
+ * Performance Fix Pass (DESIGN.md §5): the market datasets the task
+ * lists as separate route files (multiples / rates / indicators /
+ * tailwind / companies) are all served by THIS [dataset] route in
+ * the repo — there are no app/api/market/<name>/route.ts files.
+ * Versioned cases return Cache-Control: private, max-age=300 plus
+ * their X-Dataset-Version header, read after the payload computes.
+ */
+async function versionedJson(
+  data: unknown,
+  dataset: DatasetName
+): Promise<NextResponse> {
+  return NextResponse.json(data, {
+    headers: {
+      "Cache-Control": "private, max-age=300",
+      ...(await datasetVersionHeader(dataset)),
+    },
+  });
+}
 
 const DATASETS = [
   "indicators",
@@ -72,7 +96,7 @@ export async function GET(
     switch (dataset) {
       case "indicators": {
         const series = (sp.get("series") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-        return NextResponse.json(await getIndicatorSeries(series));
+        return versionedJson(await getIndicatorSeries(series), "market_indicators");
       }
       case "latest":
         return NextResponse.json(await getLatestIndicators());
@@ -90,7 +114,7 @@ export async function GET(
             .map((s) => s.trim())
             .filter(Boolean);
           const { companies, fitTotal } = await getFitCompanies(sectors.length ? sectors : undefined);
-          return NextResponse.json({ companies, fitTotal, limit: FITS_DISPLAY_LIMIT, mode: "fits" });
+          return versionedJson({ companies, fitTotal, limit: FITS_DISPLAY_LIMIT, mode: "fits" }, "market_companies");
         }
         // Filtered Out feed (chain/franchise filter, Oct 16, 2026;
         // institutional filter, Oct 17, 2026): chain-flagged AND
@@ -103,7 +127,7 @@ export async function GET(
             .map((s) => s.trim())
             .filter(Boolean);
           const { companies, chainTotal, institutionalTotal, filteredTotal } = await getFilteredCompanies(sectors.length ? sectors : undefined);
-          return NextResponse.json({ companies, chainTotal, institutionalTotal, filteredTotal, mode: "filtered" });
+          return versionedJson({ companies, chainTotal, institutionalTotal, filteredTotal, mode: "filtered" }, "market_companies");
         }
         const sector = sp.get("sector") ?? undefined;
         const off = Number(sp.get("offset") ?? 0);
@@ -113,13 +137,13 @@ export async function GET(
           countFits(sector),
           countUnscored(sector),
         ]);
-        return NextResponse.json({ companies, total, fitTotal, unscoredTotal, offset: off });
+        return versionedJson({ companies, total, fitTotal, unscoredTotal, offset: off }, "market_companies");
       }
       case "updates": {
         return NextResponse.json(await getUpdates());
       }
       case "multiples":
-        return NextResponse.json(await getMultiples());
+        return versionedJson(await getMultiples(), "market_multiples");
       case "rates": {
         const rows = await getIndicatorSeries(["DPRIME", "SOFR", "DGS10", "DGS2", "DFF"]);
         const latest = (id: string) => {
@@ -131,7 +155,7 @@ export async function GET(
         };
         const primeLatest = latest("DPRIME");
         const primeVal = primeLatest?.value ?? null;
-        return NextResponse.json({
+        return versionedJson({
           prime: primeLatest,
           sba: primeLatest && primeVal !== null
             ? {
@@ -145,7 +169,7 @@ export async function GET(
           treasury10y: latest("DGS10"),
           treasury2y: latest("DGS2"),
           fedFunds: latest("DFF"),
-        });
+        }, "market_rates");
       }
       case "acquisitions":
         return NextResponse.json(await getAcquisitions(sp.get("status") ?? undefined));
@@ -168,7 +192,7 @@ export async function GET(
       case "competing-buyers":
         return NextResponse.json(await getCompetingBuyers());
       case "tailwind":
-        return NextResponse.json(await getTailwindReport());
+        return versionedJson(await getTailwindReport(), "market_tailwind");
       default:
         return NextResponse.json({ error: "Unknown dataset" }, { status: 404 });
     }

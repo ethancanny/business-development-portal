@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { ensurePlatform, getOverviewData } from "@/lib/platform/service";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 export async function GET(req: NextRequest) {
   if (!getSessionUser()) {
@@ -77,7 +78,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(
     { ...data, earlyWarning, activityPulse, flywheel },
     {
-      headers: { "Cache-Control": "private, max-age=300" },
+      headers: {
+        "Cache-Control": "private, max-age=300",
+        ...(await datasetVersionHeader("overview")),
+      },
     }
   );
 }

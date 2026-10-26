@@ -6,6 +6,7 @@ import {
   setCalendarEventDismissed,
   type CalendarEvent,
 } from "@/lib/calendar-db";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 /**
  * Outlook Calendar mirror (Ethan, Oct 9, 2026).
@@ -29,19 +30,20 @@ export async function GET(req: NextRequest) {
   const from = sp.get("from") ?? new Date(now - 14 * 86400000).toISOString();
   const to = sp.get("to") ?? new Date(now + 28 * 86400000).toISOString();
   try {
-    // ?live=1 (Calendar month view): pull the requested range straight from
-    // Graph first so any browsable month is fresh, then read the mirror.
-    if (sp.get("live") === "1") {
-      const spanMs = new Date(to).getTime() - new Date(from).getTime();
-      if (spanMs > 0 && spanMs <= 370 * 86400000) {
-        const { msConnected, pullGraphRange } = await import("@/lib/microsoft");
-        if (await msConnected()) {
-          await pullGraphRange(from, to).catch(() => null);
-        }
-      }
-    }
+    // Mirror-only reads for every caller (Performance Fix Pass,
+    // DESIGN.md §6): the ?live=1 Graph-pull branch is deleted —
+    // freshness is owned by webhooks + the 15-min watchdog, and
+    // browsable months now show mirror coverage only.
     const events = await getCalendarEvents(from, to);
-    return NextResponse.json({ events });
+    return NextResponse.json(
+      { events },
+      {
+        headers: {
+          "Cache-Control": "private, max-age=300",
+          ...(await datasetVersionHeader("calendar")),
+        },
+      }
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });

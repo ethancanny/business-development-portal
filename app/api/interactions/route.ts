@@ -9,6 +9,7 @@ import {
 } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import type { Interaction, InteractionKind } from "@/lib/types";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 const KINDS: InteractionKind[] = ["call", "email", "meeting", "note"];
 
@@ -22,7 +23,12 @@ export async function GET(req: NextRequest) {
   let items = await getInteractions();
   if (dealId) items = items.filter((i) => i.dealId === dealId);
   if (execId) items = items.filter((i) => i.execId === execId);
-  return NextResponse.json(items);
+  return NextResponse.json(items, {
+    headers: {
+      "Cache-Control": "private, max-age=300",
+      ...(await datasetVersionHeader("interactions")),
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {

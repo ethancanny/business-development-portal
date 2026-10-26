@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authed, NO_STORE, ok, serviceError } from "@/lib/capital/http";
 import { listCapitalDeals } from "@/lib/capital/service";
 import { getAccessContext } from "@/lib/platform/permissions";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 /** GET capital deals index: every core deal + its deal_summary row. */
 export async function GET(): Promise<NextResponse> {
@@ -17,7 +18,10 @@ export async function GET(): Promise<NextResponse> {
   }
   try {
     const items = await listCapitalDeals();
-    return ok({ items });
+    const res = ok({ items });
+    const hdr = await datasetVersionHeader("capital");
+    if (hdr["X-Dataset-Version"]) res.headers.set("X-Dataset-Version", hdr["X-Dataset-Version"]);
+    return res;
   } catch (err) {
     return serviceError(err, "deals-list");
   }

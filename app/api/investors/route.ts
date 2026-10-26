@@ -6,6 +6,7 @@ import {
   upsertInvestor,
   type Investor,
 } from "@/lib/investors-db";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 /**
  * Investor contacts (Directory → Investors tab).
@@ -42,7 +43,16 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    return NextResponse.json({ investors: await getInvestors() });
+    const investors = await getInvestors();
+    return NextResponse.json(
+      { investors },
+      {
+        headers: {
+          "Cache-Control": "private, max-age=300",
+          ...(await datasetVersionHeader("investors")),
+        },
+      }
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });

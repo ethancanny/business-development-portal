@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { getExecutives, saveExecutives, newId, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { EXEC_STAGES, type Executive } from "@/lib/types";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 export async function GET() {
   if (!getSessionUser()) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  return NextResponse.json(await getExecutives());
+  const executives = await getExecutives();
+  return NextResponse.json(executives, {
+    headers: {
+      "Cache-Control": "private, max-age=300",
+      ...(await datasetVersionHeader("executives")),
+    },
+  });
 }
 
 function parseIndustries(body: unknown): string[] {

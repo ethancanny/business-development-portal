@@ -8,6 +8,7 @@ import {
   listDirectory,
   updateRecord,
 } from "@/lib/directory/service";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 export async function GET(req: NextRequest) {
   const user = getSessionUser();
@@ -56,7 +57,12 @@ export async function GET(req: NextRequest) {
   );
   return NextResponse.json(
     { items, total },
-    { headers: { "Cache-Control": "private, max-age=300" } }
+    {
+      headers: {
+        "Cache-Control": "private, max-age=300",
+        ...(await datasetVersionHeader("directory")),
+      },
+    }
   );
 }
 

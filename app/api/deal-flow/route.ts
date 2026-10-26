@@ -6,6 +6,7 @@ import { getSessionUser } from "@/lib/auth";
 import { evalNewListingItem } from "@/lib/push-evals";
 import { drainPushJobs } from "@/lib/push-schedule";
 import type { DealFlowItem, DealFlowKind } from "@/lib/types";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 const KINDS: DealFlowKind[] = [
   "business_for_sale",
@@ -28,7 +29,12 @@ export async function GET() {
     }
   }
   if (changed) await saveDealFlow(items);
-  return NextResponse.json(items);
+  return NextResponse.json(items, {
+    headers: {
+      "Cache-Control": "private, max-age=300",
+      ...(await datasetVersionHeader("dealflow")),
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {

@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { scheduleTaskPushJobs } from "@/lib/push-schedule";
 import { recountTaskLink } from "@/lib/directory/crm";
 import type { Task, TaskType } from "@/lib/types";
+import { datasetVersionHeader } from "@/lib/platform/versions";
 
 const TASK_TYPES: TaskType[] = ["Call", "Email", "Meeting", "Send docs", "Other"];
 
@@ -30,7 +31,12 @@ export async function GET() {
     // All-day (no time) first, then timed in order.
     return (a.dueTime ?? "").localeCompare(b.dueTime ?? "");
   });
-  return NextResponse.json(tasks);
+  return NextResponse.json(tasks, {
+    headers: {
+      "Cache-Control": "private, max-age=300",
+      ...(await datasetVersionHeader("tasks")),
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {
