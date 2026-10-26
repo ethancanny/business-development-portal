@@ -94,7 +94,7 @@ export function GenerateDocumentButton({
         className={className ?? "btn btn-primary btn-sm min-h-[44px]"}
         onClick={() => setOpen(true)}
       >
-        {label ?? (scope === "investor" ? "Draft document" : "Generate document")}
+        {label ?? "Generate contract"}
       </button>
       {open && (
         <GenerateDocumentDrawer
@@ -318,7 +318,7 @@ function GenerateDocumentDrawer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Generate document">
+    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Generate contract">
       <button
         type="button"
         aria-label="Close"
@@ -329,7 +329,7 @@ function GenerateDocumentDrawer({
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-white/10">
           <div>
             <h2 className="font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
-              {scope === "investor" ? "Draft investor document" : "Generate document"}
+              Generate contract
             </h2>
             <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
               Approved templates only · output is .docx + PDF with a

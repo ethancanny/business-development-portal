@@ -205,10 +205,10 @@ export default function DocGenPanel({ companyId }: { companyId: string }) {
   }, [templateId, dealId, generating]);
 
   return (
-    <section className="card-surface p-5" aria-label="Generate documents">
+    <section className="card-surface p-5" aria-label="Generate contract">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
-          Generate documents
+          Generate contract
         </h2>
         {companyName && (
           <span className="text-xs text-caption">{companyName}</span>
@@ -281,7 +281,7 @@ export default function DocGenPanel({ companyId }: { companyId: string }) {
               onClick={() => void runGenerate()}
               className="btn btn-primary min-h-[44px]"
             >
-              {generating ? "Generating…" : "Generate"}
+              {generating ? "Generating…" : "Generate contract"}
             </button>
           </div>
 

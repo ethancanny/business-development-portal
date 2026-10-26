@@ -211,7 +211,7 @@ export default function InvestorDetail({
           <GenerateDocumentButton
             scope="investor"
             investorPersonId={personId}
-            label="Draft document"
+            label="Generate contract"
             className="btn btn-secondary btn-sm min-h-[44px]"
           />
           {onClose && (

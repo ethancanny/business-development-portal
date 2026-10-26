@@ -6,7 +6,7 @@
  * Structure: identity header (below the standalone deal banner the
  * identity build mounts above this page) → six clickable summary
  * tiles fed by the pre-aggregated workspace summary → grouped
- * navigation (six groups, sub-sections as wrapping chips — never a
+ * navigation (seven groups, sub-sections as wrapping chips — never a
  * horizontally scrolling nav) → the active section only. Section
  * data is fetched per tab; the shell itself loads only the resolve
  * call + the summary aggregate.
@@ -41,6 +41,8 @@ import SellerQaTab from "@/components/diligence/SellerQaTab";
 import QoeTab from "@/components/diligence/QoeTab";
 import FindingsTab from "@/components/diligence/FindingsTab";
 import ContractsTab from "@/components/diligence/ContractsTab";
+import { GenerateDocumentButton } from "@/components/docgen/GenerateDocument";
+import ContractsPanel from "@/components/docgen/ContractsPanel";
 import LicensesTab from "@/components/diligence/LicensesTab";
 import TaxTab from "@/components/diligence/TaxTab";
 import ScorecardTab from "@/components/diligence/ScorecardTab";
@@ -90,11 +92,18 @@ const GROUPS: GroupDef[] = [
     key: "business",
     label: "Business & Legal",
     sections: [
-      { key: "contracts", label: "Contracts" },
       { key: "licenses", label: "Licenses" },
       { key: "site-visits", label: "Site Visits" },
       { key: "bpmn", label: "Process Maps" },
       { key: "scorecard", label: "Scorecard" },
+    ],
+  },
+  {
+    key: "contracts",
+    label: "Contracts",
+    sections: [
+      { key: "generate", label: "Generate contract" },
+      { key: "contracts", label: "Material contracts" },
     ],
   },
   {
@@ -487,6 +496,31 @@ export default function DiligenceWorkspace({ dealId }: { dealId: string }) {
         {section === "qoe" && <QoeTab {...tabProps} view="workbench" />}
         {section === "analysis" && <QoeTab {...tabProps} view="analysis" />}
         {section === "findings" && <FindingsTab {...tabProps} />}
+        {section === "generate" && (
+          <div className="space-y-4">
+            <section className="card-surface p-5" aria-label="Generate contract">
+              <h3 className="text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
+                Generate contract
+              </h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-white/50">
+                Draft an NDA, LOI or other document for this deal from an
+                approved template — fields pre-fill from the deal and the
+                Directory, and every field is reviewed before anything is
+                generated.
+              </p>
+              <div className="mt-3">
+                <GenerateDocumentButton
+                  scope="deal"
+                  dealId={dealId}
+                  label="Generate contract"
+                />
+              </div>
+            </section>
+            {workspace.companyId && (
+              <ContractsPanel companyId={workspace.companyId} />
+            )}
+          </div>
+        )}
         {section === "contracts" && <ContractsTab {...tabProps} />}
         {section === "licenses" && <LicensesTab {...tabProps} />}
         {section === "tax" && <TaxTab {...tabProps} />}

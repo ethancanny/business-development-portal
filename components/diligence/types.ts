@@ -327,6 +327,7 @@ export type SectionKey =
   | "analysis"
   | "tax"
   | "contracts"
+  | "generate"
   | "licenses"
   | "site-visits"
   | "bpmn"

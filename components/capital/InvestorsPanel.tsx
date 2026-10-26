@@ -153,7 +153,7 @@ export default function InvestorsPanel() {
         <span className="flex flex-wrap gap-2">
           <GenerateDocumentButton
             scope="investor"
-            label="Draft document"
+            label="Generate contract"
             className="btn btn-secondary min-h-[44px]"
           />
           <Button
