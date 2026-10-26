@@ -10,7 +10,8 @@ import {
   type LegacyInvestorInfo,
 } from "../directory/service";
 import { getDealContext } from "../diligence/service";
-import { getBdConfig, getAllDealMetrics } from "../bd/service";
+import { getBdConfig, getDealMetricsForDeals } from "../bd/service";
+import { bumpDatasets } from "../platform/versions";
 import { INVESTMENT_TYPE_LABELS, type InvestmentTypeKey } from "../types";
 import {
   ensureCapital,
@@ -1159,6 +1160,7 @@ export async function createRaise(
       ${input.entityName ?? ""}, ${input.nextMilestone ?? ""},
       ${input.nextMilestoneDate !== undefined ? cleanDateOnly(input.nextMilestoneDate) : null})`;
   await refreshDealSummary(dealId);
+  await bumpDatasets("capital");
   return (await getOpenRaise(dealId)) as RaiseRow;
 }
 
@@ -1182,6 +1184,7 @@ export async function updateRaise(
         updated_at = now()
     WHERE id = ${cur.id}`;
   await refreshDealSummary(dealId);
+  await bumpDatasets("capital");
   const rows = await db`
     SELECT * FROM capital.raises WHERE id = ${cur.id} LIMIT 1`;
   return rowToRaise(rows[0] as Record<string, unknown>);
@@ -1199,6 +1202,7 @@ export async function deleteRaise(
     UPDATE capital.raises SET deleted_at = now(), updated_at = now()
     WHERE id = ${cur.id} AND deleted_at IS NULL`;
   await refreshDealSummary(dealId);
+  await bumpDatasets("capital");
   return true;
 }
 
@@ -1329,6 +1333,10 @@ async function afterCommitmentMutation(opts: {
     kind: "investor_commitment_changed",
     message,
   });
+  // Direct bump as well as the event-map bump (investor_commitment_changed
+  // → capital): harmless duplication, and it guarantees coverage for
+  // every commitment create/update/delete through this choke point.
+  await bumpDatasets("capital");
 }
 
 export interface CommitmentInput {
@@ -1678,7 +1686,7 @@ export async function listCapitalDeals(): Promise<CapitalDealRow[]> {
   // via the Directory (investorLabel). Failures degrade to empty
   // enrichment, never fail the index.
   let typeByKey = new Map<string, CapitalDealType>();
-  let metricsByDeal: Awaited<ReturnType<typeof getAllDealMetrics>> = {};
+  let metricsByDeal: Awaited<ReturnType<typeof getDealMetricsForDeals>> = {};
   try {
     const cfg = await getBdConfig();
     typeByKey = new Map(
@@ -1687,7 +1695,9 @@ export async function listCapitalDeals(): Promise<CapitalDealRow[]> {
         { key: t.key, label: t.label, enabled: t.enabled },
       ])
     );
-    metricsByDeal = await getAllDealMetrics();
+    metricsByDeal = await getDealMetricsForDeals(
+      rows.map((r) => str((r as Record<string, unknown>).id))
+    );
   } catch {
     /* bd unavailable — type falls back to the static labels below */
   }
