@@ -45,6 +45,41 @@ export const COMMITMENT_STAGES = [
   "passed",
 ] as const;
 
+/** Raise-workspace Kanban stages (Redesign Step 1): the pipeline a
+ * commitment moves through on a raise. Stored per commitment in
+ * capital.commitments.pipeline_stage; the legacy stage/kind pair is
+ * kept in sync by the service so older readers stay correct. */
+export const PIPELINE_STAGES = [
+  { key: "prospect", label: "Prospect" },
+  { key: "intro", label: "Intro" },
+  { key: "meeting", label: "Meeting" },
+  { key: "interested", label: "Interested" },
+  { key: "soft_circled", label: "Soft-circled" },
+  { key: "committed", label: "Committed" },
+  { key: "funded", label: "Funded" },
+  { key: "passed", label: "Passed" },
+] as const;
+
+export const DOC_STATUSES = [
+  "none",
+  "draft",
+  "sent",
+  "signed",
+  "countersigned",
+  "filed",
+] as const;
+
+/** Default investor↔raise matching weights (points, sum 100) —
+ * seeded into capital.matching_weights and editable in Settings. */
+export const DEFAULT_MATCHING_WEIGHTS = {
+  type: 30,
+  checkSize: 20,
+  sector: 20,
+  structure: 10,
+  geography: 10,
+  activity: 10,
+} as const;
+
 export const IC_AREAS = [
   { key: "market", label: "Market" },
   { key: "business_quality", label: "Business quality" },
@@ -114,6 +149,81 @@ const SYSTEM_TEMPLATES: Array<{
   },
 ];
 
+/**
+ * Type-flavored report templates (Redesign Step 1, Part B §3):
+ * a teaser, an investment memo, and an investor update per investment
+ * type. capital.report_templates.kind has no teaser/memo kind, so all
+ * three reuse kind 'investor_update' with type-flavored names/bodies.
+ * These are Canny communications only — never contract language.
+ */
+const REPORT_TEMPLATE_TYPES: Array<{ key: string; label: string }> = [
+  { key: "platform_lbo", label: "Platform LBO" },
+  { key: "add_on", label: "Add-on" },
+  { key: "early_stage", label: "Early Stage" },
+  { key: "minority_growth", label: "Minority Growth" },
+];
+
+const TYPE_FLAVORED_TEMPLATES: Array<{
+  id: string;
+  name: string;
+  kind: string;
+  body: string;
+}> = REPORT_TEMPLATE_TYPES.flatMap((t) => [
+  {
+    id: `tpl_teaser_${t.key}`,
+    name: `Teaser — ${t.label}`,
+    kind: "investor_update",
+    body: [
+      `Teaser — {{deal_name}} ({{company_name}})`,
+      "",
+      `A ${t.label} opportunity presented by Canny Capital Partners.`,
+      "",
+      "Capital committed so far: {{committed}}",
+      "",
+      "Full details are available in the investment memo and data room.",
+      "",
+      "— Canny Capital Partners",
+    ].join("\n"),
+  },
+  {
+    id: `tpl_memo_${t.key}`,
+    name: `Investment memo — ${t.label}`,
+    kind: "investor_update",
+    body: [
+      `Investment memo — {{deal_name}} ({{company_name}})`,
+      `Type: ${t.label} · As of {{as_of}}`,
+      "",
+      "Capital committed: {{committed}}",
+      "Capital called: {{capital_called}}",
+      "Distributions: {{distributions}}",
+      "Net asset value: {{nav}}",
+      "",
+      "{{monitoring_section}}",
+      "",
+      "— Canny Capital Partners",
+    ].join("\n"),
+  },
+  {
+    id: `tpl_update_${t.key}`,
+    name: `Investor update — ${t.label}`,
+    kind: "investor_update",
+    body: [
+      "Dear {{investor_name}},",
+      "",
+      `Update on {{company_name}} ({{deal_name}}), a ${t.label} investment, as of {{as_of}}.`,
+      "",
+      "Capital committed: {{committed}}",
+      "Capital called: {{capital_called}}",
+      "Distributions: {{distributions}}",
+      "Net asset value: {{nav}}",
+      "",
+      "{{monitoring_section}}",
+      "",
+      "— Canny Capital Partners",
+    ].join("\n"),
+  },
+]);
+
 let schemaReady: Promise<void> | null = null;
 
 export function ensureCapital(): Promise<void> {
@@ -147,6 +257,25 @@ export function ensureCapital(): Promise<void> {
       await db`
         CREATE UNIQUE INDEX IF NOT EXISTS cap_profiles_person_live_uidx
         ON capital.investor_profiles (person_id) WHERE deleted_at IS NULL`;
+      // Redesign Step 1: Directory capital-profile tab fields —
+      // geography / accredited status / relationship owner, plus the
+      // type-aware matching inputs (invests-in types + per-type
+      // check ranges). Additive only.
+      await db`
+        ALTER TABLE capital.investor_profiles
+          ADD COLUMN IF NOT EXISTS geography TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE capital.investor_profiles
+          ADD COLUMN IF NOT EXISTS accredited_status TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE capital.investor_profiles
+          ADD COLUMN IF NOT EXISTS relationship_owner TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE capital.investor_profiles
+          ADD COLUMN IF NOT EXISTS invests_in_types JSONB NOT NULL DEFAULT '[]'::jsonb`;
+      await db`
+        ALTER TABLE capital.investor_profiles
+          ADD COLUMN IF NOT EXISTS check_by_type JSONB NOT NULL DEFAULT '{}'::jsonb`;
 
       await db`
         CREATE TABLE IF NOT EXISTS capital.raises (
@@ -169,6 +298,17 @@ export function ensureCapital(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS cap_raises_deal_idx
         ON capital.raises (deal_id)`;
+      // Redesign Step 1: SPV/entity name + next milestone for raise
+      // cards, the timeline view, and the Action Center.
+      await db`
+        ALTER TABLE capital.raises
+          ADD COLUMN IF NOT EXISTS entity_name TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE capital.raises
+          ADD COLUMN IF NOT EXISTS next_milestone TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE capital.raises
+          ADD COLUMN IF NOT EXISTS next_milestone_date DATE`;
 
       await db`
         CREATE TABLE IF NOT EXISTS capital.commitments (
@@ -195,6 +335,42 @@ export function ensureCapital(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS cap_commitments_investor_idx
         ON capital.commitments (investor_person_id)`;
+      // Redesign Step 1: a commitment IS the investor↔raise
+      // participation link record — Kanban pipeline stage, the four
+      // money buckets (indicated / soft / hard / funded), owner,
+      // document + wire status, expected funding date, and the
+      // per-stage date stamps. Legacy amount/kind/stage stay and are
+      // kept in sync by the service (see bucketAmounts there).
+      await db`
+        ALTER TABLE capital.commitments
+          ADD COLUMN IF NOT EXISTS pipeline_stage TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE capital.commitments
+          ADD COLUMN IF NOT EXISTS indicated_amount NUMERIC`;
+      await db`
+        ALTER TABLE capital.commitments
+          ADD COLUMN IF NOT EXISTS soft_amount NUMERIC`;
+      await db`
+        ALTER TABLE capital.commitments
+          ADD COLUMN IF NOT EXISTS hard_amount NUMERIC`;
+      await db`
+        ALTER TABLE capital.commitments
+          ADD COLUMN IF NOT EXISTS funded_amount NUMERIC`;
+      await db`
+        ALTER TABLE capital.commitments
+          ADD COLUMN IF NOT EXISTS owner TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE capital.commitments
+          ADD COLUMN IF NOT EXISTS doc_status TEXT NOT NULL DEFAULT 'none'`;
+      await db`
+        ALTER TABLE capital.commitments
+          ADD COLUMN IF NOT EXISTS wire_status TEXT NOT NULL DEFAULT 'pending'`;
+      await db`
+        ALTER TABLE capital.commitments
+          ADD COLUMN IF NOT EXISTS expected_funding_date DATE`;
+      await db`
+        ALTER TABLE capital.commitments
+          ADD COLUMN IF NOT EXISTS stage_dates JSONB NOT NULL DEFAULT '{}'::jsonb`;
 
       // Stored read model: refreshed on every raise/commitment/report
       // write (and on investor_commitment_changed) — rollups are
@@ -213,6 +389,25 @@ export function ensureCapital(): Promise<void> {
           nav_total NUMERIC NOT NULL DEFAULT 0,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`;
+
+      await db`
+        ALTER TABLE capital.deal_summary
+          ADD COLUMN IF NOT EXISTS indicated_total NUMERIC NOT NULL DEFAULT 0`;
+
+      // Redesign Step 1: editable investor↔raise matching weights
+      // (Settings → MatchingWeightsCard). One global row.
+      await db`
+        CREATE TABLE IF NOT EXISTS capital.matching_weights (
+          id TEXT PRIMARY KEY,
+          weights JSONB NOT NULL DEFAULT '{}'::jsonb,
+          updated_by TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
+      await db`
+        INSERT INTO capital.matching_weights (id, weights)
+        VALUES ('global', ${JSON.stringify(DEFAULT_MATCHING_WEIGHTS)}::jsonb)
+        ON CONFLICT (id) DO NOTHING`;
 
       await db`
         CREATE TABLE IF NOT EXISTS capital.economics_inputs (
@@ -331,7 +526,7 @@ export function ensureCapital(): Promise<void> {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           deleted_at TIMESTAMPTZ
         )`;
-      for (const tpl of SYSTEM_TEMPLATES) {
+      for (const tpl of [...SYSTEM_TEMPLATES, ...TYPE_FLAVORED_TEMPLATES]) {
         await db`
           INSERT INTO capital.report_templates (id, name, kind, body, is_system)
           VALUES (${tpl.id}, ${tpl.name}, ${tpl.kind}, ${tpl.body}, true)

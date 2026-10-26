@@ -106,6 +106,9 @@ const DEFINITION_SEEDS: DefSeed[] = [
    * separately; synergies_annual above stays as the combined figure. */
   ["synergies_cost", "Cost synergies (annual)", "type:add_on", "money", 25, { section: "addon_metrics" }],
   ["synergies_revenue", "Revenue synergies (annual)", "type:add_on", "money", 27, { section: "addon_metrics" }],
+  /* Add-on funding source (Investors & Capital Redesign Step 1):
+   * shown on add-on raise cards — how the add-on is funded. */
+  ["funding_source", "Funding source", "type:add_on", "enum", 45, { section: "addon_metrics", options: ["Platform cash flow", "Delayed-draw facility", "Investor pro rata", "Mixed"] }],
 
   /* ---- Early Stage ---- */
   ["arr", "ARR", "type:early_stage", "money", 10],
@@ -133,6 +136,14 @@ const DEFINITION_SEEDS: DefSeed[] = [
   ["market_notes", "Market notes", "type:early_stage", "text", 20, { section: "team_market" }],
   ["lead_investor", "Lead investor", "type:early_stage", "text", 10, { section: "investors_es" }],
   ["co_investors", "Co-investors", "type:early_stage", "text", 20, { section: "investors_es" }],
+
+  /* ---- Minority Growth (Investors & Capital Redesign Step 1) ----
+   * The type ships disabled in type_config; these are the structured
+   * fields its raise cards / workspace read. */
+  ["mg_check_size", "Check size", "type:minority_growth", "money", 10],
+  ["mg_instrument", "Instrument", "type:minority_growth", "enum", 20, { options: ["Preferred equity", "Common equity", "Structured equity", "Other"] }],
+  ["mg_pre_money", "Pre-money valuation", "type:minority_growth", "money", 30],
+  ["mg_ownership_pct", "Ownership %", "type:minority_growth", "pct", 40],
 
   /* ---- Aerospace & Defense sector pack (additive, any type) ---- */
   ["backlog", "Backlog", "sector:aerospace_defense", "money", 10],
