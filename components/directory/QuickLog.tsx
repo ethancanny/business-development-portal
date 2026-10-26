@@ -33,6 +33,7 @@ import {
   type ReactNode,
 } from "react";
 import { showToast } from "@/components/Toast";
+import { bumpLocalDataset } from "@/lib/client/datasets";
 
 /* ---------------- Local contract types ---------------- */
 
@@ -337,6 +338,11 @@ function QuickLogDialog({ onClose, initialPerson }: { onClose: () => void; initi
         return;
       }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      // The log changes the Directory list (last touch / timeline) and
+      // can create a follow-up task — drop both local dataset caches
+      // so their next loads refetch instead of serving pre-log data.
+      bumpLocalDataset("directory");
+      bumpLocalDataset("tasks");
       showToast("Interaction logged");
       window.dispatchEvent(new CustomEvent("ccp:interaction-logged"));
       onClose();
