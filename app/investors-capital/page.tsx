@@ -1,173 +1,323 @@
 "use client";
 
 /**
- * Investors & Capital index (Phase 7) — the deal grid first (every
- * deal with its raise summary chips: target / hard / funded /
- * investors, linking into the per-deal capital workspace), then the
- * investor panel (Directory people + capital profiles). Section
- * order flipped Oct 24, 2026 at Ethan's direction: Deals & raises
- * above Investors.
+ * Investors & Capital index (Step 1 redesign, Oct 25, 2026) — the
+ * page is built around capital raises: a clickable summary strip,
+ * type chips that filter everything below, then Raises (Cards /
+ * Table / Timeline), the cross-raise Matching matrix, and the
+ * Action Center. The Investors list and Investor Pipeline that used
+ * to live here are REMOVED — investors live only in the Directory
+ * (the header keeps an "Add investor" shortcut into it). All figures
+ * come from the pre-aggregated /api/platform/capital endpoints;
+ * nothing is recomputed on load.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
-import { CardSkeleton, EmptyState, ErrorState } from "@/components/ui";
-import InvestorsPanel from "@/components/capital/InvestorsPanel";
+import { CardSkeleton, ErrorState } from "@/components/ui";
+import { GenerateDocumentButton } from "@/components/docgen/GenerateDocument";
+import SummaryStrip from "@/components/capital/home/SummaryStrip";
+import RaiseViews from "@/components/capital/home/RaiseViews";
+import MatchingSection from "@/components/capital/home/MatchingSection";
+import ActionCenter from "@/components/capital/home/ActionCenter";
+import NewRaiseDialog from "@/components/capital/home/NewRaiseDialog";
 import {
   API,
   api,
-  cardCls,
   fmtMoneyCompact,
-  fmtMoneyN,
   listFrom,
-  type CapitalDeal,
 } from "@/components/capital/types";
+import {
+  hasOpenRaise,
+  isPassed,
+  type CapitalSummaryData,
+  type ExtCapitalDeal,
+} from "@/components/capital/home/shared";
 
 export default function InvestorsCapitalPage() {
-  const [deals, setDeals] = useState<CapitalDeal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const router = useRouter();
+  const [deals, setDeals] = useState<ExtCapitalDeal[]>([]);
+  const [dealsLoading, setDealsLoading] = useState(true);
+  const [dealsError, setDealsError] = useState(false);
+  const [summary, setSummary] = useState<CapitalSummaryData | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [type, setType] = useState("all");
+  const [showTestData, setShowTestData] = useState(false);
+  const [newRaiseOpen, setNewRaiseOpen] = useState(false);
+  const [startingDealId, setStartingDealId] = useState<string | null>(null);
+  const [startError, setStartError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(false);
+  const loadDeals = useCallback(async () => {
+    setDealsLoading(true);
+    setDealsError(false);
     try {
       const data = await api<Record<string, unknown>>(`${API}/deals`);
-      setDeals(listFrom<CapitalDeal>(data, "items", "deals"));
+      setDeals(listFrom<ExtCapitalDeal>(data, "items", "deals"));
     } catch {
-      setError(true);
+      setDealsError(true);
     } finally {
-      setLoading(false);
+      setDealsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadDeals();
+  }, [loadDeals]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSummaryLoading(true);
+    api<CapitalSummaryData>(`${API}/summary?type=${encodeURIComponent(type)}`)
+      .then((d) => {
+        if (!cancelled) setSummary(d);
+      })
+      .catch(() => {
+        if (!cancelled) setSummary(null);
+      })
+      .finally(() => {
+        if (!cancelled) setSummaryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [type]);
+
+  /* Type chips come from the configured types on the summary
+   * payload (labels from config — never hardcoded). Disabled types
+   * show only when they actually have raises. */
+  const typeChips = useMemo(() => {
+    const byType = new Map((summary?.byType ?? []).map((t) => [t.typeKey, t]));
+    const chips: Array<{
+      key: string;
+      label: string;
+      raiseCount: number;
+      target: number;
+    }> = [];
+    for (const t of summary?.types ?? []) {
+      const agg = byType.get(t.key);
+      const raiseCount = agg?.raiseCount ?? 0;
+      if (!t.enabled && raiseCount === 0) continue;
+      chips.push({
+        key: t.key,
+        label: t.label,
+        raiseCount,
+        target: agg?.target ?? 0,
+      });
+    }
+    return chips;
+  }, [summary]);
+
+  const allRaiseCount = useMemo(
+    () => (summary?.byType ?? []).reduce((n, t) => n + t.raiseCount, 0),
+    [summary]
+  );
+  const allTarget = useMemo(() => {
+    if (type === "all" && summary) return summary.target;
+    return (summary?.byType ?? []).reduce((n, t) => n + t.target, 0);
+  }, [summary, type]);
+
+  const typeFiltered = useMemo(
+    () =>
+      type === "all"
+        ? deals
+        : deals.filter((d) => d.investmentType?.key === type),
+    [deals, type]
+  );
+
+  const visible = useMemo(
+    () =>
+      showTestData
+        ? typeFiltered
+        : typeFiltered.filter((d) => !d.isTestData && !isPassed(d)),
+    [typeFiltered, showTestData]
+  );
+
+  const raises = useMemo(() => visible.filter(hasOpenRaise), [visible]);
+  const dealsWithoutRaise = useMemo(
+    () => visible.filter((d) => !hasOpenRaise(d)),
+    [visible]
+  );
+  /* The New raise picker offers every deal without an open raise,
+   * regardless of the Passed/test-data visibility toggle. */
+  const newRaiseCandidates = useMemo(
+    () => typeFiltered.filter((d) => !hasOpenRaise(d)),
+    [typeFiltered]
+  );
+
+  const startRaise = useCallback(
+    async (deal: ExtCapitalDeal) => {
+      if (startingDealId) return;
+      setStartingDealId(deal.dealId);
+      setStartError("");
+      try {
+        await api(`${API}/deals/${encodeURIComponent(deal.dealId)}/raise`, {
+          method: "POST",
+          body: JSON.stringify({ targetRaise: 0 }),
+        });
+        router.push(`/investors-capital/${encodeURIComponent(deal.dealId)}`);
+      } catch {
+        setStartError(
+          `Could not start a raise for ${deal.dealName || deal.companyName || "that deal"}. It may already have an open raise.`
+        );
+        setStartingDealId(null);
+      }
+    },
+    [router, startingDealId]
+  );
 
   return (
     <div>
       <PageHero
         eyebrow="Platform"
         title="Investors & Capital"
-        subtitle="Investor profiles, capital raises, deal economics, investment committee and investor reporting"
+        subtitle="Capital raises, cross-raise matching and what needs action — investors live in the Directory"
       />
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
-        <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
-          Deals &amp; raises
-        </h2>
-        <p className="mt-0.5 text-sm text-slate-500 dark:text-white/50">
-          Open a deal for its raise book, economics model, deal screen, IC
-          record and reporting ledger.
-        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setNewRaiseOpen(true)}
+            className="btn btn-primary btn-sm min-h-[44px]"
+          >
+            + New raise
+          </button>
+          <GenerateDocumentButton
+            scope="investor"
+            label="Generate contract"
+            className="btn btn-secondary btn-sm min-h-[44px]"
+          />
+          <Link
+            href="/directory?action=add-investor&view=investors"
+            className="btn btn-secondary btn-sm min-h-[44px]"
+          >
+            Add investor
+          </Link>
+        </div>
 
-        <div className="mt-4">
-          {loading ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <CardSkeleton key={i} lines={3} />
-              ))}
-            </div>
-          ) : error ? (
-            <ErrorState onRetry={() => void load()} />
-          ) : deals.length === 0 ? (
-            <EmptyState
-              title="No deals yet"
-              message="Deals appear here as they enter the pipeline. Each deal gets a capital workspace — raise, economics, screen, IC and reporting — as soon as it exists."
-            />
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {deals.map((deal) => {
-                const s = deal.summary;
-                const fundedPct =
-                  s && s.targetRaise > 0 ? s.fundedTotal / s.targetRaise : null;
-                return (
-                  <div key={deal.dealId} className={cardCls}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h3 className="truncate font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
-                          <Link
-                            href={`/investors-capital/${encodeURIComponent(deal.dealId)}`}
-                            className="hover:text-gold-700 hover:underline dark:hover:text-gold-400"
-                          >
-                            {deal.dealName || deal.companyName || "Deal"}
-                          </Link>
-                        </h3>
-                        {deal.companyName && deal.dealName && (
-                          <p className="truncate text-sm text-slate-500 dark:text-white/50">
-                            {deal.companyName}
-                          </p>
-                        )}
-                      </div>
-                      {deal.stage && (
-                        <span className="badge badge-neutral shrink-0">{deal.stage}</span>
-                      )}
-                    </div>
+        <div className="mt-5">
+          <SummaryStrip summary={summary} loading={summaryLoading} />
+        </div>
 
-                    {s ? (
-                      <>
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          <span className="badge badge-neutral" title={fmtMoneyN(s.targetRaise)}>
-                            Target {fmtMoneyCompact(s.targetRaise)}
-                          </span>
-                          <span className="badge badge-warn" title={fmtMoneyN(s.hardTotal)}>
-                            Hard {fmtMoneyCompact(s.hardTotal)}
-                          </span>
-                          <span className="badge badge-fit" title={fmtMoneyN(s.fundedTotal)}>
-                            Funded {fmtMoneyCompact(s.fundedTotal)}
-                          </span>
-                          <span className="badge badge-neutral">
-                            {s.investorCount} investor{s.investorCount === 1 ? "" : "s"}
-                          </span>
-                        </div>
-                        {fundedPct !== null && (
-                          <div className="mt-3" aria-label="Funded progress">
-                            <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
-                              <div
-                                className="h-full rounded-full bg-gradient-to-r from-[#b8975a] to-[#d4b37a]"
-                                style={{ width: `${Math.min(100, Math.max(0, fundedPct * 100))}%` }}
-                              />
-                            </div>
-                            <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
-                              {Math.round(fundedPct * 100)}% funded · called{" "}
-                              {fmtMoneyCompact(s.calledTotal)} · NAV{" "}
-                              {fmtMoneyCompact(s.navTotal)}
-                            </p>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <p className="mt-3 text-sm text-slate-500 dark:text-white/50">
-                        No raise open yet — open one in the workspace.
-                      </p>
-                    )}
+        {/* Type chips */}
+        <div className="mt-5 flex flex-wrap gap-1.5" role="group" aria-label="Filter by investment type">
+          <button
+            type="button"
+            aria-pressed={type === "all"}
+            onClick={() => setType("all")}
+            className={`chip min-h-[44px] ${type === "all" ? "chip-active" : ""}`}
+          >
+            All
+            <span className="opacity-70">
+              {allRaiseCount} · {fmtMoneyCompact(allTarget)}
+            </span>
+          </button>
+          {typeChips.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              aria-pressed={type === c.key}
+              onClick={() => setType(c.key)}
+              className={`chip min-h-[44px] ${type === c.key ? "chip-active" : ""}`}
+            >
+              {c.label}
+              <span className="opacity-70">
+                {c.raiseCount} · {fmtMoneyCompact(c.target)}
+              </span>
+            </button>
+          ))}
+        </div>
 
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <Link
-                        href={`/investors-capital/${encodeURIComponent(deal.dealId)}`}
-                        className="btn btn-primary btn-sm min-h-[44px]"
-                      >
-                        Open workspace
-                      </Link>
-                      <Link
-                        href={`/due-diligence/${encodeURIComponent(deal.dealId)}`}
-                        className="btn btn-secondary btn-sm min-h-[44px]"
-                      >
-                        Due Diligence
-                      </Link>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+        {/* Sticky section bar */}
+        <nav
+          aria-label="Page sections"
+          className="sticky top-0 z-20 -mx-4 mt-6 border-y border-slate-200 bg-white/90 px-4 backdrop-blur dark:border-white/10 dark:bg-[#0b1526]/90 sm:-mx-6 sm:px-6"
+        >
+          <div className="flex gap-1 overflow-x-auto py-2">
+            {[
+              { id: "raises", label: "Raises" },
+              { id: "matching", label: "Matching" },
+              { id: "action-center", label: "Action Center" },
+            ].map((s) => (
+              <a
+                key={s.id}
+                href={`#${s.id}`}
+                className="chip min-h-[44px] shrink-0"
+              >
+                {s.label}
+              </a>
+            ))}
+          </div>
+        </nav>
+
+        <section id="raises" aria-label="Raises" className="mt-6 scroll-mt-24">
+          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+            Raises
+          </h2>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-white/50">
+            Open a raise for its investor book, matching, documents, reports, economics and
+            closing.
+          </p>
+          {startError && (
+            <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-300">
+              {startError}
+            </p>
           )}
-        </div>
+          <div className="mt-4">
+            {dealsLoading ? (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <CardSkeleton key={i} lines={3} />
+                ))}
+              </div>
+            ) : dealsError ? (
+              <ErrorState onRetry={() => void loadDeals()} />
+            ) : (
+              <RaiseViews
+                raises={raises}
+                dealsWithoutRaise={dealsWithoutRaise}
+                showTestData={showTestData}
+                onShowTestDataChange={setShowTestData}
+                onStartRaise={(deal) => void startRaise(deal)}
+                startingDealId={startingDealId}
+              />
+            )}
+          </div>
+        </section>
 
-        <div className="mt-8">
-          <InvestorsPanel />
-        </div>
+        <section id="matching" aria-label="Matching" className="mt-10 scroll-mt-24">
+          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+            Matching
+          </h2>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-white/50">
+            Who is in which raise, each investor&apos;s exposure and capacity, and the top
+            suggested matches per raise.
+          </p>
+          <div className="mt-4">
+            <MatchingSection typeKey={type} typeOptions={summary?.types ?? []} />
+          </div>
+        </section>
+
+        <section id="action-center" aria-label="Action Center" className="mt-10 scroll-mt-24">
+          <h2 className="font-display text-2xl font-semibold text-[#0d1f3c] dark:text-white">
+            Action Center
+          </h2>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-white/50">
+            Stale touches, unsigned documents, unfunded commitments, upcoming closings and
+            raises behind target.
+          </p>
+          <div className="mt-4">
+            <ActionCenter typeKey={type} />
+          </div>
+        </section>
       </div>
+
+      <NewRaiseDialog
+        open={newRaiseOpen}
+        candidates={newRaiseCandidates}
+        onClose={() => setNewRaiseOpen(false)}
+      />
     </div>
   );
 }
