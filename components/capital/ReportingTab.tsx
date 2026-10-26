@@ -40,43 +40,23 @@ import {
   type WorkspaceBundle,
 } from "@/components/capital/workspace/shared";
 
+/** A real delivery record from the comms module (Send anywhere,
+ * Oct 25, 2026) — the tab's log reads GET …/reports/deliveries,
+ * which returns comms delivery rows for this deal's reports.
+ * emailOpenedAt is the open-pixel stamp; openedAt/viewedAt are the
+ * stronger portal-link signals — labeled distinctly, never merged. */
 interface DeliveryRow {
-  key: string;
-  investorName: string;
-  what: string;
-  sentAt: string;
-  opened: string | null;
-}
-
-/** Delivery records, IF the reporting payload carries any
- * (deliveries / deliveryLog / communications / sends). Returns []
- * when the payload has none — the tab says so rather than
- * inventing a log. */
-function normalizeDeliveries(data: ReportingData & Record<string, unknown>): DeliveryRow[] {
-  const raw =
-    (data as Record<string, unknown>).deliveries ??
-    (data as Record<string, unknown>).deliveryLog ??
-    (data as Record<string, unknown>).communications ??
-    (data as Record<string, unknown>).sends;
-  if (!Array.isArray(raw)) return [];
-  return raw.map((r, i) => {
-    const rec = (r ?? {}) as Record<string, unknown>;
-    const openedRaw = rec.openedAt ?? rec.opened_at ?? rec.opened;
-    return {
-      key: String(rec.id ?? i),
-      investorName: String(rec.investorName ?? rec.investorPersonId ?? "Investor"),
-      what: String(rec.what ?? rec.subject ?? rec.templateName ?? rec.kind ?? "Report"),
-      sentAt: String(rec.sentAt ?? rec.sent_at ?? rec.createdAt ?? rec.asOf ?? ""),
-      opened:
-        openedRaw === true
-          ? "Yes"
-          : openedRaw === false
-            ? "No"
-            : typeof openedRaw === "string" && openedRaw
-              ? openedRaw
-              : null,
-    };
-  });
+  id: string;
+  reportTitle: string;
+  recipientName: string;
+  recipientEmail: string;
+  status: string;
+  emailStatus: string;
+  deliveredAt: string;
+  emailOpenedAt: string | null;
+  openedAt: string | null;
+  viewedAt: string | null;
+  downloadedAt: string | null;
 }
 
 interface ReportingData {
@@ -159,6 +139,24 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
   const [renderSel, setRenderSel] = useState({ templateId: "", investorPersonId: "" });
   const [rendering, setRendering] = useState(false);
   const [rendered, setRendered] = useState<{ text: string; values: Record<string, unknown> } | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState<Array<{
+    recipientName: string;
+    recipientEmail: string;
+    emailStatus: string;
+    link?: string;
+  }> | null>(null);
+
+  const loadDeliveries = useCallback(async () => {
+    try {
+      const d = await api<{ deliveries: DeliveryRow[] }>(
+        `${API}/deals/${encodeURIComponent(dealId)}/reports/deliveries`
+      );
+      setDeliveries(Array.isArray(d.deliveries) ? d.deliveries : []);
+    } catch {
+      /* the log is additive — a failure leaves the last known rows */
+    }
+  }, [dealId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -169,13 +167,13 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
         entries: Array.isArray(d.entries) ? d.entries : [],
         totals: d.totals ?? { called: 0, distributed: 0, navLatest: 0, byInvestor: null },
       });
-      setDeliveries(normalizeDeliveries(d as ReportingData & Record<string, unknown>));
+      void loadDeliveries();
     } catch {
       setLoadFailed(true);
     } finally {
       setLoading(false);
     }
-  }, [base]);
+  }, [base, loadDeliveries]);
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -251,15 +249,38 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
 
   useEffect(() => {
     let live = true;
-    api<{ investors: InvestorListItem[] }>(`${API}/investors?limit=50`)
+    // The investors API returns { items, total } — reading a
+    // `investors` key here silently emptied every investor dropdown
+    // on this tab (fixed in the Send anywhere build, Oct 25, 2026).
+    api<{ items?: InvestorListItem[]; investors?: InvestorListItem[] }>(
+      `${API}/investors?limit=100`
+    )
       .then((d) => {
-        if (live) setInvestors(Array.isArray(d.investors) ? d.investors : []);
+        if (live) {
+          setInvestors(
+            Array.isArray(d.items)
+              ? d.items
+              : Array.isArray(d.investors)
+                ? d.investors
+                : []
+          );
+        }
       })
       .catch(() => undefined);
     return () => {
       live = false;
     };
   }, []);
+
+  /** personId → email, from the investors list (its items carry the
+   * Directory email; commitments do not). */
+  const emailByPerson = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const inv of investors) {
+      if (inv.personId && inv.email) m.set(inv.personId, inv.email);
+    }
+    return m;
+  }, [investors]);
 
   const addEntry = async () => {
     const amount = parseNum(form.amount);
@@ -329,11 +350,9 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
     setRendering(true);
     setError("");
     try {
-      // The existing render endpoint renders for ONE investor or the
-      // whole deal — there is no multi-recipient send endpoint, so
-      // the recipient selection is honored exactly when it resolves
-      // to a single investor (or the explicit pick below); otherwise
-      // the render is whole-deal. No send API is invented here.
+      // Preview render only — for one investor or the whole deal.
+      // Sending (below) goes through the reports/send endpoint,
+      // which bridges the render into comms and delivers it.
       const selected = recipients ? Array.from(recipients) : [];
       const effectiveInvestorId =
         renderSel.investorPersonId ||
@@ -355,6 +374,67 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
       setError("Could not render that report. Pick a template and try again.");
     } finally {
       setRendering(false);
+    }
+  };
+
+  /** Send the selected template to the selected recipients
+   * (Send anywhere, Oct 25, 2026): the server renders (personalized
+   * when exactly one recipient is selected), bridges the render into
+   * comms, and delivers with per-recipient tracked links. Recipients
+   * without an email on file are reported, never silently dropped
+   * from the count. */
+  const sendReport = async () => {
+    if (!renderSel.templateId || sending) return;
+    const selectedIds = recipients ? Array.from(recipients) : [];
+    const sendable = participants
+      .filter((p) => selectedIds.includes(p.personId))
+      .map((p) => ({
+        personId: p.personId,
+        name: p.name,
+        email: emailByPerson.get(p.personId) ?? "",
+      }))
+      .filter((r) => r.email.includes("@"));
+    if (!sendable.length) {
+      setError(
+        "None of the selected recipients has an email on file — add one on their Directory record first."
+      );
+      return;
+    }
+    setSending(true);
+    setError("");
+    setSendResult(null);
+    try {
+      const d = await api<{
+        deliveries: Array<{
+          recipientName: string;
+          recipientEmail: string;
+          emailStatus: string;
+          link?: string;
+        }>;
+      }>(`${API}/deals/${encodeURIComponent(dealId)}/reports/send`, {
+        method: "POST",
+        body: JSON.stringify({
+          templateId: renderSel.templateId,
+          recipients: sendable,
+        }),
+      });
+      setSendResult(Array.isArray(d.deliveries) ? d.deliveries : []);
+      await loadDeliveries();
+    } catch (err) {
+      const e = err as { status?: number; body?: Record<string, unknown> };
+      if (e.status === 409 && e.body?.error === "send_blocked") {
+        const check = (e.body.check ?? {}) as {
+          blocked?: Array<{ message: string }>;
+        };
+        const msgs = (check.blocked ?? []).map((b) => b.message).join(" ");
+        setError(
+          `Delivery is blocked by the pre-send check.${msgs ? ` ${msgs}` : ""} Resolve it (or send from the report in Communications, where an override with a reason is available).`
+        );
+      } else {
+        setError("Could not send that report. Pick a template and recipients and try again.");
+      }
+    } finally {
+      setSending(false);
     }
   };
 
@@ -413,51 +493,63 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
         </div>
       )}
 
-      {/* Delivery log — only when the payload carries records */}
+      {/* Delivery log — real comms delivery records for this deal */}
       <div className={cardCls}>
         <h3 className="font-display text-lg font-semibold text-[#0d1f3c] dark:text-white">
           Delivery log
         </h3>
         {deliveries.length === 0 ? (
           <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-white/50">
-            No delivery records are returned by the reporting endpoints for this
-            deal. The existing flow renders reports (below) but has no send
-            endpoint and no sent/opened tracking in its payloads — so no log is
-            shown rather than an invented one. The ledger below is the record of
-            capital calls, distributions and NAV marks, not of sends.
+            No reports have been sent for this deal yet. Pick a template and
+            recipients under Investor reports below and use Send — every
+            delivery lands here with its email outcome and open tracking.
+            (The ledger below is the record of capital calls, distributions
+            and NAV marks, not of sends.)
           </p>
         ) : (
-          <>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[560px]">
-                <thead>
-                  <tr className="border-b border-slate-100 dark:border-white/5">
-                    <th className={thCls}>Investor</th>
-                    <th className={thCls}>What was sent</th>
-                    <th className={thCls}>Sent</th>
-                    <th className={thCls}>
-                      {deliveries.some((d) => d.opened !== null) ? "Opened" : "Opened (not tracked)"}
-                    </th>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[760px]">
+              <thead>
+                <tr className="border-b border-slate-100 dark:border-white/5">
+                  <th className={thCls}>Investor</th>
+                  <th className={thCls}>What was sent</th>
+                  <th className={thCls}>Sent</th>
+                  <th className={thCls}>Email</th>
+                  <th className={thCls}>Opened (pixel-detected)</th>
+                  <th className={thCls}>Opened / Viewed / Downloaded</th>
+                  <th className={thCls}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deliveries.map((d) => (
+                  <tr key={d.id} className="border-t border-slate-100 dark:border-white/5">
+                    <td className={`${tdCls} font-semibold`}>
+                      {d.recipientName || d.recipientEmail}
+                      {d.recipientName && (
+                        <span className="block text-xs font-normal text-slate-400 dark:text-white/40">
+                          {d.recipientEmail}
+                        </span>
+                      )}
+                    </td>
+                    <td className={tdCls}>{d.reportTitle}</td>
+                    <td className={tdCls}>{d.deliveredAt ? fmtDateShort(d.deliveredAt) : "—"}</td>
+                    <td className={tdCls}>{d.emailStatus || "—"}</td>
+                    <td className={tdCls}>{d.emailOpenedAt ? fmtDateShort(d.emailOpenedAt) : "—"}</td>
+                    <td className={tdCls}>
+                      {d.openedAt ? fmtDateShort(d.openedAt) : "—"} /{" "}
+                      {d.viewedAt ? fmtDateShort(d.viewedAt) : "—"} /{" "}
+                      {d.downloadedAt ? fmtDateShort(d.downloadedAt) : "—"}
+                    </td>
+                    <td className={tdCls}>
+                      <span className={`badge ${d.status === "revoked" ? "badge-danger" : "badge-fit"}`}>
+                        {d.status}
+                      </span>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {deliveries.map((d) => (
-                    <tr key={d.key} className="border-t border-slate-100 dark:border-white/5">
-                      <td className={`${tdCls} font-semibold`}>{d.investorName}</td>
-                      <td className={tdCls}>{d.what}</td>
-                      <td className={tdCls}>{d.sentAt ? fmtDateShort(d.sentAt) : "—"}</td>
-                      <td className={tdCls}>{d.opened ?? "Not tracked"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {!deliveries.some((d) => d.opened !== null) && (
-              <p className="mt-2 text-xs text-slate-400 dark:text-white/40">
-                Open tracking isn&apos;t recorded for these sends — the column is labeled accordingly.
-              </p>
-            )}
-          </>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -596,18 +688,23 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
                           })
                         }
                       />
-                      {p.name}
+                      <span>
+                        {p.name}
+                        <span className="block text-xs text-slate-400 dark:text-white/40">
+                          {emailByPerson.get(p.personId) ?? "No email on file — can't be sent to"}
+                        </span>
+                      </span>
                     </label>
                   );
                 })}
               </div>
               <p className="mt-2 text-xs text-slate-400 dark:text-white/40">
                 {recipients ? `${recipients.size} of ${participants.length} selected. ` : ""}
-                Honest limit: the existing render endpoint renders for one investor
-                or the whole deal and there is no multi-recipient send endpoint —
-                when exactly one recipient is selected the render is personalized
-                to them; otherwise it renders whole-deal. Sending itself is not
-                part of the existing reporting endpoints, so nothing is marked sent here.
+                Sending delivers through the portal&apos;s report pipeline
+                (tracked personal links, 30-day expiry): when exactly one
+                recipient is selected the report is personalized to them;
+                with several, the whole-deal render is sent and each
+                recipient&apos;s copy is prepared for them.
               </p>
             </>
           )}
@@ -620,7 +717,7 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
             ))}
           </p>
         )}
-        <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end">
           <div>
             <label className={labelCls}>Template</label>
             <select className={`${selectCls} min-h-[44px]`} value={renderSel.templateId} onChange={(e) => setRenderSel((s) => ({ ...s, templateId: e.target.value }))}>
@@ -644,7 +741,42 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
           <Button onClick={() => void render()} loading={rendering} disabled={!renderSel.templateId} className="min-h-[44px]">
             Render report
           </Button>
+          <Button
+            onClick={() => void sendReport()}
+            loading={sending}
+            disabled={!renderSel.templateId || !recipients || recipients.size === 0}
+            className="min-h-[44px]"
+          >
+            Send to selected recipients
+          </Button>
         </div>
+
+        {sendResult && (
+          <div className="mt-4 space-y-2 rounded-2xl border border-slate-100 p-4 dark:border-white/5">
+            <p className="text-sm font-semibold text-[#0d1f3c] dark:text-white">
+              Sent — per-recipient outcomes
+            </p>
+            {sendResult.map((d, i) => (
+              <div key={i} className="text-sm text-slate-600 dark:text-white/70">
+                <p>
+                  <span className="font-semibold">{d.recipientName || d.recipientEmail}</span>{" "}
+                  — email: {d.emailStatus || "unknown"}
+                </p>
+                {d.link && d.emailStatus !== "sent" && (
+                  <p className="mt-1 break-all rounded-lg bg-slate-100 px-3 py-2 text-xs dark:bg-white/10">
+                    Recipient link (shown once — copy it now if the email
+                    above was not sent):{" "}
+                    <span className="font-mono">{d.link}</span>
+                  </p>
+                )}
+              </div>
+            ))}
+            <p className="text-xs text-slate-400 dark:text-white/40">
+              Deliveries are tracked in the Delivery log above; the sent
+              report also lives in Communications.
+            </p>
+          </div>
+        )}
 
         {rendered && (
           <div className="mt-4">

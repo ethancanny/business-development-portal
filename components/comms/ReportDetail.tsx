@@ -952,6 +952,7 @@ function DeliveriesPanel({
                 <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide">Status</th>
                 <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide">Email</th>
                 <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide">Delivered</th>
+                <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide">Opened (pixel-detected)</th>
                 <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide">Opened / Viewed / Downloaded</th>
                 <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wide">Actions</th>
               </tr>
@@ -984,6 +985,9 @@ function DeliveriesPanel({
                     </td>
                     <td className="px-3 py-2.5 text-slate-500 dark:text-white/50">
                       {when(pick(rec, "deliveredAt", "delivered_at"))}
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-500 dark:text-white/50">
+                      {when(pick(rec, "emailOpenedAt", "email_opened_at"))}
                     </td>
                     <td className="px-3 py-2.5 text-slate-500 dark:text-white/50">
                       {when(pick(rec, "openedAt", "opened_at"))} /{" "}
