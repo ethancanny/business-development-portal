@@ -6,6 +6,7 @@ import {
   serviceError,
   sStr,
   sNum,
+  sDate,
 } from "@/lib/capital/http";
 import {
   deleteCommitment,
@@ -29,6 +30,15 @@ export async function PATCH(
         kind: sStr(body.kind),
         stage: sStr(body.stage),
         notes: sStr(body.notes),
+        pipelineStage: sStr(body.pipelineStage),
+        indicatedAmount: sNum(body.indicatedAmount),
+        softAmount: sNum(body.softAmount),
+        hardAmount: sNum(body.hardAmount),
+        fundedAmount: sNum(body.fundedAmount),
+        owner: sStr(body.owner),
+        docStatus: sStr(body.docStatus),
+        wireStatus: sStr(body.wireStatus),
+        expectedFundingDate: sDate(body.expectedFundingDate),
       },
       gate.user.name || gate.user.email
     );

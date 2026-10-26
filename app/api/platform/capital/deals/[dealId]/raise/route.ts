@@ -6,6 +6,7 @@ import {
   serviceError,
   sStr,
   sNum,
+  sDate,
 } from "@/lib/capital/http";
 import {
   createRaise,
@@ -44,6 +45,9 @@ export async function POST(
       {
         targetRaise: target === null ? undefined : target,
         notes: sStr(body.notes),
+        entityName: sStr(body.entityName),
+        nextMilestone: sStr(body.nextMilestone),
+        nextMilestoneDate: sDate(body.nextMilestoneDate),
       },
       gate.user.name || gate.user.email
     );
@@ -69,6 +73,9 @@ export async function PATCH(
         targetRaise: target === null ? undefined : target,
         status: sStr(body.status),
         notes: sStr(body.notes),
+        entityName: sStr(body.entityName),
+        nextMilestone: sStr(body.nextMilestone),
+        nextMilestoneDate: sDate(body.nextMilestoneDate),
       },
       gate.user.name || gate.user.email
     );

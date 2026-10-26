@@ -15,6 +15,25 @@ import {
   type InvestorProfileInput,
 } from "@/lib/capital/service";
 
+/** checkByType body field: { [typeKey]: { min, max } } sanitized. */
+function sCheckByType(
+  v: unknown
+): Record<string, { min: number | null; max: number | null }> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const out: Record<string, { min: number | null; max: number | null }> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    const r =
+      val && typeof val === "object"
+        ? (val as Record<string, unknown>)
+        : {};
+    out[k] = {
+      min: typeof r.min === "number" ? r.min : null,
+      max: typeof r.max === "number" ? r.max : null,
+    };
+  }
+  return out;
+}
+
 function profileInputFrom(
   body: Record<string, unknown>
 ): InvestorProfileInput {
@@ -31,6 +50,11 @@ function profileInputFrom(
     structurePrefs: sStr(body.structurePrefs),
     notes: sStr(body.notes),
     source: sStr(body.source),
+    geography: sStr(body.geography),
+    accreditedStatus: sStr(body.accreditedStatus),
+    relationshipOwner: sStr(body.relationshipOwner),
+    investsInTypes: sStrArr(body.investsInTypes),
+    checkByType: sCheckByType(body.checkByType),
   };
 }
 
