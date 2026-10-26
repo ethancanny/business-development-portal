@@ -1,5 +1,6 @@
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import { logActivity } from "./db";
+import { bumpDatasets } from "./platform/versions";
 
 /**
  * Operator candidates (Ethan's Operator Discovery & Sourcing spec,
@@ -448,13 +449,60 @@ export interface CandidateFilters {
   sort?: string;
 }
 
+/** Exactly the columns rowToCandidate reads — the list query never
+ * hauls the full row (notably the JSONB sightings/score payloads are
+ * still needed by the mapper, but nothing else exists on the table
+ * beyond this list + dedup_key). */
+const CANDIDATE_COLUMNS = [
+  "id", "name", "current_title", "company", "industry", "focus_sector",
+  "city", "location_verified", "source_type", "source_url", "date_found",
+  "last_seen", "referrer", "fit_notes", "status", "pass_reason",
+  "last_touch", "next_step", "target_role", "prep_notes",
+  "directory_exec_id", "sightings", "score", "score_factors", "scored_at",
+  "matched_targets", "conflicts", "created_at", "updated_at",
+].join(", ");
+
 export async function listCandidates(
   filters: CandidateFilters = {}
 ): Promise<OperatorCandidate[]> {
   await ensure();
-  const rows = await sql()`
-    SELECT * FROM operator_candidates ORDER BY updated_at DESC`;
-  let out = rows.map(rowToCandidate);
+  // Filters pushed into SQL (Performance Fix Pass): status /
+  // focus_sector / location_verified as WHERE clauses; q as an ILIKE
+  // over the same field concatenation the JS filter below uses, so
+  // the SQL result is always a superset of the JS-filtered result.
+  // The JS filters/sort stay as an idempotent safety net — the final
+  // result set and order are byte-identical to the pre-pushdown code.
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (filters.status) {
+    params.push(filters.status);
+    clauses.push(`status = $${params.length}`);
+  }
+  if (filters.focusSector !== undefined) {
+    params.push(filters.focusSector);
+    clauses.push(`focus_sector = $${params.length}`);
+  }
+  if (filters.locationVerified !== undefined) {
+    params.push(filters.locationVerified);
+    clauses.push(`location_verified = $${params.length}`);
+  }
+  if (filters.q) {
+    const needle = filters.q.replace(/[\\%_]/g, "\\$&");
+    params.push(`%${needle}%`);
+    clauses.push(
+      `(name || ' ' || company || ' ' || current_title || ' ' || city || ' ' || industry) ILIKE $${params.length}`
+    );
+  }
+  const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+  const order =
+    filters.sort === "score"
+      ? " ORDER BY score DESC NULLS LAST, name ASC"
+      : " ORDER BY updated_at DESC";
+  const rows = await sql().query(
+    `SELECT ${CANDIDATE_COLUMNS} FROM operator_candidates${where}${order}`,
+    params
+  );
+  let out = (rows as Record<string, unknown>[]).map(rowToCandidate);
   if (filters.status) out = out.filter((c) => c.status === filters.status);
   if (filters.focusSector !== undefined)
     out = out.filter((c) => c.focusSector === filters.focusSector);
@@ -480,6 +528,79 @@ export async function listCandidates(
     });
   }
   return out;
+}
+
+/**
+ * Monday (YYYY-MM-DD) of the current week in America/Phoenix.
+ * Mirrors the Overview page's operator-tile math (local Monday via
+ * `d minus ((getDay()+6)%7) days`, en-CA string) with the timezone
+ * fixed to Phoenix so the server computes the same boundary the
+ * page computed in Ethan's browser.
+ */
+export function phoenixWeekMonday(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Phoenix",
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const part = (type: string): string =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  const weekdayIdx = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(
+    part("weekday")
+  );
+  const monday = new Date(
+    Date.UTC(Number(part("year")), Number(part("month")) - 1, Number(part("day")))
+  );
+  monday.setUTCDate(monday.getUTCDate() - ((weekdayIdx + 6) % 7));
+  const mm = String(monday.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(monday.getUTCDate()).padStart(2, "0");
+  return `${monday.getUTCFullYear()}-${mm}-${dd}`;
+}
+
+export interface CandidateSummary {
+  total: number;
+  byStatus: Record<string, number>;
+  /** Candidates whose date_found falls in the current Phoenix week
+   * (Monday → now) — the Overview tile's newCandidatesThisWeek. */
+  newThisWeek: number;
+  interviewing: number;
+  paired: number;
+  verified: number;
+  awaitingVerification: number;
+}
+
+/**
+ * Server-side counts for the Overview operators tile (Performance
+ * Fix Pass): selects ONLY status + date_found, never full rows.
+ * newThisWeek mirrors the page math exactly: date_found non-empty
+ * AND date_found >= this week's Phoenix-Monday string.
+ */
+export async function getCandidateSummary(): Promise<CandidateSummary> {
+  await ensure();
+  const rows = await sql()`
+    SELECT status, date_found FROM operator_candidates`;
+  const monday = phoenixWeekMonday();
+  const byStatus: Record<string, number> = {};
+  for (const s of CANDIDATE_STATUSES) byStatus[s] = 0;
+  let newThisWeek = 0;
+  for (const r of rows) {
+    const rec = r as Record<string, unknown>;
+    const status = String(rec.status ?? "Candidate") || "Candidate";
+    byStatus[status] = (byStatus[status] ?? 0) + 1;
+    const dateFound = rec.date_found ? String(rec.date_found) : "";
+    if (dateFound && dateFound >= monday) newThisWeek++;
+  }
+  return {
+    total: rows.length,
+    byStatus,
+    newThisWeek,
+    interviewing: byStatus["Interviewing"] ?? 0,
+    paired: byStatus["Paired"] ?? 0,
+    verified: byStatus["Verified"] ?? 0,
+    awaitingVerification: byStatus["Candidate"] ?? 0,
+  };
 }
 
 export async function getCandidate(
@@ -608,6 +729,7 @@ export async function createOrMergeCandidate(
     `${actor} added operator candidate ${candidate.name}`,
     candidate
   );
+  await bumpDatasets("candidates");
   return { candidate, merged: false };
 }
 
@@ -655,6 +777,7 @@ async function mergeSighting(
     `${actor} logged a new sighting of ${existing.name} (${sighting.sourceType})`,
     updated
   );
+  await bumpDatasets("candidates");
   return { candidate: updated, merged: true };
 }
 
@@ -784,6 +907,7 @@ export async function updateCandidate(
       : `${actor} updated candidate ${next.name}`,
     next
   );
+  await bumpDatasets("candidates");
   return next;
 }
 
@@ -812,6 +936,7 @@ export async function deleteCandidate(
     `${actor} deleted operator candidate ${prev.name}`,
     prev
   );
+  await bumpDatasets("candidates");
   return prev;
 }
 
@@ -877,6 +1002,7 @@ export async function applyScoring(
     before: prev,
     after: next,
   });
+  await bumpDatasets("candidates");
   return true;
 }
 
