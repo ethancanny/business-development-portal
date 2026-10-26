@@ -1,9 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { startAuthentication } from "@simplewebauthn/browser";
 import { useTheme } from "@/components/ThemeProvider";
+import {
+  BlueprintGrid,
+  ContrailArc,
+  StarField,
+  TopoContours,
+} from "@/components/theme/DesertMotifs";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,6 +19,22 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [focus, setFocus] = useState<"ad" | "all">("ad");
+
+  // Focus-aware tagline (pre-auth): one public probe on mount; a
+  // failed fetch keeps the "ad" default.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/platform/focus-public")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { focus?: string } | null) => {
+        if (!cancelled && d) setFocus(d.focus === "all" ? "all" : "ad");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Post-login routing (Phase 9): management users (role 'guest')
   // land on their scoped /my-company portal; everyone else keeps the
@@ -101,7 +123,7 @@ export default function LoginPage() {
 
   return (
     <div
-      className="flex min-h-screen items-center justify-center px-4"
+      className="relative flex min-h-screen items-center justify-center px-4"
       style={{
         backgroundImage:
           "linear-gradient(rgba(13,31,60,0.82), rgba(13,31,60,0.88)), url(https://cannycapitalpartners.com/arizona-desert-landscape.jpg)",
@@ -109,7 +131,13 @@ export default function LoginPage() {
         backgroundPosition: "center",
       }}
     >
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-2xl dark:border-white/10 dark:bg-[#132847]/95 dark:backdrop-blur">
+      <span className="text-white">
+        <TopoContours />
+        <BlueprintGrid />
+        <ContrailArc />
+        <StarField />
+      </span>
+      <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-2xl dark:border-white/10 dark:bg-[#132847]/95 dark:backdrop-blur">
         <img
           src={theme === "dark" ? "https://cannycapitalpartners.com/canny-logo-white.png" : "https://cannycapitalpartners.com/canny-logo.png"}
           alt="Canny Capital Partners"
@@ -119,7 +147,9 @@ export default function LoginPage() {
           Canny Capital Portal
         </h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-[#c8bfa8]">
-          Sign in to track your pipelines
+          {focus === "ad"
+            ? "Arizona aerospace and defense — deal flow, operators, and market intelligence for Canny Capital Partners."
+            : "Sign in to track your pipelines"}
         </p>
 
         <form onSubmit={submit} className="mt-6 flex flex-col gap-4">

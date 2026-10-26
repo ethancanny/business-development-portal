@@ -22,6 +22,8 @@ import { Breadcrumbs } from "@/components/EntityBits";
 import NotificationCenter from "@/components/NotificationCenter";
 import { openGlobalSearch } from "@/components/Sidebar";
 import { useTheme } from "@/components/ThemeProvider";
+import FocusConfirmDialog from "@/components/focus/FocusConfirmDialog";
+import { useFocus } from "@/components/focus/FocusProvider";
 import { IconLogOut, IconMoon, IconSun } from "@/components/icons";
 
 function lineIcon(children: React.ReactNode) {
@@ -174,9 +176,13 @@ export function crumbsForPath(pathname: string): Crumb[] {
 export default function TopBar({ onMenu }: { onMenu: () => void }) {
   const pathname = usePathname() ?? "";
   const router = useRouter();
-  const { theme, toggle } = useTheme();
+  const { theme, toggle, namedTheme, setNamedTheme } = useTheme();
+  const { focus, impact, role, refresh: refreshFocus } = useFocus();
   const [userName, setUserName] = useState("");
   const [userOpen, setUserOpen] = useState(false);
+  const [focusDialogOpen, setFocusDialogOpen] = useState(false);
+  const [focusBusy, setFocusBusy] = useState(false);
+  const [focusNote, setFocusNote] = useState("");
   const userRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -218,6 +224,44 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
     setUserOpen(false);
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
+  };
+
+  const focusTarget = focus === "ad" ? "all" : "ad";
+  const isFocusAdmin = role === "admin";
+
+  const confirmFocusSwitch = async () => {
+    setFocusBusy(true);
+    try {
+      const res = await fetch("/api/platform/settings/focus", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ focus: focusTarget }),
+      });
+      if (res.status === 403) {
+        // Not an admin after all — revert (the focus value never
+        // changed locally) and surface the note in the user menu.
+        setFocusNote("Admins only");
+        setFocusDialogOpen(false);
+        setUserOpen(true);
+        return;
+      }
+      if (!res.ok) {
+        setFocusNote("Could not switch focus");
+        setFocusDialogOpen(false);
+        setUserOpen(true);
+        return;
+      }
+      setFocusNote("");
+      refreshFocus();
+      setFocusDialogOpen(false);
+      setUserOpen(false);
+    } catch {
+      setFocusNote("Could not switch focus");
+      setFocusDialogOpen(false);
+      setUserOpen(true);
+    } finally {
+      setFocusBusy(false);
+    }
   };
 
   const crumbs = crumbsForPath(pathname);
@@ -307,6 +351,56 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
                   {userName}
                 </p>
               )}
+              <div className="border-t border-slate-100 px-3.5 py-2 dark:border-white/10">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-xs text-slate-600 dark:text-white/70">
+                    Focus:{" "}
+                    <span className="font-medium text-[#0d1f3c] dark:text-white">
+                      {focus === "ad" ? "Aerospace & Defense" : "All sectors"}
+                    </span>
+                  </span>
+                  {isFocusAdmin ? (
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs font-medium text-[#8a6d3b] hover:underline dark:text-[#d4b37a]"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFocusNote("");
+                        setFocusDialogOpen(true);
+                      }}
+                    >
+                      Switch
+                    </button>
+                  ) : (
+                    <span className="shrink-0 text-[11px] text-slate-400 dark:text-white/40">
+                      Admin-set
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-xs text-slate-600 dark:text-white/70">
+                    Theme:{" "}
+                    <span className="font-medium text-[#0d1f3c] dark:text-white">
+                      {namedTheme === "desert" ? "Aerospace Desert" : "Classic"}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 text-xs font-medium text-[#8a6d3b] hover:underline dark:text-[#d4b37a]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setNamedTheme(namedTheme === "desert" ? "classic" : "desert");
+                    }}
+                  >
+                    Switch
+                  </button>
+                </div>
+                {focusNote && (
+                  <p className="mt-1.5 text-[11px] font-medium text-red-600 dark:text-red-300">
+                    {focusNote}
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 role="menuitem"
@@ -320,6 +414,16 @@ export default function TopBar({ onMenu }: { onMenu: () => void }) {
           )}
         </div>
       </div>
+      <FocusConfirmDialog
+        open={focusDialogOpen}
+        target={focusTarget}
+        impact={impact}
+        busy={focusBusy}
+        onConfirm={confirmFocusSwitch}
+        onCancel={() => {
+          if (!focusBusy) setFocusDialogOpen(false);
+        }}
+      />
     </header>
   );
 }

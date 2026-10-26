@@ -27,6 +27,7 @@ import {
 } from "@/components/icons";
 import { fmtMoney, fmtMoneyCompact } from "@/lib/format";
 import type { OverviewSummary } from "@/lib/platform/types";
+import { useFocus } from "@/components/focus/FocusProvider";
 
 function Sparkline({ points }: { points: { day: string; value: number }[] }) {
   const w = 120;
@@ -101,6 +102,9 @@ export default function CommandStrip({
   fitTotal: number;
   fitReady: boolean;
 }) {
+  // Focus & Theme §2: the fit total passed in is A&D-only in Focus
+  // mode (the Overview page scopes it), so the caption follows suit.
+  const { focus } = useFocus();
   const pipelineValue = summary.pipelineValue ?? 0;
   const valuedCount = summary.pipelineValuedCount ?? 0;
   const counted = useCountUp(pipelineValue);
@@ -197,7 +201,11 @@ export default function CommandStrip({
           href="/market-intel#fit-targets"
           label="Fit targets"
           display={fitReady ? fitTotal.toLocaleString() : "…"}
-          caption="Across the five focus sectors"
+          caption={
+            focus === "ad"
+              ? "Aerospace & Defense focus"
+              : "Across the five focus sectors"
+          }
           Icon={IconActivity}
         />
         <Secondary

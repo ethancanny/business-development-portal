@@ -11,6 +11,12 @@
  */
 
 import { BANNER_DARK, BANNER_LIGHT } from "@/lib/sector-colors";
+import { useFocus } from "@/components/focus/FocusProvider";
+import {
+  ContrailArc,
+  StarField,
+  TopoContours,
+} from "@/components/theme/DesertMotifs";
 
 export function phoenixHour(now = new Date()): number {
   const h = new Intl.DateTimeFormat("en-US", {
@@ -36,6 +42,7 @@ export default function TodayHero({
   firstName: string;
   briefParts: string[];
 }) {
+  const { focus } = useFocus();
   const now = new Date();
   const greeting = greetingFor(phoenixHour(now));
   const fullDate = now.toLocaleDateString("en-US", {
@@ -63,9 +70,16 @@ export default function TodayHero({
       />
       <div className="absolute inset-0 bg-gradient-to-r from-[#0d1f3c] via-[#0d1f3c]/60 to-[#0d1f3c]/15" />
       <div className="absolute inset-0 bg-gradient-to-t from-[#0d1f3c]/60 via-transparent to-transparent" />
+      <span className="text-white">
+        <TopoContours />
+        <StarField />
+        <ContrailArc />
+      </span>
       <div className="relative px-5 py-6 sm:px-6 sm:py-7">
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#d4b37a]">
-          Canny Capital Partners · Overview
+          {focus === "ad"
+            ? "Canny Capital Partners · Arizona aerospace and defense"
+            : "Canny Capital Partners · Overview"}
         </p>
         <h1 className="mt-1.5 font-display text-3xl font-semibold text-white sm:text-4xl">
           {greeting}

@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { startAuthentication } from "@simplewebauthn/browser";
 import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
+import {
+  BlueprintGrid,
+  ContrailArc,
+  StarField,
+  TopoContours,
+} from "@/components/theme/DesertMotifs";
 
 /**
  * Idle auto-lock (CRM Phase 2, Oct 2026). Mounted once by the app layout.
@@ -185,7 +191,13 @@ export default function LockScreen() {
         backgroundPosition: "center",
       }}
     >
-      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#0d1f3c]/90 p-8 shadow-2xl backdrop-blur">
+      <span className="text-white">
+        <TopoContours />
+        <BlueprintGrid />
+        <ContrailArc />
+        <StarField />
+      </span>
+      <div className="relative w-full max-w-sm rounded-2xl border border-white/10 bg-[#0d1f3c]/90 p-8 shadow-2xl backdrop-blur">
         <img
           src="https://cannycapitalpartners.com/canny-logo-white.png"
           alt="Canny Capital Partners"

@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { BANNER_DARK, BANNER_LIGHT } from "@/lib/sector-colors";
+import {
+  ContrailArc,
+  StarField,
+  TopoContours,
+} from "@/components/theme/DesertMotifs";
 
 interface PageHeroProps {
   eyebrow?: string;
@@ -56,6 +61,11 @@ export default function PageHero({ eyebrow, title, subtitle }: PageHeroProps) {
       {/* Dark mode only: extra depth over the night sky (~40–60%). */}
       <div className="absolute inset-0 hidden bg-gradient-to-r from-[#040b1a]/60 via-[#040b1a]/25 to-transparent dark:block" />
       <div className="absolute inset-0 hidden bg-gradient-to-t from-[#040b1a]/50 via-transparent to-transparent dark:block" />
+      <span className="text-white">
+        <TopoContours />
+        <ContrailArc />
+        <StarField />
+      </span>
       <div className="relative mx-auto flex h-full max-w-[1400px] flex-col justify-center px-4 sm:px-6">
         {eyebrow && !collapsed && (
           <p className="hidden text-[11px] font-semibold uppercase tracking-label text-[#d4b37a] sm:block">
