@@ -172,6 +172,25 @@ export interface DocgenEnvelopeRow {
   updatedAt: string;
 }
 
+/** One row per recipient per send attempt (Send anywhere, Oct 25,
+ * 2026): channel 'signature' (state = the envelope's email status:
+ * sent / setup_required / manual_link) or 'email' (state = the mail
+ * outcome: sent / setup_required / failed). Errors are recorded, never
+ * hidden — a send is only ever shown as sent when the transport
+ * actually accepted it. */
+export interface DocumentSendRow {
+  id: string;
+  contractId: string;
+  documentId: string;
+  recipientName: string;
+  recipientEmail: string;
+  channel: "signature" | "email" | string;
+  actor: string;
+  state: string;
+  error: string;
+  createdAt: string;
+}
+
 let schemaReady: Promise<void> | null = null;
 
 export function ensureDocgenSchema(): Promise<void> {
@@ -375,6 +394,56 @@ export function ensureDocgenSchema(): Promise<void> {
         await db`
           INSERT INTO docgen.schema_migrations (marker)
           VALUES ('docgen-contracts-v1')
+          ON CONFLICT (marker) DO NOTHING`;
+      }
+
+      /* ------- Send anywhere (Oct 25, 2026) -------
+       * Marker-guarded migration `docgen-send-anywhere-v1`:
+       * (a) the six SYSTEM seed templates move from scope='deal' to
+       * scope='general' — they are firm-standard documents (NDA, LOI…)
+       * usable on deal AND investor surfaces, and listTemplates already
+       * unions 'general' into every scope, so no query changes. Only
+       * rows created_by='system' with a seed key are touched; user
+       * templates are never re-scoped. (Ethan approved the seeds in
+       * Settings on Oct 25 but the approvals never persisted — the
+       * seeds were deal-scope drafts, invisible to investor drawers.)
+       * (b) docgen.document_sends — the send log for contract/document
+       * sends (signature + email-attachment channels). comms.deliveries
+       * cannot be reused: its report_id is NOT NULL and report-scoped.
+       * Statements are idempotent, so a lost marker re-runs no-ops. */
+      const sendMarkerRows = await db`
+        SELECT marker FROM docgen.schema_migrations
+        WHERE marker = 'docgen-send-anywhere-v1'`;
+      if (!sendMarkerRows.length) {
+        await db`
+          UPDATE docgen.templates
+          SET scope = 'general', updated_at = now()
+          WHERE created_by = 'system'
+            AND key IN ('loi', 'ioi', 'nda', 'cim', 'closing-checklist',
+              'board-consent')
+            AND deleted_at IS NULL
+            AND scope <> 'general'`;
+
+        await db`
+          CREATE TABLE IF NOT EXISTS docgen.document_sends (
+            id TEXT PRIMARY KEY,
+            contract_id TEXT NOT NULL,
+            document_id TEXT NOT NULL DEFAULT '',
+            recipient_name TEXT NOT NULL DEFAULT '',
+            recipient_email TEXT NOT NULL DEFAULT '',
+            channel TEXT NOT NULL DEFAULT '',
+            actor TEXT NOT NULL DEFAULT '',
+            state TEXT NOT NULL DEFAULT '',
+            error TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          )`;
+        await db`
+          CREATE INDEX IF NOT EXISTS docgen_document_sends_contract_idx
+          ON docgen.document_sends (contract_id, created_at DESC)`;
+
+        await db`
+          INSERT INTO docgen.schema_migrations (marker)
+          VALUES ('docgen-send-anywhere-v1')
           ON CONFLICT (marker) DO NOTHING`;
       }
     })().catch((err) => {

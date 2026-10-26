@@ -35,6 +35,11 @@ export function middleware(req: NextRequest) {
     // themselves (hash lookup + envelope state) on every call. The
     // session cookie is never read on signer routes.
     "/api/sign",
+    // Report open pixel (Send anywhere, Oct 25, 2026): same pattern —
+    // /api/track authenticates the delivery token itself (hash lookup
+    // + expiry + revocation) on every call; an email client fetching
+    // the pixel has no session cookie.
+    "/api/track",
   ];
   // PWA assets: browsers fetch the manifest, icons, splash images and the
   // service worker outside the page's auth context (notably iOS), and the

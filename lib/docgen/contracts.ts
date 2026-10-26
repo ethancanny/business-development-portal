@@ -51,6 +51,7 @@ import {
 } from "./contract-esign";
 import { getLatestEnvelope } from "./esign";
 import { getEnvelopeDetail } from "../signing/service";
+import { sendAttachmentEmail } from "../comms/mail";
 import {
   buildSignatureSections,
   signatureFieldRects,
@@ -65,6 +66,7 @@ import type {
   ContractKeyDates,
   ContractStatus,
   DocgenTemplateRow,
+  DocumentSendRow,
 } from "./schema";
 
 /**
@@ -1153,13 +1155,95 @@ export async function updateContract(
   return getContractRow(id);
 }
 
+/* ------------------------------ send log ------------------------------ */
+
+/**
+ * Data-room export controls (Send anywhere, Oct 25, 2026): when the
+ * contract's room is U.S.-persons-only or restricted, every outbound
+ * recipient — signer OR email recipient — must be an approved party
+ * for the room: their email domain is on the room allowlist, or a
+ * Directory record carries that exact email. This is the same rule
+ * the guest-invite path enforces; ONE helper serves both send
+ * channels so the gate can never drift between them.
+ */
+async function assertRecipientsApprovedForRoom(
+  contract: ContractRow,
+  emails: string[]
+): Promise<void> {
+  if (!contract.roomId) return;
+  const room = await getRoom(contract.roomId);
+  if (!room || (!room.usPersonsOnly && !room.restrictedAccess)) return;
+  for (const email of emails) {
+    const domain = email.split("@")[1]?.toLowerCase() ?? "";
+    if (domain && room.domainAllowlist.includes(domain)) continue;
+    const found = await listDirectory({ q: email, limit: 5, offset: 0 });
+    const ok = found.items.some(
+      (p) => p.email.toLowerCase() === email.toLowerCase()
+    );
+    if (!ok) throw new DocGenError("signer_not_approved_for_room");
+  }
+}
+
+async function recordDocumentSend(input: {
+  contractId: string;
+  documentId: string;
+  recipientName: string;
+  recipientEmail: string;
+  channel: "signature" | "email";
+  actor: string;
+  state: string;
+  error?: string;
+}): Promise<void> {
+  const db = sql();
+  await db`
+    INSERT INTO docgen.document_sends
+      (id, contract_id, document_id, recipient_name, recipient_email,
+       channel, actor, state, error)
+    VALUES (${newId()}, ${input.contractId}, ${input.documentId},
+      ${input.recipientName}, ${input.recipientEmail}, ${input.channel},
+      ${input.actor}, ${input.state}, ${(input.error ?? "").slice(0, 500)})`;
+}
+
+export async function listDocumentSends(
+  contractId: string
+): Promise<DocumentSendRow[]> {
+  await ensureDocgen();
+  const db = sql();
+  const rows = await db`
+    SELECT id, contract_id, document_id, recipient_name, recipient_email,
+      channel, actor, state, error, created_at
+    FROM docgen.document_sends
+    WHERE contract_id = ${contractId}
+    ORDER BY created_at DESC LIMIT 100`;
+  return rows.map((r) => {
+    const rec = r as Record<string, unknown>;
+    return {
+      id: str(rec.id),
+      contractId: str(rec.contract_id),
+      documentId: str(rec.document_id),
+      recipientName: str(rec.recipient_name),
+      recipientEmail: str(rec.recipient_email),
+      channel: str(rec.channel),
+      actor: str(rec.actor),
+      state: str(rec.state),
+      error: str(rec.error),
+      createdAt: isoOrNull(rec.created_at) ?? "",
+    };
+  });
+}
+
 /* --------------------------- send for signature --------------------------- */
 
 export async function sendContractForSignature(
   id: string,
   actor: string,
   actorEmail?: string
-): Promise<{ envelopeId: string; provider: string; links: unknown }> {
+): Promise<{
+  envelopeId: string;
+  provider: string;
+  links: unknown;
+  emailStatus: string;
+}> {
   await ensureDocgen();
   const contract = await getContractRow(id);
   if (!contract) throw new DocGenError("contract_not_found");
@@ -1174,24 +1258,11 @@ export async function sendContractForSignature(
     if (!s.email.trim()) throw new DocGenError("signer_email_required");
   }
 
-  // Data-room export controls: when the contract's room is
-  // U.S.-persons-only or restricted, signers must be approved
-  // parties for the room — the same rule the guest-invite path
-  // enforces (Directory person by email, or an allowlisted domain).
-  if (contract.roomId) {
-    const room = await getRoom(contract.roomId);
-    if (room && (room.usPersonsOnly || room.restrictedAccess)) {
-      for (const s of contract.signers) {
-        const domain = s.email.split("@")[1]?.toLowerCase() ?? "";
-        if (domain && room.domainAllowlist.includes(domain)) continue;
-        const found = await listDirectory({ q: s.email, limit: 5, offset: 0 });
-        const ok = found.items.some(
-          (p) => p.email.toLowerCase() === s.email.toLowerCase()
-        );
-        if (!ok) throw new DocGenError("signer_not_approved_for_room");
-      }
-    }
-  }
+  // Room gate (shared with the email channel — see the helper).
+  await assertRecipientsApprovedForRoom(
+    contract,
+    contract.signers.map((s) => s.email)
+  );
 
   const versions = await listContractVersions(id);
   const current = versions.find((v) => v.version === contract.currentVersion);
@@ -1235,11 +1306,145 @@ export async function sendContractForSignature(
     provider: result.provider,
     envelopeId: result.envelopeId,
   });
+  // The envelope's email outcome (sent / setup_required /
+  // manual_link), read back from the signing module — the Send
+  // dialog surfaces it so the sender knows whether signer emails
+  // actually went out or the one-time links must be shared by hand.
+  let emailStatus = "manual_link";
+  try {
+    const detail = await getEnvelopeDetail(result.envelopeId);
+    if (detail?.signing?.emailStatus) emailStatus = detail.signing.emailStatus;
+  } catch {
+    /* status is informational; the send itself already succeeded */
+  }
+  for (const s of contract.signers) {
+    await recordDocumentSend({
+      contractId: id,
+      documentId: docId,
+      recipientName: s.name,
+      recipientEmail: s.email,
+      channel: "signature",
+      actor,
+      state: emailStatus,
+    });
+  }
   return {
     envelopeId: result.envelopeId,
     provider: result.provider,
     links: result.links,
+    emailStatus,
   };
+}
+
+/* ------------------------- send by email (attachment) ------------------------- */
+
+export interface ContractEmailRecipient {
+  name: string;
+  email: string;
+}
+
+export interface ContractEmailSendResult {
+  sends: Array<{
+    recipientName: string;
+    recipientEmail: string;
+    state: string;
+    error: string;
+  }>;
+  documentId: string;
+  documentName: string;
+}
+
+/**
+ * Email the contract's current PDF as an attachment (Send anywhere,
+ * Oct 25, 2026). The SAME room restriction gate as the signature
+ * channel runs first — a restricted-room document never leaves to an
+ * unapproved address. Every attempt is written to
+ * docgen.document_sends with its real outcome (sent / setup_required
+ * / failed) — never a faked success.
+ */
+export async function sendContractDocumentByEmail(
+  id: string,
+  input: { recipients: ContractEmailRecipient[]; subject?: string },
+  actor: string
+): Promise<ContractEmailSendResult> {
+  await ensureDocgen();
+  const contract = await getContractRow(id);
+  if (!contract) throw new DocGenError("contract_not_found");
+  if (contract.status === "executed") {
+    throw new DocGenError("contract_executed");
+  }
+  const recipients = (input.recipients ?? [])
+    .map((r) => ({
+      name: (r.name ?? "").trim(),
+      email: (r.email ?? "").trim(),
+    }))
+    .filter((r) => r.email.includes("@"));
+  if (!recipients.length) throw new DocGenError("recipients_required");
+
+  // Room gate — identical rule to sending for signature.
+  await assertRecipientsApprovedForRoom(
+    contract,
+    recipients.map((r) => r.email)
+  );
+
+  const docId = contract.currentPdfDocumentId ?? contract.currentDocumentId;
+  if (!docId) throw new DocGenError("document_not_found");
+  const doc = await getDocument(docId);
+  if (!doc) throw new DocGenError("document_not_found");
+  const { bytes } = await readDocumentBytes(doc);
+
+  const subject =
+    (input.subject ?? "").trim() || `Document for your review: ${contract.title}`;
+  const sends: ContractEmailSendResult["sends"] = [];
+  for (const r of recipients) {
+    const result = await sendAttachmentEmail({
+      to: r.email,
+      name: r.name,
+      subject,
+      text: [
+        r.name ? `Hello ${r.name},` : "Hello,",
+        "",
+        `${actor} from Canny Capital Partners sent you the attached document: ${contract.title}.`,
+        "",
+        "— Canny Capital Partners",
+      ].join("\n"),
+      attachment: {
+        filename: doc.name,
+        bytes,
+        contentType: doc.mime || "application/pdf",
+      },
+    });
+    await recordDocumentSend({
+      contractId: id,
+      documentId: docId,
+      recipientName: r.name,
+      recipientEmail: r.email,
+      channel: "email",
+      actor,
+      state: result.status,
+      error: result.status === "sent" ? "" : result.detail,
+    });
+    sends.push({
+      recipientName: r.name,
+      recipientEmail: r.email,
+      state: result.status,
+      error: result.status === "sent" ? "" : result.detail,
+    });
+  }
+  await addContractEvent(
+    id,
+    actor,
+    "sent_email",
+    `Emailed ${doc.name} to ${sends
+      .map((s) => `${s.recipientEmail} (${s.state})`)
+      .join(", ")}`
+  );
+  await writeAudit("contract", id, actor, "send_email", {
+    documentId: docId,
+    recipients: sends.length,
+    sent: sends.filter((s) => s.state === "sent").length,
+  });
+  return { sends, documentId: docId, documentName: doc.name };
 }
 
 /* ------------------------------- redlines ------------------------------- */
