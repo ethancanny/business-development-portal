@@ -29,6 +29,11 @@ export interface RelationshipProfile {
   source: string;
   introducedByPersonId?: string | null;
   commPrefs: string;
+  /* A&D attributes (Focus & Theme, Oct 26, 2026) */
+  adCertifications?: string;
+  adItar?: string;
+  adClearance?: string;
+  adPrimeCustomers?: string;
   importantDates: { label: string; date: string }[];
   lastTouchAt?: string | null;
   nextTouchDue?: string | null;

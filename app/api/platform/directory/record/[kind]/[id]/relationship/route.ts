@@ -95,6 +95,15 @@ export async function PUT(
   }
   if (typeof src.commPrefs === "string") patch.commPrefs = src.commPrefs;
   else if (typeof src.comm_prefs === "string") patch.commPrefs = src.comm_prefs;
+  // A&D attributes (Focus & Theme, Oct 26, 2026).
+  if (typeof src.adCertifications === "string") patch.adCertifications = src.adCertifications;
+  else if (typeof src.ad_certifications === "string") patch.adCertifications = src.ad_certifications;
+  if (typeof src.adItar === "string") patch.adItar = src.adItar;
+  else if (typeof src.ad_itar === "string") patch.adItar = src.ad_itar;
+  if (typeof src.adClearance === "string") patch.adClearance = src.adClearance;
+  else if (typeof src.ad_clearance === "string") patch.adClearance = src.ad_clearance;
+  if (typeof src.adPrimeCustomers === "string") patch.adPrimeCustomers = src.adPrimeCustomers;
+  else if (typeof src.ad_prime_customers === "string") patch.adPrimeCustomers = src.ad_prime_customers;
   if (Array.isArray(src.importantDates)) {
     patch.importantDates = src.importantDates as RelationshipPatch["importantDates"];
   } else if (Array.isArray(src.important_dates)) {

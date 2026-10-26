@@ -1,4 +1,5 @@
 import { sql, newId, str, num, isoOrNull } from "../platform/db";
+import { getFocusSettings } from "../platform/focus";
 import { logUsage } from "../platform/usage";
 import { getStorageProvider } from "../storage";
 import {
@@ -329,7 +330,14 @@ export async function listRooms(opts: {
  * exists for the deal it is returned with existed=true.
  */
 export async function createRoom(
-  input: { dealId: string; name?: string; templateId?: string },
+  input: {
+    dealId: string;
+    name?: string;
+    templateId?: string;
+    /** Explicit safeguard values always win over the Focus default. */
+    usPersonsOnly?: boolean;
+    restrictedAccess?: boolean;
+  },
   actor: string
 ): Promise<{ room: RoomRow; existed: boolean }> {
   await ensureDataRoom();
@@ -369,9 +377,29 @@ export async function createRoom(
   const roomName =
     (input.name ?? "").trim() || (dealName ? `${dealName} — Data Room` : "Data Room");
   const provider = getStorageProvider().name;
+  // Focus safeguard default (spec §2: U.S.-persons-only + controlled-
+  // data safeguards default ON for data rooms in A&D Focus): when the
+  // caller does not specify a safeguard, Focus = A&D defaults BOTH
+  // us_persons_only and the restricted-access flag (the controlled-
+  // data flag on this same table, defaulted alongside it in the
+  // schema) to true. Explicit input values always win; all-sector
+  // mode keeps the schema defaults (false). The settings read only
+  // happens when at least one safeguard is unspecified.
+  const needsFocusDefault =
+    typeof input.usPersonsOnly !== "boolean" ||
+    typeof input.restrictedAccess !== "boolean";
+  const focusAd = needsFocusDefault
+    ? (await getFocusSettings().catch(() => null))?.focus === "ad"
+    : false;
+  const usPersonsOnly =
+    typeof input.usPersonsOnly === "boolean" ? input.usPersonsOnly : focusAd;
+  const restrictedAccess =
+    typeof input.restrictedAccess === "boolean"
+      ? input.restrictedAccess
+      : focusAd;
   await db`
-    INSERT INTO dataroom.rooms (id, deal_id, company_id, name, provider, created_by)
-    VALUES (${roomId}, ${dealId}, ${companyId}, ${roomName}, ${provider}, ${actor})`;
+    INSERT INTO dataroom.rooms (id, deal_id, company_id, name, provider, created_by, us_persons_only, restricted_access)
+    VALUES (${roomId}, ${dealId}, ${companyId}, ${roomName}, ${provider}, ${actor}, ${usPersonsOnly}, ${restrictedAccess})`;
 
   let sort = 0;
   for (const folder of template.structure.folders) {

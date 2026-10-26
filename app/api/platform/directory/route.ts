@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
     owner: sp.get("owner") ?? undefined,
     tag: sp.get("tag") ?? undefined,
     overdueOnly: sp.get("overdueOnly") === "1" || sp.get("overdueOnly") === "true",
+    adOnly: sp.get("adOnly") === "1" || sp.get("adOnly") === "true",
     lastTouchBefore: sp.get("lastTouchBefore") ?? undefined,
     lastTouchAfter: sp.get("lastTouchAfter") ?? undefined,
     sort: sp.get("sort") ?? undefined,

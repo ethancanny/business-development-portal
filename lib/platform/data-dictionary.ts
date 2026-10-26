@@ -63,6 +63,10 @@ export const TABLE_DESCRIPTIONS: Record<string, string> = {
     "The background job queue: syncs, ingests, event handlers, and scheduled notifications.",
   "core.user_roles":
     "Platform access: one row per login email with its role (admin / internal / guest) and access scope.",
+  "core.focus_settings":
+    "Focus & Theme system (Oct 26, 2026): the single workspace row (id 'workspace'). Focus is workspace-wide and admin-set: 'ad' = Aerospace & Defense (the default) or 'all' = All sectors. It also stores the editable A&D sub-segment taxonomy (JSONB: precision machining & machine shops; castings & forgings; aerostructures & composites; avionics & electronics; special processes; testing & certification; MRO; tooling & fixtures; space systems & components; UAS & drones; defense electronics), the editable A&D fit-sourcing NAICS list (JSONB; the shipped defaults — 336411, 336412, 336413, 336414, 336415, 336419, 332710, 332721, 332811, 332813, 334511, 488190, 541380, 541330 — were each verified against the official NAICS 2022 list), and matching_boost (extra sector weight in investor matching while Focus is on). THE OUT-OF-FOCUS FLAG IS DERIVED, NOT STORED: a company, deal, or fit target whose sector is set and is not 'Aerospace & Defense' is out of focus while Focus = 'ad' — hidden by default behind each list's 'Show out-of-focus' toggle, never deleted or altered, and fully restored by switching to 'all'. PAUSED PULLS: while Focus = 'ad', the hospitality and adhs ingest sources are skipped at the door in runMarketIngest (logged 'paused' in the sync log, ~zero CPU) and news/fit sourcing narrow to A&D; all-sector reference pulls keep running because they also carry A&D data. Every change is written to core.audit_log and bumps the focus_theme dataset version.",
+  "core.user_preferences":
+    "Per-user preferences keyed by login email. Currently the named Theme (Focus & Theme, Oct 26, 2026): 'desert' = Aerospace Desert (the default) or 'classic' = the pre-Oct-26 look. Stored server-side so the choice follows the user across devices; the client caches it in localStorage only to paint the right theme before first render.",
   "core.overview_summary":
     "Pre-aggregated Overview read model — the Overview page reads summaries, never raw tables.",
   "core.company_cards":
@@ -72,7 +76,7 @@ export const TABLE_DESCRIPTIONS: Record<string, string> = {
   "directory.type_tags":
     "Directory type taxonomy for people and organizations (operator, investor, lender, broker, attorney…).",
   "directory.relationship_profiles":
-    "One relationship summary row per Directory person or organization: tier, stage, owner, cadence, source, communication preferences, important dates, and the pre-computed touch summaries (last touch, next touch due, touches in the last 90 days, open task count) that Directory lists read instead of computing live.",
+    "One relationship summary row per Directory person or organization: tier, stage, owner, cadence, source, communication preferences, important dates, and the pre-computed touch summaries (last touch, next touch due, touches in the last 90 days, open task count) that Directory lists read instead of computing live. Focus & Theme (Oct 26, 2026) adds the A&D attributes — ad_certifications, ad_itar, ad_clearance, ad_prime_customers — which power the Directory 'A&D' filter (a record matches when any of the four is set).",
   "directory.interactions":
     "The single contact-activity system: calls, meetings, emails, texts, notes, events and intros with participants, direction, outcome, next step, visibility (shared/private), and an optional predicted reply % locked once saved. Soft-deleted rows keep deleted_at set.",
   "directory.interaction_participants":
