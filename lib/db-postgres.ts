@@ -198,6 +198,10 @@ export function ensureSchema(): Promise<void> {
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS investment_type TEXT NOT NULL DEFAULT 'platform_lbo'`;
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS parent_deal_id TEXT`;
+      // Investors & Capital redesign (Oct 25, 2026): test-data flag —
+      // verification/test deals carry it and hide from default views.
+      await db`
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS is_test_data BOOLEAN NOT NULL DEFAULT false`;
       await db`
         ALTER TABLE deals ADD COLUMN IF NOT EXISTS sourced_from_type TEXT`;
       await db`
@@ -508,6 +512,7 @@ function rowToDeal(r: Record<string, unknown>): Deal {
     stage: String(r.stage ?? "Sourced") as Deal["stage"],
     investmentType: (String(r.investment_type ?? "platform_lbo") ||
       "platform_lbo") as Deal["investmentType"],
+    isTestData: r.is_test_data === true,
     parentDealId: r.parent_deal_id ? String(r.parent_deal_id) : null,
     codename: String(r.codename ?? ""),
     codenameExternal: r.codename_external !== false,
@@ -576,7 +581,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           id, company_name, industry, stage, deal_value, contact_name,
           contact_email, notes, owner, city, lat, lng, links, operator_ids,
           revenue, ebitda, asking_price, growth_pct, broker, pass_reason, source, drivers, structure,
-          metrics, synthesis, investment_type, parent_deal_id,
+          metrics, synthesis, investment_type, parent_deal_id, is_test_data,
           sourced_from_type, sourced_from_id, codename, codename_external,
           website, created_at, updated_at
         ) VALUES (
@@ -591,7 +596,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
           ${JSON.stringify(d.structure ?? {})},
           ${JSON.stringify(d.metrics ?? {})},
           ${d.synthesis ? JSON.stringify(d.synthesis) : null},
-          ${d.investmentType ?? "platform_lbo"}, ${d.parentDealId ?? null},
+          ${d.investmentType ?? "platform_lbo"}, ${d.parentDealId ?? null}, ${d.isTestData === true},
           ${d.sourcedFromType ?? null}, ${d.sourcedFromId ?? null},
           ${d.codename ?? ""}, ${d.codenameExternal !== false},
           ${d.website ?? ""},

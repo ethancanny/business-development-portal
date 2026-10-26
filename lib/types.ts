@@ -185,6 +185,10 @@ export interface Deal {
   investmentType?: InvestmentTypeKey;
   /** Add-on → its platform deal (required for add_on deals). */
   parentDealId?: string | null;
+  /** Test-data flag (Investors & Capital redesign, Oct 25, 2026):
+   * test/verification deals carry it and hide from default views.
+   * Absent/false = real deal. */
+  isTestData?: boolean;
   /** Deal Identity (Oct 24, 2026): optional codename. Internal
    *  surfaces show it beside the real name; external surfaces show
    *  the codename ONLY (logo hidden) when codenameExternal is on. */

@@ -228,6 +228,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
       body.industry !== undefined ? String(body.industry).trim() : prev.industry,
     stage: newStage,
     investmentType: newType,
+    isTestData:
+      body.isTestData !== undefined
+        ? body.isTestData === true
+        : (prev.isTestData ?? false),
     parentDealId: newParentDealId,
     sourcedFromType: newSourcedFromType,
     sourcedFromId: newSourcedFromId,
