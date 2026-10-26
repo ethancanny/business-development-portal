@@ -662,8 +662,14 @@ export async function sendInvestorReport(
   // the deal carries an external codename, the stored render's
   // subject label is the codename ONLY (mirrors comms'
   // resolveSubjectLabel; the guest meta re-resolves it per delivery
-  // as well).
+  // as well). The render BODY is scrubbed too: capital templates
+  // substitute {{company_name}} / {{deal_name}} with the real names
+  // at render time, so under an active codename every occurrence of
+  // the real company/deal name in the text is replaced with the
+  // codename (split/join, per this module's substitution rule) —
+  // the real name never lands in the stored external artifact.
   let subjectLabel = ctx.companyName || ctx.dealName || "Deal";
+  let activeCodename = "";
   try {
     const identity = await import("../identity/service");
     const shared = await import("../identity/shared");
@@ -679,10 +685,21 @@ export async function sendInvestorReport(
         },
         "external"
       );
-      if (resolved.codenameActive) subjectLabel = resolved.displayName;
+      if (resolved.codenameActive) {
+        subjectLabel = resolved.displayName;
+        activeCodename = resolved.displayName;
+      }
     }
   } catch {
     /* identity is best-effort; the plain label is the fallback */
+  }
+  let bodyText = rendered.text;
+  if (activeCodename) {
+    for (const real of [ctx.companyName, ctx.dealName]) {
+      if (real && real !== activeCodename) {
+        bodyText = bodyText.split(real).join(activeCodename);
+      }
+    }
   }
 
   const asOf =
@@ -705,7 +722,7 @@ export async function sendInvestorReport(
         visibility: "all",
         dataStatus: "ok",
         figures: [],
-        text: rendered.text,
+        text: bodyText,
       },
     ],
     warnings: [],
