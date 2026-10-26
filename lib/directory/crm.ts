@@ -115,6 +115,10 @@ export function ensureCrmSchema(): Promise<void> {
           source TEXT NOT NULL DEFAULT '',
           introduced_by_person_id TEXT,
           comm_prefs TEXT NOT NULL DEFAULT '',
+          ad_certifications TEXT NOT NULL DEFAULT '',
+          ad_itar TEXT NOT NULL DEFAULT '',
+          ad_clearance TEXT NOT NULL DEFAULT '',
+          ad_prime_customers TEXT NOT NULL DEFAULT '',
           important_dates JSONB NOT NULL DEFAULT '[]',
           last_touch_at TIMESTAMPTZ,
           next_touch_due TIMESTAMPTZ,
@@ -125,6 +129,21 @@ export function ensureCrmSchema(): Promise<void> {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           PRIMARY KEY (entity_kind, entity_id)
         )`;
+      // A&D attributes (Focus & Theme, Oct 26, 2026): certifications,
+      // ITAR status, clearance level, prime customers — added via the
+      // same ensure path for tables created before this build.
+      await db`
+        ALTER TABLE directory.relationship_profiles
+        ADD COLUMN IF NOT EXISTS ad_certifications TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE directory.relationship_profiles
+        ADD COLUMN IF NOT EXISTS ad_itar TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE directory.relationship_profiles
+        ADD COLUMN IF NOT EXISTS ad_clearance TEXT NOT NULL DEFAULT ''`;
+      await db`
+        ALTER TABLE directory.relationship_profiles
+        ADD COLUMN IF NOT EXISTS ad_prime_customers TEXT NOT NULL DEFAULT ''`;
       await db`
         CREATE INDEX IF NOT EXISTS directory_rel_profiles_tier_idx
         ON directory.relationship_profiles (tier)`;
@@ -246,6 +265,12 @@ export interface RelationshipProfile {
   source: string;
   introducedByPersonId: string | null;
   commPrefs: string;
+  /** A&D attributes (Focus & Theme, Oct 26, 2026). */
+  adCertifications: string;
+  /** ITAR status, e.g. "Registered" or "" when not recorded. */
+  adItar: string;
+  adClearance: string;
+  adPrimeCustomers: string;
   importantDates: ImportantDate[];
   lastTouchAt: string | null;
   nextTouchDue: string | null;
@@ -296,6 +321,10 @@ function rowToProfile(
       ? str(rec.introduced_by_person_id)
       : null,
     commPrefs: str(rec.comm_prefs),
+    adCertifications: str(rec.ad_certifications),
+    adItar: str(rec.ad_itar),
+    adClearance: str(rec.ad_clearance),
+    adPrimeCustomers: str(rec.ad_prime_customers),
     importantDates: parseImportantDates(rec.important_dates),
     lastTouchAt: isoOrNull(rec.last_touch_at),
     nextTouchDue: isoOrNull(rec.next_touch_due),
@@ -354,6 +383,7 @@ export async function getRelationship(
   const rows = await db`
     SELECT entity_kind, entity_id, tier, stage, cadence_days, owner,
       source, introduced_by_person_id, comm_prefs, important_dates,
+      ad_certifications, ad_itar, ad_clearance, ad_prime_customers,
       last_touch_at, next_touch_due, touch_count_90d, open_task_count,
       is_test_data, created_at, updated_at
     FROM directory.relationship_profiles
@@ -375,6 +405,14 @@ export interface RelationshipPatch {
   introduced_by_person_id?: string | null;
   commPrefs?: string;
   comm_prefs?: string;
+  adCertifications?: string;
+  ad_certifications?: string;
+  adItar?: string;
+  ad_itar?: string;
+  adClearance?: string;
+  ad_clearance?: string;
+  adPrimeCustomers?: string;
+  ad_prime_customers?: string;
   importantDates?: ImportantDate[];
   important_dates?: ImportantDate[];
   isTestData?: boolean;
@@ -422,6 +460,30 @@ export async function updateRelationship(
         : patch.comm_prefs !== undefined
           ? String(patch.comm_prefs)
           : current?.commPrefs ?? "",
+    adCertifications:
+      patch.adCertifications !== undefined
+        ? String(patch.adCertifications)
+        : patch.ad_certifications !== undefined
+          ? String(patch.ad_certifications)
+          : current?.adCertifications ?? "",
+    adItar:
+      patch.adItar !== undefined
+        ? String(patch.adItar)
+        : patch.ad_itar !== undefined
+          ? String(patch.ad_itar)
+          : current?.adItar ?? "",
+    adClearance:
+      patch.adClearance !== undefined
+        ? String(patch.adClearance)
+        : patch.ad_clearance !== undefined
+          ? String(patch.ad_clearance)
+          : current?.adClearance ?? "",
+    adPrimeCustomers:
+      patch.adPrimeCustomers !== undefined
+        ? String(patch.adPrimeCustomers)
+        : patch.ad_prime_customers !== undefined
+          ? String(patch.ad_prime_customers)
+          : current?.adPrimeCustomers ?? "",
     importantDates:
       patch.importantDates !== undefined
         ? patch.importantDates
@@ -449,18 +511,25 @@ export async function updateRelationship(
   apply("source", current?.source ?? "", next.source);
   apply("introducedByPersonId", current?.introducedByPersonId ?? null, next.introducedByPersonId);
   apply("commPrefs", current?.commPrefs ?? "", next.commPrefs);
+  apply("adCertifications", current?.adCertifications ?? "", next.adCertifications);
+  apply("adItar", current?.adItar ?? "", next.adItar);
+  apply("adClearance", current?.adClearance ?? "", next.adClearance);
+  apply("adPrimeCustomers", current?.adPrimeCustomers ?? "", next.adPrimeCustomers);
   const stageChanged = (current?.stage ?? "New") !== next.stage;
 
   await db`
     INSERT INTO directory.relationship_profiles (
       entity_kind, entity_id, tier, stage, cadence_days, owner, source,
-      introduced_by_person_id, comm_prefs, important_dates, is_test_data
+      introduced_by_person_id, comm_prefs, important_dates, is_test_data,
+      ad_certifications, ad_itar, ad_clearance, ad_prime_customers
     )
     VALUES (
       ${kind}, ${id}, ${next.tier}, ${next.stage}, ${next.cadenceDays},
       ${next.owner}, ${next.source}, ${next.introducedByPersonId},
       ${next.commPrefs}, ${JSON.stringify(next.importantDates)}::jsonb,
-      ${next.isTestData}
+      ${next.isTestData},
+      ${next.adCertifications}, ${next.adItar}, ${next.adClearance},
+      ${next.adPrimeCustomers}
     )
     ON CONFLICT (entity_kind, entity_id) DO UPDATE SET
       tier = EXCLUDED.tier,
@@ -472,6 +541,10 @@ export async function updateRelationship(
       comm_prefs = EXCLUDED.comm_prefs,
       important_dates = EXCLUDED.important_dates,
       is_test_data = EXCLUDED.is_test_data,
+      ad_certifications = EXCLUDED.ad_certifications,
+      ad_itar = EXCLUDED.ad_itar,
+      ad_clearance = EXCLUDED.ad_clearance,
+      ad_prime_customers = EXCLUDED.ad_prime_customers,
       updated_at = now()`;
 
   if (patch.tags !== undefined) {
@@ -1858,6 +1931,18 @@ export async function mergeDirectoryRecords(
         commPrefs: blank(keeperProfile.commPrefs)
           ? dupProfile.commPrefs
           : keeperProfile.commPrefs,
+        adCertifications: blank(keeperProfile.adCertifications)
+          ? dupProfile.adCertifications
+          : keeperProfile.adCertifications,
+        adItar: blank(keeperProfile.adItar)
+          ? dupProfile.adItar
+          : keeperProfile.adItar,
+        adClearance: blank(keeperProfile.adClearance)
+          ? dupProfile.adClearance
+          : keeperProfile.adClearance,
+        adPrimeCustomers: blank(keeperProfile.adPrimeCustomers)
+          ? dupProfile.adPrimeCustomers
+          : keeperProfile.adPrimeCustomers,
         importantDates: keeperProfile.importantDates.length
           ? keeperProfile.importantDates
           : dupProfile.importantDates,
