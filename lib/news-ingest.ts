@@ -50,6 +50,7 @@ import {
   feedbackDelta,
 } from "./news-classify";
 import type { MiNewsItem, MiNewsMatch } from "./types";
+import type { FocusSettings } from "./platform/focus";
 
 /* ---------------- feeds ---------------- */
 
@@ -83,6 +84,32 @@ const NEWS_FEEDS: NewsFeed[] = [
   { name: "Nation's Restaurant News", short: "NRN", kind: "rss", url: "https://www.nrn.com/rss.xml" },
   { name: "Hotel Business", short: "HB", kind: "rss", url: "https://hotelbusiness.com/feed/" },
 ];
+
+/**
+ * Focus mode (A&D) feed narrowing (spec §2): while Focus = A&D the
+ * feed set shrinks to the A&D topics — defense budgets and contract
+ * awards, the aerospace supply chain, FAA and DoD announcements, and
+ * Arizona A&D companies. Existing feeds matching the A&D keywords
+ * (Aviation Week, Defense News) are kept; a dedicated Google News set
+ * covers the topics no existing feed queries. All-sector mode uses
+ * NEWS_FEEDS untouched.
+ */
+const AD_INTEL_KEYWORDS =
+  /\b(defense|defence|aerospace|aviation|dod|faa|contract awards?|arizona aerospace)\b/i;
+
+const AD_INTEL_FEEDS: NewsFeed[] = [
+  { name: "Google News — Arizona A&D contract awards", short: "ADCon", kind: "gnews", query: 'Arizona (aerospace OR defense) "contract award" when:7d' },
+  { name: "Google News — FAA & DoD announcements", short: "ADGov", kind: "gnews", query: '(FAA OR "Department of Defense" OR DoD) aerospace announcement when:7d' },
+  { name: "Google News — Defense budget & aerospace supply chain", short: "ADSup", kind: "gnews", query: '("defense budget" OR "aerospace supply chain") when:7d' },
+  { name: "Google News — Arizona A&D companies", short: "ADAz", kind: "gnews", query: '"Arizona aerospace" company when:7d' },
+];
+
+function focusIntelFeeds(): NewsFeed[] {
+  const kept = NEWS_FEEDS.filter((f) =>
+    AD_INTEL_KEYWORDS.test(`${f.name} ${f.query ?? ""} ${f.url ?? ""}`)
+  );
+  return [...kept, ...AD_INTEL_FEEDS];
+}
 
 /* ---------------- RSS parsing ----------------
  * Mirrors parseRss / the junk blocklist in lib/market-ingest.ts (those are
@@ -302,7 +329,13 @@ async function fetchOgImage(url: string): Promise<string | null> {
 
 const IMAGE_FETCH_CAP = 12;
 
-export async function ingestIntelNews(): Promise<number> {
+export async function ingestIntelNews(
+  focusSettings?: FocusSettings | null
+): Promise<number> {
+  // Focus context is passed down from runMarketIngest (its single
+  // per-run settings read); standalone callers keep all-sector feeds.
+  const feeds =
+    focusSettings?.focus === "ad" ? focusIntelFeeds() : NEWS_FEEDS;
   const loadStats: MatchLoadStats = { hospitalityTotal: 0, hospitalityMatchable: 0, hospitalityGenericSkipped: 0 };
   const entities = await loadMatchEntities(loadStats);
   const classifierState = await loadClassifierState();
@@ -334,7 +367,7 @@ export async function ingestIntelNews(): Promise<number> {
   }
   const candidates: Candidate[] = [];
 
-  for (const feed of NEWS_FEEDS) {
+  for (const feed of feeds) {
     const t = { fetched: 0, kept: 0 };
     tally.set(feed.short, t);
     const feedUrl =
@@ -466,7 +499,7 @@ export async function ingestIntelNews(): Promise<number> {
     .map(([short, h]) => `${short} ${h}`)
     .join(", ");
   const hardStr = Array.from(hardCats.entries()).map(([c, n]) => `${c} ${n}`).join(", ");
-  const verdict = `fetched ${fetched} · kept ${kept} · inserted ${inserted} · merged ${merged} · dup ${dupSkipped} · hard-excluded ${hardExcluded}${hardStr ? ` (${hardStr})` : ""} · below-bar ${belowBar} · entities ${entities.length} (hosp groups ${loadStats.hospitalityMatchable}/${loadStats.hospitalityTotal} matchable, ${loadStats.hospitalityGenericSkipped} generic-skipped) · per-source kept/fetched: ${perSource}${feedGaps ? ` · FEED GAPS: ${feedGaps}` : ""}`;
+  const verdict = `fetched ${fetched} · kept ${kept} · inserted ${inserted} · merged ${merged} · dup ${dupSkipped} · hard-excluded ${hardExcluded}${hardStr ? ` (${hardStr})` : ""} · below-bar ${belowBar} · entities ${entities.length} (hosp groups ${loadStats.hospitalityMatchable}/${loadStats.hospitalityTotal} matchable, ${loadStats.hospitalityGenericSkipped} generic-skipped) · per-source kept/fetched: ${perSource}${feedGaps ? ` · FEED GAPS: ${feedGaps}` : ""}${focusSettings?.focus === "ad" ? ` · Focus: A&D feed set (${feeds.length} feeds)` : ""}`;
   await logSync("intel-news-xcheck", "ok", kept, verdict.slice(0, 950));
   await logSync("intel_news", "ok", inserted, verdict.slice(0, 950));
   return inserted;

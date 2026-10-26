@@ -143,6 +143,10 @@ export interface DirectoryListFilters {
   owner?: string;
   tag?: string;
   overdueOnly?: boolean;
+  /** A&D filter (Focus & Theme, Oct 26, 2026): only profiles with at
+   *  least one A&D attribute (certifications / ITAR / clearance /
+   *  prime customers) non-empty. */
+  adOnly?: boolean;
   lastTouchBefore?: string;
   lastTouchAfter?: string;
   sort?: DirectoryListSort | string;
@@ -170,6 +174,7 @@ export async function listDirectory(
   const ownerParam = (filters.owner ?? "").trim();
   const tagParam = (filters.tag ?? "").trim();
   const overdueParam = filters.overdueOnly ? 1 : 0;
+  const adParam = filters.adOnly ? 1 : 0;
   // NULL when unset: ''::timestamptz throws SQLSTATE 22007 in Postgres
   // (constant-folded even behind a boolean guard) — the IS NULL checks
   // below are the safe form.
@@ -236,6 +241,7 @@ export async function listDirectory(
           WHERE tg2.entity_kind = 'person' AND tg2.entity_id = p.id
             AND lower(tg2.tag) = lower(${tagParam})))
         AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
+        AND (${adParam} = 0 OR (coalesce(rp.ad_certifications, '') <> '' OR coalesce(rp.ad_itar, '') <> '' OR coalesce(rp.ad_clearance, '') <> '' OR coalesce(rp.ad_prime_customers, '') <> ''))
         AND (${lastTouchBefore}::timestamptz IS NULL OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
         AND (${lastTouchAfter}::timestamptz IS NULL OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz)
       UNION ALL
@@ -277,6 +283,7 @@ export async function listDirectory(
           WHERE tg2.entity_kind = 'organization' AND tg2.entity_id = o.id
             AND lower(tg2.tag) = lower(${tagParam})))
         AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
+        AND (${adParam} = 0 OR (coalesce(rp.ad_certifications, '') <> '' OR coalesce(rp.ad_itar, '') <> '' OR coalesce(rp.ad_clearance, '') <> '' OR coalesce(rp.ad_prime_customers, '') <> ''))
         AND (${lastTouchBefore}::timestamptz IS NULL OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
         AND (${lastTouchAfter}::timestamptz IS NULL OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz)
     ) u
@@ -345,6 +352,7 @@ export async function listDirectory(
             WHERE tg2.entity_kind = 'person' AND tg2.entity_id = p.id
               AND lower(tg2.tag) = lower(${tagParam})))
           AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
+          AND (${adParam} = 0 OR (coalesce(rp.ad_certifications, '') <> '' OR coalesce(rp.ad_itar, '') <> '' OR coalesce(rp.ad_clearance, '') <> '' OR coalesce(rp.ad_prime_customers, '') <> ''))
           AND (${lastTouchBefore}::timestamptz IS NULL OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
           AND (${lastTouchAfter}::timestamptz IS NULL OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz))
       +
@@ -367,6 +375,7 @@ export async function listDirectory(
             WHERE tg2.entity_kind = 'organization' AND tg2.entity_id = o.id
               AND lower(tg2.tag) = lower(${tagParam})))
           AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
+          AND (${adParam} = 0 OR (coalesce(rp.ad_certifications, '') <> '' OR coalesce(rp.ad_itar, '') <> '' OR coalesce(rp.ad_clearance, '') <> '' OR coalesce(rp.ad_prime_customers, '') <> ''))
           AND (${lastTouchBefore}::timestamptz IS NULL OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
           AND (${lastTouchAfter}::timestamptz IS NULL OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz))
     ) AS n`;
