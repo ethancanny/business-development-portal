@@ -12,6 +12,7 @@ import SettingsSectionNav from "@/components/settings/SettingsSectionNav";
 import StageGatesCard from "@/components/settings/StageGatesCard";
 import EsignSettingsCard from "@/components/docgen/EsignSettingsCard";
 import InvestmentTypesSettings from "@/components/settings/InvestmentTypesSettings";
+import FocusThemeSettings from "@/components/settings/FocusThemeSettings";
 
 /**
  * Settings — General (CRM Phase 2, Oct 2026; restructured with the
@@ -42,6 +43,27 @@ export default function SettingsPage() {
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
           <SettingsSectionNav />
           <div className="flex min-w-0 flex-1 flex-col gap-6">
+        <h3 className="px-1 -mb-2 mt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/40">
+          Workspace
+        </h3>
+
+        <section
+          id="settings-focus-theme"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Focus &amp; Theme
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            The workspace Focus — Aerospace &amp; Defense or all sectors —
+            is set by an admin and applies to everyone; your Theme is
+            yours alone and follows you across devices. The A&amp;D
+            taxonomy, NAICS sourcing list, and matching boost behind
+            Focus mode are edited here too.
+          </p>
+          <FocusThemeSettings />
+        </section>
+
         <h3 className="px-1 -mb-2 mt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/40">
           Account &amp; security
         </h3>

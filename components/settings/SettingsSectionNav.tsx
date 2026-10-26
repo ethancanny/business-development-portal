@@ -27,6 +27,10 @@ interface SectionGroup {
 
 const SECTION_GROUPS: SectionGroup[] = [
   {
+    label: "Workspace",
+    sections: [{ id: "settings-focus-theme", label: "Focus & Theme" }],
+  },
+  {
     label: "Account & security",
     sections: [
       { id: "settings-notifications", label: "Notifications" },
