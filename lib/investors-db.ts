@@ -1,4 +1,5 @@
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { bumpDatasets } from "./platform/versions";
 
 /**
  * Investors (Ethan, Oct 9, 2026): investor contacts for the Directory's
@@ -118,10 +119,12 @@ export async function upsertInvestor(inv: Omit<Investor, "createdAt" | "updatedA
       source = EXCLUDED.source,
       photo_url = EXCLUDED.photo_url,
       updated_at = now()`;
+  await bumpDatasets("investors");
 }
 
 export async function deleteInvestor(id: string): Promise<void> {
   await ensure();
   const q = sql();
   await q`DELETE FROM investors WHERE id = ${id}`;
+  await bumpDatasets("investors");
 }

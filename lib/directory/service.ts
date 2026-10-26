@@ -1,5 +1,6 @@
 import { newId, normalizeName, num, sql, str, isoOrNull } from "../platform/db";
 import { publishEvent } from "../platform/events";
+import { bumpDatasets } from "../platform/versions";
 import { ensureIdentitySchema } from "../identity/schema";
 import { logUsage } from "../platform/usage";
 import {
@@ -1062,6 +1063,10 @@ export async function importRows(input: {
     }
   }
   logUsage("directory_import", created, 0);
+  // Import commit point: each created row went through createRecord
+  // (which publishes contact_updated), but bump once more at commit
+  // so the version reflects the finished import, not an early row.
+  if (!input.dryRun && created > 0) await bumpDatasets("directory");
   return {
     created: input.dryRun ? 0 : created,
     duplicates,
