@@ -121,6 +121,11 @@ export interface SendDeliveryEmailInput {
   link: string;
   /** PDF attachment — provided ONLY for allow_pdf recipients. */
   pdf?: { filename: string; bytes: Buffer } | null;
+  /** Open-pixel URL (Send anywhere, Oct 25, 2026): when set, the body
+   * is sent as HTML carrying a 1×1 <img> for this delivery's token.
+   * The pixel records that the EMAIL was opened (email_opened_at) —
+   * it never touches the portal-access stamps. */
+  trackUrl?: string | null;
 }
 
 export interface SendDeliveryEmailResult {
@@ -147,6 +152,14 @@ function isScopeStyleError(message: string): boolean {
  * a short notification plus the recipient's personal login link —
  * never report content. Returns the outcome; never throws.
  */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export async function sendDeliveryEmail(
   input: SendDeliveryEmailInput
 ): Promise<SendDeliveryEmailResult> {
@@ -163,9 +176,24 @@ export async function sendDeliveryEmail(
       "",
       "— Canny Capital Partners",
     ].join("\n");
+    // With a tracking URL the body goes out as HTML: the same words,
+    // the link as an anchor, and the 1×1 open pixel for this delivery.
+    const body = input.trackUrl
+      ? {
+          contentType: "html",
+          content: [
+            `<p>${escapeHtml(greeting)}</p>`,
+            `<p>A report is available for you from Canny Capital Partners: ${escapeHtml(input.reportTitle)}</p>`,
+            `<p>View it securely here: <a href="${escapeHtml(input.link)}">${escapeHtml(input.link)}</a></p>`,
+            `<p>This link is personal to you and expires in 30 days. Please do not forward it.</p>`,
+            `<p>— Canny Capital Partners</p>`,
+            `<img src="${escapeHtml(input.trackUrl)}" width="1" height="1" alt="" style="display:none" />`,
+          ].join("\n"),
+        }
+      : { contentType: "text", content: text };
     const message: Record<string, unknown> = {
       subject: `Report available: ${input.reportTitle}`,
-      body: { contentType: "text", content: text },
+      body,
       toRecipients: [
         {
           emailAddress: {
@@ -185,6 +213,64 @@ export async function sendDeliveryEmail(
         },
       ];
     }
+    await graph("/me/sendMail", undefined, {
+      method: "POST",
+      body: JSON.stringify({ message, saveToSentItems: false }),
+    });
+    await writeProbe({ mailSend: "available" });
+    return { status: "sent", detail: "" };
+  } catch (err) {
+    const detail =
+      err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300);
+    if (isScopeStyleError(detail)) {
+      await writeProbe({ mailSend: "setup_required", detail });
+      return { status: "setup_required", detail };
+    }
+    return { status: "failed", detail };
+  }
+}
+
+export interface SendAttachmentEmailInput {
+  to: string;
+  name: string;
+  subject: string;
+  /** Plain-text body — for contract sends the attachment IS the
+   * content; the body only introduces it. */
+  text: string;
+  attachment: { filename: string; bytes: Buffer; contentType?: string };
+}
+
+/**
+ * Generic Graph sendMail with one file attachment (Send anywhere,
+ * Oct 25, 2026) — the transport for the docgen "email the document"
+ * channel. Same honesty rules as sendDeliveryEmail: never throws, the
+ * outcome is returned as data and the probe is updated from the real
+ * attempt; a send is never reported as sent unless Graph accepted it.
+ */
+export async function sendAttachmentEmail(
+  input: SendAttachmentEmailInput
+): Promise<SendDeliveryEmailResult> {
+  try {
+    const message: Record<string, unknown> = {
+      subject: input.subject,
+      body: { contentType: "text", content: input.text },
+      toRecipients: [
+        {
+          emailAddress: {
+            address: input.to,
+            ...(input.name ? { name: input.name } : {}),
+          },
+        },
+      ],
+      attachments: [
+        {
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: input.attachment.filename,
+          contentType: input.attachment.contentType || "application/pdf",
+          contentBytes: input.attachment.bytes.toString("base64"),
+        },
+      ],
+    };
     await graph("/me/sendMail", undefined, {
       method: "POST",
       body: JSON.stringify({ message, saveToSentItems: false }),

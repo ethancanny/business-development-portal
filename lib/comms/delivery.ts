@@ -164,7 +164,7 @@ export async function deliverReport(
         ${expiresAt.toISOString()})
       RETURNING id, report_id, version, recipient_person_id, recipient_name,
         recipient_email, audience, allow_pdf, token_last4, status,
-        email_status, email_detail, delivered_by, delivered_at, opened_at,
+        email_status, email_detail, delivered_by, delivered_at, email_opened_at, opened_at,
         viewed_at, downloaded_at, revoked_at, revoked_by, expires_at`;
     const delivery = rowToDelivery(rows[0] as Record<string, unknown>);
 
@@ -193,6 +193,9 @@ export async function deliverReport(
       reportTitle: report.title,
       link,
       pdf: attachBytes ? { filename: pdfFilename, bytes: attachBytes } : null,
+      // Open pixel for THIS delivery's token (the raw token exists
+      // only here, at creation — the pixel URL is never stored).
+      trackUrl: `${SITE_BASE}/api/track/${token}`,
     });
     await db`
       UPDATE comms.deliveries
@@ -238,7 +241,7 @@ export async function validateReportToken(
   const rows = await db`
     SELECT id, report_id, version, recipient_person_id, recipient_name,
       recipient_email, audience, allow_pdf, token_last4, status,
-      email_status, email_detail, delivered_by, delivered_at, opened_at,
+      email_status, email_detail, delivered_by, delivered_at, email_opened_at, opened_at,
       viewed_at, downloaded_at, revoked_at, revoked_by, expires_at
     FROM comms.deliveries
     WHERE token_hash = ${hashReportToken(token)} LIMIT 1`;
@@ -285,6 +288,31 @@ export async function trackAccess(
   await db`
     INSERT INTO comms.access_log (id, delivery_id, report_id, action)
     VALUES (${newId()}, ${deliveryId}, ${reportId}, ${action})`;
+}
+
+/**
+ * Open-pixel hit (Send anywhere, Oct 25, 2026): re-validates the
+ * token exactly like every other guest path (hash + revoked + expired
+ * + report not deleted) and, only when valid, stamps
+ * email_opened_at — first hit only (COALESCE) — plus an access_log
+ * row with action 'email_opened'. It NEVER touches opened_at /
+ * viewed_at: those record the recipient opening the portal link, a
+ * different, stronger signal than an image fetch.
+ */
+export async function recordEmailPixelOpen(
+  token: string
+): Promise<{ ok: true; deliveryId: string } | { error: string }> {
+  const v = await validateReportToken(token);
+  if ("error" in v) return { error: v.error };
+  await ensureComms();
+  const db = sql();
+  await db`
+    UPDATE comms.deliveries SET email_opened_at = COALESCE(email_opened_at, now())
+    WHERE id = ${v.delivery.id}`;
+  await db`
+    INSERT INTO comms.access_log (id, delivery_id, report_id, action)
+    VALUES (${newId()}, ${v.delivery.id}, ${v.delivery.reportId}, 'email_opened')`;
+  return { ok: true, deliveryId: v.delivery.id };
 }
 
 export async function revokeDelivery(

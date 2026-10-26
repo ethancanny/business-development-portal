@@ -6,6 +6,7 @@ import {
 } from "./schema";
 import { getDealContext } from "../diligence/service";
 import { getDirectoryDetail } from "../directory/service";
+import type { ReportRender } from "../comms/types";
 // WS-A's capital service owns capital.deal_summary; every report
 // write refreshes it through this service function (never raw SQL
 // against another workstream's logic — deal_summary is refreshed,
@@ -575,4 +576,202 @@ export async function renderReport(
     text = text.split(`{{${key}}}`).join(value);
   }
   return { text, values };
+}
+
+/* ----------------- send: bridge into comms delivery ----------------- */
+
+/**
+ * Send anywhere (Oct 25, 2026): capital renders were transient — you
+ * could render a report but never send it. This bridges a render
+ * into the Communications module and delivers it through
+ * deliverReport wholesale: pre-send check, per-recipient tokens,
+ * codename resolution, delivery rows and revocation all come from
+ * comms. The capital render is persisted as a comms report (its own
+ * module boundary respected — comms is reached ONLY through its
+ * service functions, loaded dynamically like the monitoring read
+ * above so the modules stay separable).
+ *
+ * Personalization: with exactly ONE recipient the render is
+ * personalized to that investor (the long-standing tab semantics);
+ * with several, the whole-deal render is sent and comms personalizes
+ * each delivery's "Prepared for" + PDF.
+ */
+
+const BRIDGE_TEMPLATE_NAME = "Capital investor report (bridge)";
+const BRIDGE_DISCLAIMER =
+  "Confidential — prepared for the named recipients only. Do not forward or distribute without the written consent of Canny Capital Partners.";
+
+type CommsService = typeof import("../comms/service");
+
+async function ensureBridgeTemplate(
+  comms: CommsService,
+  actor: string
+): Promise<string> {
+  const templates = await comms.listTemplates();
+  const found = templates.find((t) => t.name === BRIDGE_TEMPLATE_NAME);
+  if (found) return found.id;
+  const created = await comms.createTemplate(
+    {
+      name: BRIDGE_TEMPLATE_NAME,
+      purpose: "investor_update",
+      audience: "investor",
+      subjectKinds: ["deal"],
+      blocks: [
+        { key: "body", type: "text", heading: "Report", visibility: "all" },
+      ],
+      tone: "",
+      disclaimers: [BRIDGE_DISCLAIMER],
+      routine: false,
+    },
+    actor
+  );
+  return created.id;
+}
+
+export interface SendInvestorReportRecipient {
+  personId?: string | null;
+  name: string;
+  email: string;
+  allowPdf?: boolean;
+}
+
+export async function sendInvestorReport(
+  dealId: string,
+  input: { templateId: string; recipients: SendInvestorReportRecipient[] },
+  actor: string
+) {
+  await ensureCapital();
+  const ctx = await getDealContext(dealId);
+  if (!ctx) throw new Error("deal_not_found");
+  const recipients = (input.recipients ?? []).filter(
+    (r) => r && r.email && r.email.includes("@")
+  );
+  if (!recipients.length) throw new Error("no_recipients");
+  const template = await getReportTemplate(input.templateId);
+  if (!template) throw new Error("template_not_found");
+
+  const personalInvestorId =
+    recipients.length === 1 ? (recipients[0].personId ?? null) : null;
+  const rendered = await renderReport({
+    dealId,
+    templateId: input.templateId,
+    investorPersonId: personalInvestorId,
+  });
+
+  // Codename law: a generated report is an EXTERNAL surface — when
+  // the deal carries an external codename, the stored render's
+  // subject label is the codename ONLY (mirrors comms'
+  // resolveSubjectLabel; the guest meta re-resolves it per delivery
+  // as well).
+  let subjectLabel = ctx.companyName || ctx.dealName || "Deal";
+  try {
+    const identity = await import("../identity/service");
+    const shared = await import("../identity/shared");
+    const dealIdentity = await identity
+      .dealIdentityForDeal(dealId)
+      .catch(() => null);
+    if (dealIdentity) {
+      const resolved = shared.resolveDisplayIdentity(
+        {
+          name: dealIdentity.companyName || dealIdentity.name,
+          codename: dealIdentity.codename,
+          codenameExternal: dealIdentity.codenameExternal,
+        },
+        "external"
+      );
+      if (resolved.codenameActive) subjectLabel = resolved.displayName;
+    }
+  } catch {
+    /* identity is best-effort; the plain label is the fallback */
+  }
+
+  const asOf =
+    typeof rendered.values.as_of === "string"
+      ? rendered.values.as_of
+      : new Date().toISOString().slice(0, 10);
+  const title = `${template.name} — ${subjectLabel} — ${asOf}`;
+  const render: ReportRender = {
+    title,
+    subjectLabel,
+    asOf,
+    sample: false,
+    firm: "Canny Capital Partners",
+    disclaimers: [BRIDGE_DISCLAIMER],
+    blocks: [
+      {
+        key: "body",
+        type: "text",
+        heading: template.name,
+        visibility: "all",
+        dataStatus: "ok",
+        figures: [],
+        text: rendered.text,
+      },
+    ],
+    warnings: [],
+  };
+
+  const comms = (await import("../comms/service")) as CommsService;
+  const delivery = await import("../comms/delivery");
+  const bridgeTemplateId = await ensureBridgeTemplate(comms, actor);
+  const report = await comms.createReport(
+    {
+      templateId: bridgeTemplateId,
+      subjectKind: "deal",
+      dealId,
+      companyId: ctx.companyId,
+      title,
+    },
+    actor
+  );
+  await comms.storeExternalRender(
+    report.id,
+    render,
+    actor,
+    `Capital render: ${template.name}`
+  );
+  await comms.transitionReport(report.id, "submit", actor);
+  await comms.transitionReport(report.id, "approve", actor);
+  const result = await delivery.deliverReport(
+    report.id,
+    {
+      recipients: recipients.map((r) => ({
+        personId: r.personId ?? null,
+        name: r.name,
+        email: r.email,
+        allowPdf: Boolean(r.allowPdf),
+      })),
+    },
+    actor
+  );
+  return {
+    reportId: report.id,
+    title,
+    deliveries: result.deliveries,
+    check: result.check,
+  };
+}
+
+/**
+ * The raise workspace delivery log, from the comms module's real
+ * delivery records for this deal (Send anywhere, Oct 25, 2026) —
+ * replaces the old payload-scavenging, which read fields the
+ * reporting endpoints never returned.
+ */
+export async function listDealReportDeliveries(dealId: string) {
+  await ensureCapital();
+  const comms = (await import("../comms/service")) as CommsService;
+  const reports = await comms.listReports({ dealId });
+  const out: Array<
+    import("../comms/service").DeliveryRow & { reportTitle: string }
+  > = [];
+  for (const r of reports.slice(0, 25)) {
+    const detail = await comms.getReport(r.id);
+    if (!detail) continue;
+    for (const d of detail.deliveries) {
+      out.push({ ...d, reportTitle: r.title });
+    }
+  }
+  out.sort((a, b) => (b.deliveredAt ?? "").localeCompare(a.deliveredAt ?? ""));
+  return out;
 }
