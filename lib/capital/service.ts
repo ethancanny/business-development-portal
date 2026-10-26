@@ -12,6 +12,7 @@ import {
 import { getDealContext } from "../diligence/service";
 import { getBdConfig, getDealMetricsForDeals } from "../bd/service";
 import { bumpDatasets } from "../platform/versions";
+import { getFocusSettings } from "../platform/focus";
 import { INVESTMENT_TYPE_LABELS, type InvestmentTypeKey } from "../types";
 import {
   ensureCapital,
@@ -2123,12 +2124,27 @@ export async function listMatchingForRaise(
   await ensureCapital();
   const ctx = await getDealContext(dealId);
   if (!ctx) throw new CapitalError("deal_not_found");
-  const [weights, raise, summary, types] = await Promise.all([
-    getMatchingWeights(),
-    getOpenRaise(dealId),
-    getDealSummary(dealId),
-    configuredTypes(),
-  ]);
+  const [storedWeights, raise, summary, types, focusSettings] =
+    await Promise.all([
+      getMatchingWeights(),
+      getOpenRaise(dealId),
+      getDealSummary(dealId),
+      configuredTypes(),
+      // One Focus read per match run (not per investor); a failed
+      // read falls back to the stored weights untouched.
+      getFocusSettings().catch(() => null),
+    ]);
+  // Focus mode (A&D): the sector criterion (MatchingWeights.sector,
+  // verified in lib/capital/matching.ts) carries the Focus matching
+  // boost for this run only — the stored weights are never mutated.
+  // All-sector mode passes the stored weights through untouched.
+  const weights: MatchingWeights =
+    focusSettings?.focus === "ad"
+      ? {
+          ...storedWeights,
+          sector: storedWeights.sector + focusSettings.matchingBoost,
+        }
+      : storedWeights;
   const target = summary?.targetRaise ?? raise?.targetRaise ?? 0;
   const remaining =
     target -
