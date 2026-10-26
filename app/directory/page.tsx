@@ -34,6 +34,7 @@ import DirectoryGrid, {
   type DirectorySortDir,
   type DirectorySortKey,
 } from "@/components/DirectoryUnified";
+import { loadDataset } from "@/lib/client/datasets";
 import DirectoryDetail from "@/components/DirectoryDetail";
 import DirectoryImport from "@/components/DirectoryImport";
 import DirectoryTemplates from "@/components/DirectoryTemplates";
@@ -366,6 +367,10 @@ export default function Directory() {
   // user types never auto-open anything.
   const deepLinkQRef = useRef<string | null>(null);
   const deepLinkPendingRef = useRef(false);
+  // A reloadTick bump is a mutation-triggered reload (refresh()):
+  // those list loads pass force to loadDataset; filter/search-driven
+  // loads use the version gate.
+  const prevReloadTickRef = useRef(0);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -470,22 +475,29 @@ export default function Directory() {
     let cancelled = false;
     setLoading(true);
     setError(false);
+    const forceLoad = reloadTick !== prevReloadTickRef.current;
+    prevReloadTickRef.current = reloadTick;
     const timer = window.setTimeout(() => {
       (async () => {
         try {
           const sortParam = sortKey === "name" ? "name" : sortKey === "lastTouch" ? "lastTouch" : sortKey === "nextDue" ? "nextDue" : "updated";
-          const r = await fetch(buildListUrl({
-            type: typeFilter, q, offset: 0, kind: kindFilter,
-            tier: tierFilter, stage: stageFilter, owner: ownerFilter, tag: tagFilter,
-            overdueOnly, lastTouchBefore, lastTouchAfter, sort: sortParam, sortDir,
-          }));
+          const r = await loadDataset<unknown>(
+            "directory",
+            buildListUrl({
+              type: typeFilter, q, offset: 0, kind: kindFilter,
+              tier: tierFilter, stage: stageFilter, owner: ownerFilter, tag: tagFilter,
+              overdueOnly, lastTouchBefore, lastTouchAfter, sort: sortParam, sortDir,
+            }),
+            forceLoad ? { force: true } : undefined
+          );
           if (cancelled) return;
           if (r.status === 401) {
             router.replace("/login");
             return;
           }
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          const parsed = normalizeList(await r.json());
+          if (r.data === null || r.data === undefined)
+            throw new Error(`HTTP ${r.status}`);
+          const parsed = normalizeList(r.data);
           if (cancelled) return;
           setItems(parsed.items);
           setTotal(parsed.total);
@@ -527,15 +539,17 @@ export default function Directory() {
     setLoadingMore(true);
     try {
       const sortParam = sortKey === "name" ? "name" : sortKey === "lastTouch" ? "lastTouch" : sortKey === "nextDue" ? "nextDue" : "updated";
-      const r = await fetch(
+      const r = await loadDataset<unknown>(
+        "directory",
         buildListUrl({
           type: typeFilter, q, offset: items.length, kind: kindFilter,
           tier: tierFilter, stage: stageFilter, owner: ownerFilter, tag: tagFilter,
           overdueOnly, lastTouchBefore, lastTouchAfter, sort: sortParam, sortDir,
         })
       );
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const parsed = normalizeList(await r.json());
+      if (r.data === null || r.data === undefined)
+        throw new Error(`HTTP ${r.status}`);
+      const parsed = normalizeList(r.data);
       setItems((prev) => {
         const seen = new Set(prev.map((i) => `${i.kind}-${i.id}`));
         const fresh = parsed.items.filter((i) => !seen.has(`${i.kind}-${i.id}`));

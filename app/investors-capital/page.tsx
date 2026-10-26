@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
+import { loadDataset } from "@/lib/client/datasets";
 import { CardSkeleton, ErrorState } from "@/components/ui";
 import { GenerateDocumentButton } from "@/components/docgen/GenerateDocument";
 import SummaryStrip from "@/components/capital/home/SummaryStrip";
@@ -53,8 +54,18 @@ export default function InvestorsCapitalPage() {
     setDealsLoading(true);
     setDealsError(false);
     try {
-      const data = await api<Record<string, unknown>>(`${API}/deals`);
-      setDeals(listFrom<ExtCapitalDeal>(data, "items", "deals"));
+      // Version-gated (Performance Fix Pass): an unchanged capital
+      // dataset returns the cached payload object, so listFrom hands
+      // back the same array reference and React bails on the setState.
+      const r = await loadDataset<Record<string, unknown>>(
+        "capital",
+        `${API}/deals`
+      );
+      if (r.data) {
+        setDeals(listFrom<ExtCapitalDeal>(r.data, "items", "deals"));
+      } else {
+        setDealsError(true);
+      }
     } catch {
       setDealsError(true);
     } finally {
@@ -69,16 +80,22 @@ export default function InvestorsCapitalPage() {
   useEffect(() => {
     let cancelled = false;
     setSummaryLoading(true);
-    api<CapitalSummaryData>(`${API}/summary?type=${encodeURIComponent(type)}`)
-      .then((d) => {
-        if (!cancelled) setSummary(d);
-      })
-      .catch(() => {
+    (async () => {
+      try {
+        // Version-gated under the shared "capital" dataset: switching
+        // type re-keys by URL, and an unchanged type returns the same
+        // payload object (setState bails on the identical reference).
+        const r = await loadDataset<CapitalSummaryData>(
+          "capital",
+          `${API}/summary?type=${encodeURIComponent(type)}`
+        );
+        if (!cancelled) setSummary(r.data ?? null);
+      } catch {
         if (!cancelled) setSummary(null);
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setSummaryLoading(false);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
