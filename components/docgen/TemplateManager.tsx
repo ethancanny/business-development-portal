@@ -75,7 +75,13 @@ export default function TemplateManager() {
     setLoading(true);
     setError(false);
     try {
-      const res = await fetch("/api/platform/docgen/templates");
+      // no-store is load-bearing (Send anywhere, Oct 25, 2026): the
+      // GET route sends Cache-Control: private, max-age=60, and a
+      // cached pre-approval list made successful approvals look like
+      // they never saved.
+      const res = await fetch("/api/platform/docgen/templates", {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { templates?: Template[] };
       setTemplates(Array.isArray(data.templates) ? data.templates : []);
@@ -84,6 +90,15 @@ export default function TemplateManager() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  /** Merge a mutation response's template straight into the list —
+   * the row's status flips from the PATCH result itself, never from
+   * a refetch that could be stale. */
+  const mergeTemplate = useCallback((updated: Template) => {
+    setTemplates((list) =>
+      list.map((t) => (t.id === updated.id ? updated : t))
+    );
   }, []);
 
   useEffect(() => {
@@ -184,6 +199,7 @@ export default function TemplateManager() {
               {openId === t.id && (
                 <TemplateForm
                   template={t}
+                  onUpdated={mergeTemplate}
                   onDone={(msg) => {
                     setOpenId(null);
                     setNotice(msg);
@@ -202,9 +218,11 @@ export default function TemplateManager() {
 function TemplateForm({
   template,
   onDone,
+  onUpdated,
 }: {
   template?: Template;
   onDone: (msg: string) => void;
+  onUpdated?: (t: Template) => void;
 }) {
   const isEdit = Boolean(template);
   const [name, setName] = useState(template?.name ?? "");
@@ -246,15 +264,21 @@ function TemplateForm({
     setFormError(null);
     try {
       const res = await fn();
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        template?: Template;
+      };
       if (!res.ok) {
         setFormError(
           data.error === "approved_by_required"
-            ? "An approved-by note is required — record who approved this template."
+            ? "Approval needs a name: enter who approved this template in the “Approved by” field — the approval is recorded against that name and is rejected without it. The template is still a draft."
             : `${failMsg} (${data.error ?? res.status})`
         );
         return;
       }
+      // Apply the server's returned row immediately — the visible
+      // status comes from the mutation result, not a later refetch.
+      if (data.template && onUpdated) onUpdated(data.template);
       onDone(okMsg);
     } catch {
       setFormError(failMsg);
@@ -283,7 +307,17 @@ function TemplateForm({
       "Could not save the template."
     );
 
-  const approve = () =>
+  const approve = () => {
+    // Never an inert button (Send anywhere, Oct 25, 2026): clicking
+    // Approve without a name produces this visible error and the
+    // template stays clearly draft — the API rejects a nameless
+    // approval (approved_by_required), so the click must say why.
+    if (!approvedBy.trim()) {
+      setFormError(
+        "Approval needs a name: enter who approved this template in the “Approved by” field above — the approval is recorded against that name. Nothing was approved; the template is still a draft."
+      );
+      return;
+    }
     void call(
       () =>
         fetch(`/api/platform/docgen/templates/${template!.id}`, {
@@ -298,6 +332,7 @@ function TemplateForm({
       `Template approved (v${template!.version}). It can now generate documents.`,
       "Could not approve the template."
     );
+  };
 
   const unapprove = () =>
     void call(
@@ -418,6 +453,66 @@ function TemplateForm({
         </p>
       )}
 
+      {isEdit && (
+        <div className="mb-5 border-b border-slate-100 pb-4 dark:border-white/5">
+          <h4 className="text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
+            Approval
+          </h4>
+          {template!.status === "approved" ? (
+            <>
+              <p className="mt-1 text-sm text-slate-600 dark:text-white/70">
+                Approved by {template!.approvedBy}
+                {template!.approvedNote ? ` — “${template!.approvedNote}”` : ""}.
+                This version (v{template!.version}) can generate documents.
+              </p>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm mt-3 min-h-[44px]"
+                disabled={busy}
+                onClick={unapprove}
+              >
+                Return to draft
+              </button>
+            </>
+          ) : (
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className={labelCls}>Approved by *</label>
+                <input
+                  className={`${inputCls} min-h-[44px]`}
+                  value={approvedBy}
+                  onChange={(e) => setApprovedBy(e.target.value)}
+                  placeholder="Who approved this template"
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Note</label>
+                <input
+                  className={`${inputCls} min-h-[44px]`}
+                  value={approveNote}
+                  onChange={(e) => setApproveNote(e.target.value)}
+                  placeholder="e.g. Reviewed against firm standard, Oct 2026"
+                />
+              </div>
+              <div>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm min-h-[44px]"
+                  disabled={busy}
+                  onClick={approve}
+                >
+                  Approve v{template!.version}
+                </button>
+                <p className="mt-1 text-xs text-slate-400 dark:text-white/40">
+                  Approval is recorded against the name above and applies
+                  to this version only.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
@@ -479,61 +574,6 @@ function TemplateForm({
           ))}
       </div>
 
-      {isEdit && (
-        <div className="mt-5 border-t border-slate-100 pt-4 dark:border-white/5">
-          <h4 className="text-sm font-bold uppercase tracking-wide text-[#0d1f3c] dark:text-white">
-            Approval
-          </h4>
-          {template!.status === "approved" ? (
-            <>
-              <p className="mt-1 text-sm text-slate-600 dark:text-white/70">
-                Approved by {template!.approvedBy}
-                {template!.approvedNote ? ` — “${template!.approvedNote}”` : ""}.
-                This version (v{template!.version}) can generate documents.
-              </p>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm mt-3 min-h-[44px]"
-                disabled={busy}
-                onClick={unapprove}
-              >
-                Return to draft
-              </button>
-            </>
-          ) : (
-            <div className="mt-2 grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className={labelCls}>Approved by *</label>
-                <input
-                  className={`${inputCls} min-h-[44px]`}
-                  value={approvedBy}
-                  onChange={(e) => setApprovedBy(e.target.value)}
-                  placeholder="Who approved this template"
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Note</label>
-                <input
-                  className={`${inputCls} min-h-[44px]`}
-                  value={approveNote}
-                  onChange={(e) => setApproveNote(e.target.value)}
-                  placeholder="e.g. Reviewed against firm standard, Oct 2026"
-                />
-              </div>
-              <div>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm min-h-[44px]"
-                  disabled={busy || !approvedBy.trim()}
-                  onClick={approve}
-                >
-                  Approve v{template!.version}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

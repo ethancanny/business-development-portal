@@ -66,6 +66,23 @@ interface InvestorOpt {
   title: string;
 }
 
+/** Empty-state copy for the template picker: when approved templates
+ * exist for the OTHER scope, say so with the count — "3 approved
+ * templates exist for deals — none for investors yet" — instead of
+ * implying the library is empty. */
+function emptyTemplateMessage(
+  scope: "deal" | "investor",
+  counts: Record<string, number>
+): string {
+  const mine = scope === "investor" ? "investor" : "deal";
+  const other = scope === "investor" ? "deal" : "investor";
+  const otherCount = counts[other] ?? 0;
+  if (otherCount > 0) {
+    return `No approved ${mine} templates yet — but ${otherCount} approved template${otherCount === 1 ? "" : "s"} exist${otherCount === 1 ? "s" : ""} for ${other === "investor" ? "investors" : "deals"}. Approve one for this surface (or set its scope to General) in`;
+  }
+  return `No approved ${mine} templates yet. Create and approve one in`;
+}
+
 const inputCls =
   "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-[#0d1f3c] outline-none focus:border-[#b8975a] dark:border-white/10 dark:bg-[#132847]/60 dark:text-white";
 const labelCls =
@@ -125,6 +142,11 @@ function GenerateDocumentDrawer({
   const [templates, setTemplates] = useState<TemplateOpt[]>([]);
   const [tplLoading, setTplLoading] = useState(true);
   const [templateId, setTemplateId] = useState("");
+  /** Approved counts per scope across the WHOLE library (Send
+   * anywhere, Oct 25, 2026) — the scoped fetch alone can't see that
+   * approved templates exist for other surfaces, which is exactly
+   * what the empty state needs to say. */
+  const [approvedCounts, setApprovedCounts] = useState<Record<string, number>>({});
 
   const [investors, setInvestors] = useState<InvestorOpt[]>([]);
   const [investorId, setInvestorId] = useState(fixedInvestorId ?? "");
@@ -159,7 +181,8 @@ function GenerateDocumentDrawer({
     (async () => {
       try {
         const res = await fetch(
-          `/api/platform/docgen/templates?scope=${scope}&status=approved`
+          `/api/platform/docgen/templates?scope=${scope}&status=approved`,
+          { cache: "no-store" }
         );
         if (!res.ok) throw new Error();
         const data = (await res.json()) as { templates?: TemplateOpt[] };
@@ -170,6 +193,25 @@ function GenerateDocumentDrawer({
         setError("Could not load approved templates.");
       } finally {
         setTplLoading(false);
+      }
+    })();
+    // Unfiltered approved fetch for the empty state's per-scope
+    // counts — best-effort; the scoped list above is authoritative.
+    (async () => {
+      try {
+        const res = await fetch(
+          "/api/platform/docgen/templates?status=approved",
+          { cache: "no-store" }
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { templates?: TemplateOpt[] };
+        const counts: Record<string, number> = {};
+        for (const t of Array.isArray(data.templates) ? data.templates : []) {
+          counts[t.scope] = (counts[t.scope] ?? 0) + 1;
+        }
+        setApprovedCounts(counts);
+      } catch {
+        /* counts are an empty-state nicety only */
       }
     })();
   }, [scope]);
@@ -360,8 +402,7 @@ function GenerateDocumentDrawer({
                   <p className="text-sm text-slate-400">Loading templates…</p>
                 ) : templates.length === 0 ? (
                   <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:bg-white/5 dark:text-white/70">
-                    No approved {scope === "investor" ? "investor" : "deal"}{" "}
-                    templates yet. Create and approve one in{" "}
+                    {emptyTemplateMessage(scope, approvedCounts)}{" "}
                     <Link href="/settings/templates" className="font-semibold text-gold-700 underline dark:text-gold-400">
                       Settings → Templates
                     </Link>

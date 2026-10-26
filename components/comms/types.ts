@@ -364,6 +364,9 @@ export interface CommsDelivery extends Rec {
   emailDetail?: string | null;
   deliveredBy?: string;
   deliveredAt?: string | null;
+  /** Open-pixel stamp (delivery email image fetched) — distinct from
+   * openedAt/viewedAt (portal-link access). */
+  emailOpenedAt?: string | null;
   openedAt?: string | null;
   viewedAt?: string | null;
   downloadedAt?: string | null;
