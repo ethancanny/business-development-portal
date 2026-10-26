@@ -11,7 +11,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CardSkeleton, EmptyState, ErrorState } from "@/components/ui";
-import { API, api, fmtDateShort } from "@/components/capital/types";
+import { API, fmtDateShort } from "@/components/capital/types";
+import { loadDataset } from "@/lib/client/datasets";
 import { relDate } from "./shared";
 
 interface ActionItem {
@@ -38,10 +39,18 @@ export default function ActionCenter({ typeKey }: { typeKey: string }) {
     setLoading(true);
     setError(false);
     try {
-      const d = await api<{ items: ActionItem[] }>(
+      // Version-gated under the shared "capital" dataset (Performance
+      // Fix Pass): an unchanged payload returns the same items array
+      // reference, so the setState below bails without a re-render.
+      const r = await loadDataset<{ items: ActionItem[] }>(
+        "capital",
         `${API}/actions?type=${encodeURIComponent(typeKey)}`
       );
-      setItems(Array.isArray(d.items) ? d.items : []);
+      if (r.data) {
+        setItems(Array.isArray(r.data.items) ? r.data.items : []);
+      } else {
+        setError(true);
+      }
     } catch {
       setError(true);
     } finally {

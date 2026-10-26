@@ -153,7 +153,16 @@ export default function PwaShell() {
     }
   }, []);
 
-  /* --- app-icon badge sync (overdue follow-ups + items needing review) --- */
+  /* --- app-icon badge sync (overdue follow-ups + items needing review) ---
+   * Version gate (Performance Fix Pass, DESIGN §8): before paying for
+   * /api/push/badge, check the tasks+dealflow dataset versions (one
+   * tiny no-store GET). If the fingerprint is unchanged since the last
+   * badge fetch, the badge cannot have changed — skip the fetch. If
+   * the versions check itself fails, fall back to fetching the badge
+   * (the pre-gate behavior). */
+  const badgeFingerprintRef = useRef<string | null>(null);
+  const lastBadgeCheckRef = useRef(0);
+
   const syncBadge = useCallback(async () => {
     try {
       const nav = window.navigator as Navigator & {
@@ -161,16 +170,45 @@ export default function PwaShell() {
         clearAppBadge?: () => Promise<void>;
       };
       if (typeof nav.setAppBadge !== "function") return;
+      lastBadgeCheckRef.current = Date.now();
+      let fingerprint: string | null = null;
+      try {
+        const vr = await fetch("/api/platform/versions?datasets=tasks,dealflow", {
+          cache: "no-store",
+        });
+        if (vr.ok) {
+          const vb: unknown = await vr.json().catch(() => null);
+          const vs =
+            vb && typeof vb === "object"
+              ? ((vb as { versions?: Record<string, number> }).versions ?? {})
+              : {};
+          fingerprint = `${vs.tasks ?? "?"}:${vs.dealflow ?? "?"}`;
+        }
+      } catch {
+        /* versions unavailable — fingerprint stays null, badge fetches */
+      }
+      if (fingerprint !== null && fingerprint === badgeFingerprintRef.current) {
+        return;
+      }
       const r = await fetch("/api/push/badge");
       if (!r.ok) return;
       const d = await r.json().catch(() => null);
       const count = typeof d?.count === "number" ? d.count : 0;
       if (count > 0) await nav.setAppBadge(count);
       else if (typeof nav.clearAppBadge === "function") await nav.clearAppBadge();
+      if (fingerprint !== null) badgeFingerprintRef.current = fingerprint;
     } catch {
       /* badge is best-effort */
     }
   }, []);
+
+  /* Foreground triggers (focus / visibility / pageshow) are throttled:
+   * at most one version check per 30s no matter how often the app is
+   * foregrounded. Explicit refresh paths call syncBadge directly. */
+  const syncBadgeThrottled = useCallback(() => {
+    if (Date.now() - lastBadgeCheckRef.current < 30000) return;
+    void syncBadge();
+  }, [syncBadge]);
 
   /* --- per-launch push verification + badge (standalone, signed-in app) --- */
   useEffect(() => {
@@ -202,11 +240,11 @@ export default function PwaShell() {
     })();
 
     const onVisible = () => {
-      if (document.visibilityState === "visible") syncBadge();
+      if (document.visibilityState === "visible") syncBadgeThrottled();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [standalone, onLogin, syncBadge]);
+  }, [standalone, onLogin, syncBadge, syncBadgeThrottled]);
 
   /* --- badge triggers for the whole session (Oct 16, 2026) ---
    * The per-launch effect above registers one visibility listener, but
@@ -215,14 +253,19 @@ export default function PwaShell() {
    * are registered once, independent of push verification, and always
    * recalculate from the server (lib/badge) — never a local delta. */
   useEffect(() => {
-    const onForeground = () => syncBadge();
+    // Foreground returns are throttled (30s); explicit refresh paths
+    // skip the throttle but still pass syncBadge's fingerprint check
+    // first — a post-mutation server bump changes the fingerprint, so
+    // the badge refetch still happens exactly when it should.
+    const onForeground = () => syncBadgeThrottled();
+    const onExplicit = () => void syncBadge();
     const onVisible = () => {
-      if (document.visibilityState === "visible") syncBadge();
+      if (document.visibilityState === "visible") syncBadgeThrottled();
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onForeground);
     window.addEventListener("pageshow", onForeground);
-    window.addEventListener("ccp:badge-refresh", onForeground);
+    window.addEventListener("ccp:badge-refresh", onExplicit);
     // Explicit hook for any mutation code: window.ccpBadgeRefresh().
     (window as unknown as { ccpBadgeRefresh?: () => void }).ccpBadgeRefresh =
       () => syncBadge();
@@ -272,9 +315,9 @@ export default function PwaShell() {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onForeground);
       window.removeEventListener("pageshow", onForeground);
-      window.removeEventListener("ccp:badge-refresh", onForeground);
+      window.removeEventListener("ccp:badge-refresh", onExplicit);
     };
-  }, [syncBadge]);
+  }, [syncBadge, syncBadgeThrottled]);
 
   /* --- badge on navigation; unconditional clear when signed out ---
    * Arriving anywhere in the app (including right after login)

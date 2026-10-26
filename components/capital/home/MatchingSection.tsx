@@ -15,12 +15,12 @@ import Link from "next/link";
 import { CardSkeleton, EmptyState, ErrorState } from "@/components/ui";
 import {
   API,
-  api,
   fmtMoneyCompact,
   selectCls,
   tdCls,
   thCls,
 } from "@/components/capital/types";
+import { loadDataset } from "@/lib/client/datasets";
 import type { InvestmentTypeRef } from "./shared";
 
 interface MatrixCell {
@@ -87,8 +87,12 @@ export default function MatchingSection({
     setLoading(true);
     setError(false);
     try {
-      const d = await api<MatrixData>(`${API}/matrix?type=${encodeURIComponent(typeKey)}`);
-      setData(d);
+      const r = await loadDataset<MatrixData>(
+        "capital",
+        `${API}/matrix?type=${encodeURIComponent(typeKey)}`
+      );
+      if (!r.data) throw new Error(`HTTP ${r.status}`);
+      setData(r.data);
     } catch {
       setError(true);
     } finally {

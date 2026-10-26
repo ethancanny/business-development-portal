@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import TaskList from "@/components/TaskList";
@@ -13,7 +13,7 @@ import { usePullToRefresh, pullPillLabel } from "@/components/usePullToRefresh";
 import { DEAL_STAGES, EXEC_STAGES, type Deal, type DealFlowItem, type Executive, type Interaction, type MiIndicatorObs, type MiMultiple, type Task } from "@/lib/types";
 import type { CalendarEvent } from "@/lib/calendar-db";
 import type { Investor } from "@/lib/investors-db";
-import type { OperatorCandidate } from "@/lib/candidates-db";
+import { loadDataset } from "@/lib/client/datasets";
 import { fmtMoney, fmtMoneyCompact } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
@@ -25,6 +25,16 @@ import { SectorLegend } from "@/components/SectorChip";
  * Hospitality tile now carries a real fit count with its source list
  * and last-updated date under it. */
 const FIT_SECTORS: readonly string[] = FOCUS_SECTOR_NAMES;
+
+/** Candidate summary mode (Performance Fix Pass): GET
+ * /api/operators/candidates?summary=1 returns counts only — the
+ * Operators tile needs by-status counts + this week's new candidates,
+ * never the full candidate rows. Missing byStatus keys count as 0. */
+interface CandidateSummary {
+  total: number;
+  byStatus: Record<string, number>;
+  newThisWeek: number;
+}
 
 // Terminal stages (Oct 25, 2026): the Investment Types stage lists
 // name the terminal win "Closed" — the legacy "Closed Won" is kept
@@ -73,7 +83,8 @@ export default function Overview() {
   const [flow, setFlow] = useState<DealFlowItem[]>([]);
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
   const [investors, setInvestors] = useState<Investor[]>([]);
-  const [candidates, setCandidates] = useState<OperatorCandidate[]>([]);
+  const [candidateSummary, setCandidateSummary] =
+    useState<CandidateSummary | null>(null);
   const [multiples, setMultiples] = useState<MiMultiple[]>([]);
   const [rates, setRates] = useState<MarketRates>({});
   const [fitCounts, setFitCounts] = useState<Record<string, number | null>>({});
@@ -109,81 +120,122 @@ export default function Overview() {
   const [analyticsTab, setAnalyticsTab] = useState<"pipeline" | "sourcing" | "relationships">("pipeline");
   const [winDays, setWinDays] = useState<30 | 90 | 365>(30);
 
+  // Performance Fix Pass: datasets this mount has already applied.
+  // A loader applies its state slice only when its dataset changed —
+  // EXCEPT the first application in a mount, which must always land
+  // (a remounted page starts from empty state even when the module
+  // cache still holds the current version's payload).
+  const appliedRef = useRef<Set<string>>(new Set());
+  const sliceFresh = (key: string, changed: boolean): boolean => {
+    if (!changed && appliedRef.current.has(key)) return false;
+    appliedRef.current.add(key);
+    return true;
+  };
+
   const load = async () => {
     try {
-      const calFrom = new Date(Date.now() - 16 * 86400000).toISOString();
-      const calTo = new Date(Date.now() + 28 * 86400000).toISOString();
-      const [meRes, dealsRes, execsRes, tasksRes, ixRes, flowRes, calRes, invRes, multRes, ratesRes, indRes, candRes, platRes, bdRes] = await Promise.all([
-        fetch("/api/auth/me"),
-        fetch("/api/deals"),
-        fetch("/api/executives"),
-        fetch("/api/tasks"),
-        fetch("/api/interactions"),
-        fetch("/api/deal-flow"),
-        fetch(`/api/calendar?from=${encodeURIComponent(calFrom)}&to=${encodeURIComponent(calTo)}`),
-        fetch("/api/investors"),
-        fetch("/api/market/multiples"),
-        fetch("/api/market/rates"),
-        fetch("/api/market/indicators?series=DPRIME,SOFR,DGS10,DGS2"),
-        fetch("/api/operators/candidates"),
-        fetch("/api/platform/overview"),
-        fetch("/api/platform/investment-types/bootstrap"),
-      ]);
-      if (
-        meRes.status === 401 ||
-        dealsRes.status === 401 ||
-        tasksRes.status === 401
-      ) {
-        router.replace("/login");
-        return;
-      }
-      const me = await meRes.json();
-      setUserName(me.user?.name ?? "");
-      if (dealsRes.ok) setDeals(await dealsRes.json());
-      if (execsRes.ok) setExecs(await execsRes.json());
-      if (tasksRes.ok) setTasks(await tasksRes.json());
-      if (ixRes.ok) setInteractions(await ixRes.json());
-      if (flowRes.ok) setFlow(await flowRes.json());
-      if (calRes.ok) {
-        const cal = await calRes.json();
-        if (Array.isArray(cal.events)) {
-          setCalEvents(cal.events.filter((e: CalendarEvent) => !e.dismissed));
+      // Perf pass (Oct 25, 2026): the window is bucketed to local day
+      // boundaries so the URL — the calendar dataset's cache key — is
+      // stable all day and the version gate can serve repeat loads from
+      // the client cache. The window widens by <24h at the edges; the
+      // week view renders the same events either way.
+      const calFromD = new Date(Date.now() - 16 * 86400000);
+      calFromD.setHours(0, 0, 0, 0);
+      const calToD = new Date(Date.now() + 28 * 86400000);
+      calToD.setHours(23, 59, 59, 999);
+      const calFrom = calFromD.toISOString();
+      const calTo = calToD.toISOString();
+      const calUrl = `/api/calendar?from=${encodeURIComponent(calFrom)}&to=${encodeURIComponent(calTo)}`;
+
+      // /api/auth/me stays a plain fetch (not a versioned dataset).
+      const meP = (async (): Promise<number> => {
+        try {
+          const r = await fetch("/api/auth/me");
+          if (r.status !== 401) {
+            const me = await r.json().catch(() => null);
+            setUserName(me?.user?.name ?? "");
+          }
+          return r.status;
+        } catch {
+          return 0;
         }
-      }
-      if (invRes.ok) {
-        const inv = await invRes.json();
-        if (Array.isArray(inv)) setInvestors(inv);
-      }
-      if (candRes.ok) {
-        const cs = await candRes.json();
-        if (Array.isArray(cs)) setCandidates(cs as OperatorCandidate[]);
-      }
-      if (platRes.ok) {
-        const plat = await platRes.json().catch(() => null);
-        if (plat && typeof plat === "object" && plat.summary) {
-          setPlatformPayload(plat);
-        }
-      }
-      if (bdRes.ok) {
-        const bd = await bdRes.json().catch(() => null);
-        if (bd && typeof bd === "object" && bd.metricsByDeal) {
-          setMetricsByDeal(bd.metricsByDeal as Record<string, DealMetricsLite>);
-        }
-      }
-      if (multRes.ok) {
-        const mult = await multRes.json();
-        if (Array.isArray(mult)) setMultiples(mult);
-      }
-      if (ratesRes.ok) {
-        const rd = await ratesRes.json().catch(() => null);
-        setRates({ prime: rd?.prime?.value ?? null, sba: rd?.sba?.value ?? null });
-      }
-      if (indRes.ok) {
+      })();
+
+      // Per-dataset loaders: each applies ONLY its own state slice,
+      // and only when the dataset changed (or on first application
+      // this mount — see sliceFresh). A loader never rejects, so one
+      // dataset's failure cannot block the others; statuses are
+      // collected for the 401 redirect below.
+      const dealsP = (async (): Promise<number> => {
+        const r = await loadDataset<Deal[]>("deals", "/api/deals");
+        if (Array.isArray(r.data) && sliceFresh("deals", r.changed))
+          setDeals(r.data);
+        return r.status;
+      })();
+      const execsP = (async (): Promise<number> => {
+        const r = await loadDataset<Executive[]>("executives", "/api/executives");
+        if (Array.isArray(r.data) && sliceFresh("executives", r.changed))
+          setExecs(r.data);
+        return r.status;
+      })();
+      const tasksP = (async (): Promise<number> => {
+        const r = await loadDataset<Task[]>("tasks", "/api/tasks");
+        if (Array.isArray(r.data) && sliceFresh("tasks", r.changed))
+          setTasks(r.data);
+        return r.status;
+      })();
+      const ixP = (async (): Promise<number> => {
+        const r = await loadDataset<Interaction[]>("interactions", "/api/interactions");
+        if (Array.isArray(r.data) && sliceFresh("interactions", r.changed))
+          setInteractions(r.data);
+        return r.status;
+      })();
+      const flowP = (async (): Promise<number> => {
+        const r = await loadDataset<DealFlowItem[]>("dealflow", "/api/deal-flow");
+        if (Array.isArray(r.data) && sliceFresh("dealflow", r.changed))
+          setFlow(r.data);
+        return r.status;
+      })();
+      const calP = (async (): Promise<number> => {
+        const r = await loadDataset<{ events?: CalendarEvent[] }>("calendar", calUrl);
+        if (r.data && Array.isArray(r.data.events) && sliceFresh("calendar", r.changed))
+          setCalEvents(r.data.events.filter((e) => !e.dismissed));
+        return r.status;
+      })();
+      const invP = (async (): Promise<number> => {
+        const r = await loadDataset<Investor[]>("investors", "/api/investors");
+        if (Array.isArray(r.data) && sliceFresh("investors", r.changed))
+          setInvestors(r.data);
+        return r.status;
+      })();
+      const multP = (async (): Promise<number> => {
+        const r = await loadDataset<MiMultiple[]>("market_multiples", "/api/market/multiples");
+        if (Array.isArray(r.data) && sliceFresh("market_multiples", r.changed))
+          setMultiples(r.data);
+        return r.status;
+      })();
+      const ratesP = (async (): Promise<number> => {
+        const r = await loadDataset<{
+          prime?: { value?: number | null } | null;
+          sba?: { value?: number | null } | null;
+        }>("market_rates", "/api/market/rates");
+        if (r.data && sliceFresh("market_rates", r.changed))
+          setRates({
+            prime: r.data.prime?.value ?? null,
+            sba: r.data.sba?.value ?? null,
+          });
+        return r.status;
+      })();
+      const indP = (async (): Promise<number> => {
+        const r = await loadDataset<MiIndicatorObs[]>(
+          "market_indicators",
+          "/api/market/indicators?series=DPRIME,SOFR,DGS10,DGS2"
+        );
         // Market strip: latest observation per series plus the change
         // vs the previous observation (the rates endpoint returns
         // latest-only, so the strip reads the indicator series).
-        const obs = (await indRes.json().catch(() => [])) as MiIndicatorObs[];
-        if (Array.isArray(obs)) {
+        if (Array.isArray(r.data) && sliceFresh("market_indicators", r.changed)) {
+          const obs = r.data;
           const defs = [
             { id: "DPRIME", label: "Prime" },
             { id: "SOFR", label: "SOFR" },
@@ -211,63 +263,93 @@ export default function Overview() {
           }
           setRateStrip(strip);
         }
+        return r.status;
+      })();
+      const candP = (async (): Promise<number> => {
+        const r = await loadDataset<CandidateSummary>(
+          "candidates",
+          "/api/operators/candidates?summary=1"
+        );
+        if (r.data && typeof r.data === "object" && sliceFresh("candidates", r.changed))
+          setCandidateSummary(r.data);
+        return r.status;
+      })();
+      const platP = (async (): Promise<number> => {
+        const r = await loadDataset<Record<string, unknown>>(
+          "overview",
+          "/api/platform/overview"
+        );
+        if (r.data && typeof r.data === "object" && r.data.summary && sliceFresh("overview", r.changed))
+          setPlatformPayload(r.data);
+        return r.status;
+      })();
+      const bdP = (async (): Promise<number> => {
+        const r = await loadDataset<{ metricsByDeal?: Record<string, DealMetricsLite> }>(
+          "bd_bootstrap",
+          "/api/platform/investment-types/bootstrap"
+        );
+        if (r.data && typeof r.data === "object" && r.data.metricsByDeal && sliceFresh("bd_bootstrap", r.changed))
+          setMetricsByDeal(r.data.metricsByDeal);
+        return r.status;
+      })();
+
+      const [meStatus, dealsStatus, , tasksStatus] = await Promise.all([
+        meP, dealsP, execsP, tasksP, ixP, flowP, calP, invP, multP, ratesP,
+        indP, candP, platP, bdP,
+      ]);
+      if (meStatus === 401 || dealsStatus === 401 || tasksStatus === 401) {
+        router.replace("/login");
+        return;
       }
     } finally {
       setLoading(false);
     }
   };
 
-  // Fit-target counts per sector for the density view.
+  // Fit-target counts per sector for the density view. This effect
+  // runs once per mount into fresh state, so a cached payload is
+  // applied whenever one comes back (changed or not); loadDataset
+  // still skips the network fetch when the version is unchanged.
   useEffect(() => {
     let live = true;
     for (const s of FIT_SECTORS) {
-      fetch(`/api/market/companies?sector=${encodeURIComponent(s)}&limit=1`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d: { fitTotal?: number } | null) => {
-          if (live) setFitCounts((c) => ({ ...c, [s]: d?.fitTotal ?? 0 }));
-        })
-        .catch(() => {
-          if (live) setFitCounts((c) => ({ ...c, [s]: 0 }));
-        });
+      loadDataset<{ fitTotal?: number }>(
+        "market_companies",
+        `/api/market/companies?sector=${encodeURIComponent(s)}&limit=1`
+      ).then((r) => {
+        if (live) setFitCounts((c) => ({ ...c, [s]: r.data?.fitTotal ?? 0 }));
+      });
     }
-    fetch("/api/market/tailwind")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (d: {
-          sectors?: { sector: string; score: number | null; whatChanged: string }[];
-        } | null) => {
-          if (!live || !d?.sectors) return;
-          const map: Record<string, { score: number | null; whatChanged: string }> = {};
-          for (const s of d.sectors) map[s.sector] = { score: s.score, whatChanged: s.whatChanged };
-          setTailwind(map);
-        }
-      )
-      .catch(() => {});
-    fetch("/api/market/hospitality-settings")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (d: {
-          meta?: { licenses: number; lastIngestAt: string | null };
-        } | null) => {
-          if (!live || !d?.meta) return;
-          const updated = d.meta.lastIngestAt
-            ? new Date(d.meta.lastIngestAt).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-                timeZone: "America/Phoenix",
-              })
-            : "—";
-          setHospMeta({
-            sources:
-              d.meta.licenses > 0
-                ? "Maricopa Co. food permits · AZ DLLC liquor licenses"
-                : "Maricopa Co. food permits · AZ DLLC liquor (not yet connected)",
-            updated,
-          });
-        }
-      )
-      .catch(() => undefined);
+    loadDataset<{
+      sectors?: { sector: string; score: number | null; whatChanged: string }[];
+    }>("market_tailwind", "/api/market/tailwind").then((r) => {
+      const d = r.data;
+      if (!live || !d?.sectors) return;
+      const map: Record<string, { score: number | null; whatChanged: string }> = {};
+      for (const s of d.sectors) map[s.sector] = { score: s.score, whatChanged: s.whatChanged };
+      setTailwind(map);
+    });
+    loadDataset<{
+      meta?: { licenses: number; lastIngestAt: string | null };
+    }>("hospitality_settings", "/api/market/hospitality-settings").then((r) => {
+      const d = r.data;
+      if (!live || !d?.meta) return;
+      const updated = d.meta.lastIngestAt
+        ? new Date(d.meta.lastIngestAt).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            timeZone: "America/Phoenix",
+          })
+        : "—";
+      setHospMeta({
+        sources:
+          d.meta.licenses > 0
+            ? "Maricopa Co. food permits · AZ DLLC liquor licenses"
+            : "Maricopa Co. food permits · AZ DLLC liquor (not yet connected)",
+        updated,
+      });
+    });
     return () => {
       live = false;
     };
@@ -427,23 +509,23 @@ export default function Overview() {
     const now = new Date();
     const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-    const mondayStr = monday.toLocaleDateString("en-CA");
+    // Candidate contributions come from the summary endpoint's
+    // byStatus counts (missing key = 0) + newThisWeek — the execs /
+    // deals parts above are unchanged.
+    const byStatus = candidateSummary?.byStatus ?? {};
     return {
       interviewing:
         execs.filter((e) => e.stage === "Interview").length +
-        candidates.filter((c) => c.status === "Interviewing").length,
+        (byStatus["Interviewing"] ?? 0),
       paired:
         execs.filter((e) => pairedIds.has(e.id)).length +
-        candidates.filter((c) => c.status === "Paired").length,
+        (byStatus["Paired"] ?? 0),
       newThisWeek: execs.filter((e) => new Date(e.createdAt) >= monday).length,
-      newCandidatesThisWeek: candidates.filter(
-        (c) => c.dateFound && c.dateFound >= mondayStr
-      ).length,
-      verified: candidates.filter((c) => c.status === "Verified").length,
-      awaitingVerification: candidates.filter((c) => c.status === "Candidate")
-        .length,
+      newCandidatesThisWeek: candidateSummary?.newThisWeek ?? 0,
+      verified: byStatus["Verified"] ?? 0,
+      awaitingVerification: byStatus["Candidate"] ?? 0,
     };
-  }, [execs, deals, candidates]);
+  }, [execs, deals, candidateSummary]);
 
   const dismissEvent = async (eventId: string) => {
     setCalEvents((prev) => prev.filter((e) => e.eventId !== eventId));
