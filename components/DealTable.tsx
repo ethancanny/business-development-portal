@@ -7,6 +7,7 @@ import { fmtMoney, uniqueStrings } from "@/lib/format";
 import { dealFocusSector, estimateMultiple, resolveDealValue, type MarketRates } from "@/lib/valuation";
 import CompanyLogo from "@/components/CompanyLogo";
 import SectorChip, { SectorLegend } from "@/components/SectorChip";
+import { OutOfFocusChip, useFocus } from "@/components/focus/FocusProvider";
 import { StageMoveMenu } from "@/components/StageMove";
 import {
   TypeBadge,
@@ -69,6 +70,10 @@ export default function DealTable({
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
+  // Focus & Theme (Oct 26, 2026): badge out-of-focus rows when the
+  // pipeline's "Show out-of-focus" toggle has revealed them. Always
+  // false in All-sectors mode, so Classic rendering is unchanged.
+  const { isOutOfFocus } = useFocus();
 
   const estOf = (d: Deal) => estimateMultiple(d, multiples, rates);
 
@@ -196,6 +201,7 @@ export default function DealTable({
       d.industry ? (
         <span className="inline-flex items-center gap-1.5">
           <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
+          {isOutOfFocus(d.industry) && <OutOfFocusChip />}
         </span>
       ) : (
         "—"
@@ -538,6 +544,7 @@ export default function DealTable({
               {d.industry && (
                 <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
               )}
+              {isOutOfFocus(d.industry) && <OutOfFocusChip />}
               <StageMoveMenu deal={d} bd={bd} onMoved={onStageMoved} />
               <TypeBadge type={d.investmentType} />
             </div>

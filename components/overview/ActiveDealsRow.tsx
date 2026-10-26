@@ -13,8 +13,14 @@
  * scroll-snap; desktop: the row wraps into the main column grid.
  */
 
+import { useState } from "react";
 import Link from "next/link";
 import CompanyMark from "@/components/identity/CompanyMark";
+import {
+  OutOfFocusChip,
+  ShowOutOfFocusToggle,
+  useFocus,
+} from "@/components/focus/FocusProvider";
 import { fmtMoney, fmtMoneyCompact } from "@/lib/format";
 import { INVESTMENT_TYPE_LABELS, type Deal, type Task } from "@/lib/types";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
@@ -78,11 +84,26 @@ export default function ActiveDealsRow({
     day: "2-digit",
   }).format(new Date());
 
-  const active = deals
+  // Focus & Theme §2 (Oct 26, 2026): in Focus mode, deals whose
+  // industry is set and not A&D are out of focus — hidden by default
+  // behind this list's local "Show out-of-focus" toggle, flagged with
+  // the chip when shown. In "all" mode isOutOfFocus is always false,
+  // so the row renders exactly as before.
+  const { isOutOfFocus } = useFocus();
+  const [showOutOfFocus, setShowOutOfFocus] = useState(false);
+
+  const activeAll = deals
     .filter((d) => !TERMINAL.includes(d.stage))
     .map((d) => ({ deal: d, value: resolveDealValue(d, multiples, rates) }))
-    .sort((a, b) => (b.value.value ?? -1) - (a.value.value ?? -1))
-    .slice(0, 10);
+    .sort((a, b) => (b.value.value ?? -1) - (a.value.value ?? -1));
+  const hiddenCount = activeAll.filter(({ deal }) =>
+    isOutOfFocus(deal.industry)
+  ).length;
+  const active = (
+    showOutOfFocus
+      ? activeAll
+      : activeAll.filter(({ deal }) => !isOutOfFocus(deal.industry))
+  ).slice(0, 10);
 
   const nextTaskFor = (dealId: string): Task | undefined =>
     tasks
@@ -95,20 +116,35 @@ export default function ActiveDealsRow({
         <h3 className="font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
           Active deals
         </h3>
-        <Link
-          href="/pipeline"
-          className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
-        >
-          Open pipeline →
-        </Link>
+        <span className="flex items-baseline gap-3">
+          <ShowOutOfFocusToggle
+            show={showOutOfFocus}
+            onChange={setShowOutOfFocus}
+            hiddenCount={hiddenCount}
+          />
+          <Link
+            href="/pipeline"
+            className="text-xs font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]"
+          >
+            Open pipeline →
+          </Link>
+        </span>
       </div>
       {active.length === 0 ? (
-        <p className="text-sm text-caption">
-          No active deals yet.{" "}
-          <Link href="/pipeline?new=deal" className="font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]">
-            Add a deal →
-          </Link>
-        </p>
+        hiddenCount > 0 ? (
+          <p className="text-sm text-caption">
+            No in-focus active deals — {hiddenCount} out-of-focus{" "}
+            {hiddenCount === 1 ? "deal is" : "deals are"} hidden. Turn on
+            “Show out-of-focus” above to see {hiddenCount === 1 ? "it" : "them"}.
+          </p>
+        ) : (
+          <p className="text-sm text-caption">
+            No active deals yet.{" "}
+            <Link href="/pipeline?new=deal" className="font-semibold text-[#8a6f3c] hover:underline dark:text-[#d4b37a]">
+              Add a deal →
+            </Link>
+          </p>
+        )
       ) : (
         <div className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-1 lg:flex-wrap lg:overflow-visible">
           {active.map(({ deal, value }) => {
@@ -149,6 +185,7 @@ export default function ActiveDealsRow({
                     {INVESTMENT_TYPE_LABELS[deal.investmentType ?? "platform_lbo"]}
                   </span>
                   <span className="badge badge-fit">{deal.stage}</span>
+                  {isOutOfFocus(deal.industry) && <OutOfFocusChip />}
                 </span>
                 <span className="mt-2.5 flex items-baseline justify-between gap-2">
                   <span

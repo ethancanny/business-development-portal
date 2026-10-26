@@ -29,6 +29,11 @@ import PersonAvatar from "@/components/PersonAvatar";
 import { StageMoveMenu } from "@/components/StageMove";
 import SectorChip from "@/components/SectorChip";
 import { dealWebsite } from "@/components/DealTable";
+import {
+  OutOfFocusChip,
+  ShowOutOfFocusToggle,
+  useFocus,
+} from "@/components/focus/FocusProvider";
 
 /** Capital stacks (moved here from the Overview, Ethan, Oct 23, 2026):
  * self-fetches the platform summary and renders the same stacks panel
@@ -92,6 +97,10 @@ export default function PipelineView({
   // Investment Types (Step 1): type filter chips + bd bootstrap
   // (config/metrics) + the LBO hold-period column toggle.
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  // Focus & Theme (Oct 26, 2026): out-of-focus deals hide by default
+  // in Focus mode behind this toggle; nothing is deleted or altered.
+  const { focus, isOutOfFocus } = useFocus();
+  const [showOutOfFocus, setShowOutOfFocus] = useState(false);
   const [bd, setBd] = useState<BdBootstrap | null>(null);
   const [holdView, setHoldView] = useState(false);
   const [primeRate, setPrimeRate] = useState<number | null>(null);
@@ -200,11 +209,32 @@ export default function PipelineView({
           (!q || hay.includes(q)) &&
           (!ownerFilter || d.owner === ownerFilter) &&
           (!stageFilter || d.stage === stageFilter) &&
-          (typeFilter === "all" || dealTypeOf(d) === typeFilter)
+          (typeFilter === "all" || dealTypeOf(d) === typeFilter) &&
+          (showOutOfFocus || !isOutOfFocus(d.industry))
         );
       }),
-    [deals, search, ownerFilter, stageFilter, typeFilter]
+    [deals, search, ownerFilter, stageFilter, typeFilter, showOutOfFocus, isOutOfFocus]
   );
+
+  /** Deals the Focus filter is currently hiding (for the toggle's
+   * "(N hidden)" label): those passing every other filter whose
+   * sector sits outside the active focus. */
+  const hiddenOutOfFocusCount = useMemo(() => {
+    if (focus !== "ad" || showOutOfFocus) return 0;
+    return deals.filter((d) => {
+      const q = search.trim().toLowerCase();
+      const hay =
+        `${d.companyName} ${d.industry} ${d.contactName} ${d.contactEmail}`.toLowerCase();
+      return (
+        (!q || hay.includes(q)) &&
+        (!ownerFilter || d.owner === ownerFilter) &&
+        (!stageFilter || d.stage === stageFilter) &&
+        (typeFilter === "all" || dealTypeOf(d) === typeFilter) &&
+        isOutOfFocus(d.industry)
+      );
+    }).length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deals, search, ownerFilter, stageFilter, typeFilter, focus, showOutOfFocus]);
 
   const filteredExecs = useMemo(
     () =>
@@ -249,10 +279,11 @@ export default function PipelineView({
           (!ownerFilter ||
             p.deal.owner === ownerFilter ||
             p.operator.owner === ownerFilter) &&
-          (!stageFilter || p.deal.stage === stageFilter)
+          (!stageFilter || p.deal.stage === stageFilter) &&
+          (showOutOfFocus || !isOutOfFocus(p.deal.industry))
         );
       }),
-    [pairings, search, ownerFilter, stageFilter]
+    [pairings, search, ownerFilter, stageFilter, showOutOfFocus, isOutOfFocus]
   );
 
   /** Kanban columns: the active stage list PLUS any stage a visible
@@ -453,6 +484,13 @@ export default function PipelineView({
                 {holdView ? "◉ Hold-period view" : "○ Hold-period view"}
               </button>
             )}
+            <span className={typeFilter === "platform_lbo" ? "" : "ml-auto"}>
+              <ShowOutOfFocusToggle
+                show={showOutOfFocus}
+                onChange={setShowOutOfFocus}
+                hiddenCount={hiddenOutOfFocusCount}
+              />
+            </span>
           </div>
         )}
 
@@ -503,6 +541,11 @@ export default function PipelineView({
                 {d.industry && (
                   <p className="mt-1.5">
                     <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
+                  </p>
+                )}
+                {isOutOfFocus(d.industry) && (
+                  <p className="mt-1.5">
+                    <OutOfFocusChip />
                   </p>
                 )}
                 <p className="mt-1.5">
@@ -643,6 +686,11 @@ export default function PipelineView({
                     {d.industry && (
                       <p className="mt-1.5">
                         <SectorChip sector={dealFocusSector(d.industry) ?? d.industry} />
+                      </p>
+                    )}
+                    {isOutOfFocus(d.industry) && (
+                      <p className="mt-1.5">
+                        <OutOfFocusChip />
                       </p>
                     )}
                     <div className="mt-2 flex items-center justify-between">

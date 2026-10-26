@@ -12,6 +12,7 @@ import { agingColor, sectorColor } from "@/lib/sector-colors";
 import CompanyLogo from "@/components/CompanyLogo";
 import PersonAvatar from "@/components/PersonAvatar";
 import SectorChip, { StageChip } from "@/components/SectorChip";
+import { OutOfFocusChip, useFocus } from "@/components/focus/FocusProvider";
 import { dealWebsite } from "@/components/DealTable";
 import {
   TypeBadge,
@@ -66,6 +67,9 @@ export function DealCardGrid({
   /** Fired after a stage move through a card's Move-to-stage menu. */
   onStageMoved?: () => void;
 }) {
+  // Focus & Theme (Oct 26, 2026): badge out-of-focus cards revealed
+  // by the pipeline toggle. Inert in All-sectors mode.
+  const { isOutOfFocus } = useFocus();
   if (deals.length === 0) {
     return (
       <p className="card-surface px-3 py-8 text-center text-sm text-slate-400 dark:text-white/40">
@@ -104,6 +108,7 @@ export function DealCardGrid({
                 {d.industry ? (
                   <>
                     <SectorChip sector={sector} />
+                    {isOutOfFocus(d.industry) && <OutOfFocusChip />}
                   </>
                 ) : (
                   <span className="text-xs text-slate-400 dark:text-white/40">Industry —</span>
@@ -227,6 +232,7 @@ export function PairingCardGrid({
   bd?: BdBootstrap | null;
   onStageMoved?: () => void;
 }) {
+  const { isOutOfFocus } = useFocus();
   if (pairings.length === 0) {
     return (
       <p className="card-surface px-3 py-8 text-center text-sm text-slate-400 dark:text-white/40">
@@ -261,6 +267,7 @@ export function PairingCardGrid({
               </h3>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {d.industry && <SectorChip sector={sector} />}
+                {isOutOfFocus(d.industry) && <OutOfFocusChip />}
                 <StageMoveMenu deal={d} bd={bd} onMoved={onStageMoved} />
               </div>
               <p className="tnum mt-2.5 text-base font-semibold text-slate-800 dark:text-[#e8dfc8]">
