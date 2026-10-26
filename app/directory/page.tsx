@@ -288,6 +288,14 @@ export default function Directory() {
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  // "Investors" saved view (Investors & Capital Redesign Step 1,
+  // Oct 25, 2026): people/organizations with a capital profile. The
+  // capital investors list is fetched once when the view is first
+  // opened; its personId set filters the directory list client-side.
+  const [investorsView, setInvestorsView] = useState(false);
+  const [investorIds, setInvestorIds] = useState<Set<string> | null>(null);
+  const [investorIdsTick, setInvestorIdsTick] = useState(0);
+  const investorIdsLoadedRef = useRef(false);
   // View switch (Ethan, Oct 23, 2026): Table is the default; Kanban is
   // the card grid. The choice persists for the session.
   const [view, setView] = useState<"table" | "kanban">("table");
@@ -316,13 +324,64 @@ export default function Directory() {
   const deepLinkPendingRef = useRef(false);
 
   useEffect(() => {
-    const param = new URLSearchParams(window.location.search).get("q");
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get("q");
     if (param) {
       setQ(param);
       deepLinkQRef.current = param;
       deepLinkPendingRef.current = true;
     }
+    // Deep links: ?view=investors opens the Investors saved view;
+    // ?action=add-investor (the Investors & Capital page's "Add
+    // investor" shortcut) opens the view plus the Add form in person
+    // mode (AddRecordModal is person-only by design).
+    if (
+      params.get("view") === "investors" ||
+      params.get("action") === "add-investor"
+    ) {
+      setInvestorsView(true);
+    }
+    if (params.get("action") === "add-investor") {
+      setShowAdd(true);
+    }
   }, []);
+
+  // Capital investors list — fetched once when the Investors view is
+  // first opened (and re-fetched on refresh once loaded). Only the
+  // personId membership set is kept; directory rows render as usual.
+  useEffect(() => {
+    if (!investorsView) return;
+    if (investorIdsLoadedRef.current && investorIdsTick === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/platform/capital/investors?limit=200");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data: unknown = await r.json().catch(() => null);
+        const items =
+          data && typeof data === "object" && Array.isArray((data as { items?: unknown }).items)
+            ? ((data as { items: Array<{ personId?: unknown }> }).items)
+            : [];
+        if (cancelled) return;
+        const ids = new Set<string>();
+        for (const it of items) {
+          if (it && typeof it.personId === "string") ids.add(it.personId);
+        }
+        investorIdsLoadedRef.current = true;
+        setInvestorIds(ids);
+      } catch {
+        // Leave investorIds null so the view shows its loading state
+        // and a later refresh retries; never fake an empty set.
+        if (!cancelled && investorIdsLoadedRef.current) {
+          /* keep the previously loaded set on a failed re-fetch */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [investorsView, investorIdsTick]);
 
   // Server-side list fetch — refetch on filter/search change
   // (search debounced 250ms so typing doesn't hammer the endpoint).
@@ -404,12 +463,33 @@ export default function Directory() {
     setSelectedItem(item);
   };
 
-  const refresh = () => setReloadTick((t) => t + 1);
+  const refresh = () => {
+    setReloadTick((t) => t + 1);
+    // A created/updated capital profile changes view membership.
+    setInvestorIdsTick((t) => t + 1);
+  };
+
+  const selectSavedView = (id: string) => {
+    if (id === "investors") {
+      setInvestorsView(true);
+      setTypeFilter("all");
+    } else {
+      setInvestorsView(false);
+      setTypeFilter(id);
+    }
+  };
 
   const typeViews = [
     { id: "all", label: "All types" },
     ...DIRECTORY_TYPES.map((t) => ({ id: t.id, label: t.label })),
+    { id: "investors", label: "Investors" },
   ];
+
+  // Client-side membership filter for the Investors view.
+  const visibleItems =
+    investorsView && investorIds
+      ? items.filter((i) => investorIds.has(i.id))
+      : items;
 
   return (
     <div>
@@ -470,8 +550,8 @@ export default function Directory() {
           <div className="flex flex-wrap items-center gap-3">
             <SavedViewChips
               views={typeViews}
-              activeId={typeFilter}
-              onSelect={(id) => setTypeFilter(id)}
+              activeId={investorsView ? "investors" : typeFilter}
+              onSelect={selectSavedView}
             />
             <span className="ml-auto flex shrink-0 gap-1.5" role="group" aria-label="Directory view">
               <button
@@ -521,32 +601,75 @@ export default function Directory() {
               message="Directory records could not be loaded — the database may be unavailable. Try again in a moment."
               onRetry={refresh}
             />
-          ) : items.length === 0 ? (
-            <EmptyState
-              title="No records match"
-              message={
-                q.trim() || typeFilter !== "all"
-                  ? "Nothing here matches that search and filter combination. Try clearing the search, or add the contact yourself."
-                  : "No contacts yet. Add the first person, or import a CSV of people."
-              }
-              actionLabel="Add contact"
-              onAction={() => setShowAdd(true)}
-            />
+          ) : investorsView && investorIds === null ? (
+            <div
+              className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              aria-busy="true"
+            >
+              {Array.from({ length: 8 }).map((_, i) => (
+                <CardSkeleton key={i} lines={3} />
+              ))}
+              <span className="sr-only">Loading investors…</span>
+            </div>
+          ) : visibleItems.length === 0 ? (
+            investorsView && investorIds !== null && investorIds.size === 0 ? (
+              <EmptyState
+                title="No investors yet"
+                message="No investors yet — add one from any record's Capital profile tab."
+                actionLabel="Add contact"
+                onAction={() => setShowAdd(true)}
+              />
+            ) : investorsView ? (
+              <EmptyState
+                title="No investors in view"
+                message="None of the loaded contacts has a capital profile matching this view yet. Search for the investor by name, load more contacts, or add a capital profile from any record's Capital profile tab."
+                actionLabel="Add contact"
+                onAction={() => setShowAdd(true)}
+              />
+            ) : (
+              <EmptyState
+                title="No records match"
+                message={
+                  q.trim() || typeFilter !== "all"
+                    ? "Nothing here matches that search and filter combination. Try clearing the search, or add the contact yourself."
+                    : "No contacts yet. Add the first person, or import a CSV of people."
+                }
+                actionLabel="Add contact"
+                onAction={() => setShowAdd(true)}
+              />
+            )
           ) : (
             <>
               <p className="mb-3 text-xs text-slate-400 dark:text-white/40">
-                Showing {items.length} of {total} contact{total === 1 ? "" : "s"}
-                {q.trim() ? ` for “${q.trim()}”` : ""}
+                {investorsView ? (
+                  <>
+                    Showing {visibleItems.length} investor
+                    {visibleItems.length === 1 ? "" : "s"} with a capital
+                    profile
+                    {investorIds
+                      ? ` (${investorIds.size} total)`
+                      : ""}
+                    {items.length < total
+                      ? ` · from ${items.length} of ${total} loaded contacts`
+                      : ""}
+                    {q.trim() ? ` for “${q.trim()}”` : ""}
+                  </>
+                ) : (
+                  <>
+                    Showing {items.length} of {total} contact{total === 1 ? "" : "s"}
+                    {q.trim() ? ` for “${q.trim()}”` : ""}
+                  </>
+                )}
               </p>
               {view === "table" ? (
                 <DirectoryTable
-                  items={items}
+                  items={visibleItems}
                   selectedId={selected ? selected.id : null}
                   onSelect={openRecord}
                 />
               ) : (
                 <DirectoryGrid
-                  items={items}
+                  items={visibleItems}
                   selectedId={selected ? selected.id : null}
                   onSelect={openRecord}
                 />

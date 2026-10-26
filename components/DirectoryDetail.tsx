@@ -17,6 +17,7 @@ import ConfirmDealDialog from "@/components/identity/ConfirmDealDialog";
 import PersonAvatar from "@/components/PersonAvatar";
 import { ErrorState, SkeletonRows } from "@/components/ui";
 import Comments from "@/components/Comments";
+import CapitalProfileTab from "@/components/directory/CapitalProfileTab";
 import {
   DIRECTORY_TYPES,
   KindBadge,
@@ -83,6 +84,10 @@ export default function DirectoryDetail({
   const [error, setError] = useState(false);
   const [payload, setPayload] = useState<DirectoryDetailPayload | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  // Capital profile tab (Investors & Capital Redesign Step 1, Oct 25,
+  // 2026): investors live only in the Directory — every person and
+  // organization record carries this tab alongside its record view.
+  const [tab, setTab] = useState<"record" | "capital">("record");
 
   // Edit form state (seeded from the loaded record).
   const [editing, setEditing] = useState(false);
@@ -123,6 +128,7 @@ export default function DirectoryDetail({
     let cancelled = false;
     setLoading(true);
     setError(false);
+    setTab("record");
     setEditing(false);
     setSaveMsg("");
     setConfirmingDelete(false);
@@ -342,8 +348,35 @@ export default function DirectoryDetail({
           </button>
         </div>
 
+        <div
+          className="flex flex-wrap gap-1.5 border-b border-slate-100 px-5 py-2.5 dark:border-white/10"
+          role="tablist"
+          aria-label="Record sections"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "record"}
+            onClick={() => setTab("record")}
+            className={`chip ${tab === "record" ? "chip-active" : ""}`}
+          >
+            Record
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "capital"}
+            onClick={() => setTab("capital")}
+            className={`chip ${tab === "capital" ? "chip-active" : ""}`}
+          >
+            Capital profile
+          </button>
+        </div>
+
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          {loading ? (
+          {tab === "capital" ? (
+            <CapitalProfileTab recordId={id} kind={kind} onChanged={onChanged} />
+          ) : loading ? (
             <SkeletonRows rows={6} />
           ) : error || !record ? (
             <ErrorState
