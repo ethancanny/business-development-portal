@@ -299,8 +299,9 @@ const accIdOfDetails = (detailsJson: string): string => {
 
 /** Import a registry snapshot. With reset=true the source's existing rows
  * are replaced wholesale (triage status and first_seen are preserved by
- * dedup key); without it, rows upsert by (source, dedup_key). Used by the
- * weekly spine builders (SAM.gov, AZ ROC, NPPES, EPA FRS). */
+ * dedup key + sector); without it, rows upsert by (source, dedup_key,
+ * sector). Used by the weekly spine builders (SAM.gov, AZ ROC, NPPES,
+ * EPA FRS). */
 /* Hospitality fit thresholds are portal SETTINGS (Ethan, Oct 15, 2026 —
  * §2 of the hospitality build): stored in mi_hospitality_state by the
  * hospitality settings API, defaulting to 3 locations / $3M hotel-venue
@@ -1100,16 +1101,25 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
   await refreshChainSettings();
   const db = sql();
   const filtered = rows.filter((r) => r && r.dedupKey && r.name && r.source === source);
-  // Dedupe by dedupKey (last occurrence wins). A multi-row
+  // Row identity is (dedupKey, sector): since Fix A (Oct 16, 2026) the
+  // table is unique on (source, dedup_key, sector), so one dedup key can
+  // legitimately appear once per sector in a single payload (the SAM
+  // leftover re-import carries both sector slices of dual-sector
+  // recipients). Dedupe by that pair (last occurrence wins) — a multi-row
   // INSERT ... ON CONFLICT DO UPDATE aborts the entire statement when the
-  // same (source, dedup_key) pair appears twice in one VALUES list
-  // ("ON CONFLICT DO UPDATE command cannot affect row a second time") —
-  // the failure behind the Oct 9, 2026 consolidation data loss.
+  // same conflict target appears twice in one VALUES list ("ON CONFLICT
+  // DO UPDATE command cannot affect row a second time") — the failure
+  // behind the Oct 9, 2026 consolidation data loss. Keying this dedupe by
+  // dedupKey alone silently dropped the first sector's slice of every
+  // dual-sector pair in a multi-sector payload (Fix A follow-up,
+  // Oct 26, 2026: 16 A&D slices lost in one SAM leftover import).
+  const rowKey = (dedupKey: string, sector: string): string => `${dedupKey}\u0001${sector}`;
   const byKey: Record<string, CompanyInput> = {};
   const keyOrder: string[] = [];
   for (const r of filtered) {
-    if (!byKey[r.dedupKey]) keyOrder.push(r.dedupKey);
-    byKey[r.dedupKey] = r;
+    const k = rowKey(r.dedupKey, r.sector);
+    if (!byKey[k]) keyOrder.push(k);
+    byKey[k] = r;
   }
   const clean = keyOrder.map((k) => byKey[k]);
   for (const r of clean) {
@@ -1194,20 +1204,23 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     // so one registry feeding several sector spines never wipes the others.
     const sectors = Array.from(new Set(clean.map((r) => r.sector).filter(Boolean)));
     const existing = sectors.length
-      ? await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt, is_institutional, institutional_reason, institutional_suspect, institutional_exempt FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
-      : await db`SELECT dedup_key, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt, is_institutional, institutional_reason, institutional_suspect, institutional_exempt FROM mi_companies WHERE source = ${source}`;
-    const statusByKey = new Map(existing.map((r) => [str(r.dedup_key), str(r.status)]));
-    const firstSeenByKey = new Map(existing.map((r) => [str(r.dedup_key), r.first_seen]));
-    const dateAddedByKey = new Map(existing.map((r) => [str(r.dedup_key), r.date_added]));
-    const dismissedAtByKey = new Map(existing.map((r) => [str(r.dedup_key), r.dismissed_at]));
-    const dismissedReasonByKey = new Map(existing.map((r) => [str(r.dedup_key), str(r.dismissed_reason)]));
+      ? await db`SELECT dedup_key, sector, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt, is_institutional, institutional_reason, institutional_suspect, institutional_exempt FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
+      : await db`SELECT dedup_key, sector, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt, is_institutional, institutional_reason, institutional_suspect, institutional_exempt FROM mi_companies WHERE source = ${source}`;
+    // Carry-over is keyed by (dedup_key, sector) like the dedupe above:
+    // a dual-sector pair carries each sector slice's OWN triage state
+    // through a reset, never its twin's (Fix A follow-up, Oct 26, 2026).
+    const statusByKey = new Map(existing.map((r) => [rowKey(str(r.dedup_key), str(r.sector)), str(r.status)]));
+    const firstSeenByKey = new Map(existing.map((r) => [rowKey(str(r.dedup_key), str(r.sector)), r.first_seen]));
+    const dateAddedByKey = new Map(existing.map((r) => [rowKey(str(r.dedup_key), str(r.sector)), r.date_added]));
+    const dismissedAtByKey = new Map(existing.map((r) => [rowKey(str(r.dedup_key), str(r.sector)), r.dismissed_at]));
+    const dismissedReasonByKey = new Map(existing.map((r) => [rowKey(str(r.dedup_key), str(r.sector)), str(r.dismissed_reason)]));
     // Chain state carried through a reset: an exemption is permanent,
     // and a dismissed row keeps its chain fields exactly (detection
     // never writes dismissed records). Everyone else is re-judged by
     // the fresh detection above.
     const chainCarryByKey = new Map(
       existing.map((r) => [
-        str(r.dedup_key),
+        rowKey(str(r.dedup_key), str(r.sector)),
         {
           isChain: r.is_chain === true,
           reason: str(r.chain_reason),
@@ -1221,7 +1234,7 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     // keep their fields exactly; everyone else is re-judged.
     const instCarryByKey = new Map(
       existing.map((r) => [
-        str(r.dedup_key),
+        rowKey(str(r.dedup_key), str(r.sector)),
         {
           isInstitutional: r.is_institutional === true,
           reason: str(r.institutional_reason),
@@ -1236,15 +1249,16 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
       await db`DELETE FROM mi_companies WHERE source = ${source}`;
     }
     for (const r of clean) {
-      (r as CompanyInput & { _status?: string })._status = statusByKey.get(r.dedupKey);
-      (r as CompanyInput & { _firstSeen?: unknown })._firstSeen = firstSeenByKey.get(r.dedupKey);
-      (r as CompanyInput & { _dateAdded?: unknown })._dateAdded = dateAddedByKey.get(r.dedupKey);
-      (r as CompanyInput & { _dismissedAt?: unknown })._dismissedAt = dismissedAtByKey.get(r.dedupKey);
-      (r as CompanyInput & { _dismissedReason?: string })._dismissedReason = dismissedReasonByKey.get(r.dedupKey);
+      const k = rowKey(r.dedupKey, r.sector);
+      (r as CompanyInput & { _status?: string })._status = statusByKey.get(k);
+      (r as CompanyInput & { _firstSeen?: unknown })._firstSeen = firstSeenByKey.get(k);
+      (r as CompanyInput & { _dateAdded?: unknown })._dateAdded = dateAddedByKey.get(k);
+      (r as CompanyInput & { _dismissedAt?: unknown })._dismissedAt = dismissedAtByKey.get(k);
+      (r as CompanyInput & { _dismissedReason?: string })._dismissedReason = dismissedReasonByKey.get(k);
       (r as CompanyInput & { _chainCarried?: { isChain: boolean; reason: string; suspect: boolean; exempt: boolean } })._chainCarried =
-        chainCarryByKey.get(r.dedupKey);
+        chainCarryByKey.get(k);
       (r as CompanyInput & { _instCarried?: { isInstitutional: boolean; reason: string; suspect: boolean; exempt: boolean } })._instCarried =
-        instCarryByKey.get(r.dedupKey);
+        instCarryByKey.get(k);
     }
   }
   const CHUNK = 300;
