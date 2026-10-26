@@ -8,6 +8,7 @@ import {
   str,
 } from "../platform/db";
 import { publishEvent } from "../platform/events";
+import { bumpDatasets } from "../platform/versions";
 import { ensureDirectorySchema } from "./schema";
 
 /**
@@ -498,6 +499,11 @@ export async function updateRelationship(
   );
   const saved = await getRelationship(kind, id);
   if (!saved) throw new Error("relationship profile was not saved");
+  // Only a stage change publishes an event (stage_changed above);
+  // every other profile write bypasses publishEvent — bump directly
+  // (this also covers the bulk assign_owner / add_tag / set_tier
+  // actions, which compose this function).
+  await bumpDatasets("directory");
   return saved;
 }
 
@@ -1213,6 +1219,9 @@ export async function updateInteraction(
   );
   const saved = await getInteractionById(id);
   if (!saved) throw new Error("interaction not found after update");
+  // Interaction updates publish no event (creation publishes
+  // interaction_logged; edits don't) — bump directly.
+  await bumpDatasets("directory");
   return saved;
 }
 
@@ -1241,6 +1250,8 @@ export async function deleteInteraction(id: string, actor = ""): Promise<boolean
       p.catch((err) => console.error("[crm] recount after interaction delete failed", err))
     )
   );
+  // Interaction deletes publish no event — bump directly.
+  await bumpDatasets("directory");
   return true;
 }
 
@@ -1927,6 +1938,10 @@ export async function mergeDirectoryRecords(
     actor,
   });
   await recountEntitySummaries(kind, keeperId).catch(() => undefined);
+  // Bump AFTER the post-publish recount so the version clients see
+  // post-merge covers the recounted summaries too (the publish-time
+  // event bump alone would precede them).
+  await bumpDatasets("directory");
   return { movedCounts };
 }
 
@@ -1971,6 +1986,7 @@ export async function createList(name: string, actor = ""): Promise<CrmList> {
   await db`
     INSERT INTO directory.lists (id, name, created_by)
     VALUES (${id}, ${trimmed}, ${actor})`;
+  await bumpDatasets("directory");
   return { id, name: trimmed, createdBy: actor, createdAt: new Date().toISOString(), memberCount: 0 };
 }
 
@@ -1994,6 +2010,9 @@ export async function addListMembers(
       RETURNING entity_id`;
     added += rows.length;
   }
+  // Covers the bulk add_to_list action and the list-members route,
+  // which compose this function; neither publishes an event.
+  await bumpDatasets("directory");
   return { added };
 }
 
