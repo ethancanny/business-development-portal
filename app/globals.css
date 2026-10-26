@@ -584,6 +584,142 @@ textarea:focus-visible,
   color: #e8dfc8 !important;
 }
 
+/* ============================================================
+   AEROSPACE DESERT THEME (Focus & Theme, Oct 26, 2026).
+   A named theme layered over the SAME token names — every rule is
+   scoped under [data-theme="desert"], so the Classic theme (no
+   attribute / data-theme="classic") renders exactly as before.
+   Palette per Ethan's spec: midnight navy #0A1A2F, deep navy
+   #12284A, dusk blue #3B5B84, sandstone ivory page, desert sand
+   #D9C7A3, copper #B8643A as the sunset accent for highlights and
+   selected states, the existing gold kept for primary accents and
+   rules, contrail white for text on dark. Copper text/fill shades
+   are darkened a step where they carry small text, to hold WCAG AA
+   (verified numerically in the build checkpoint).
+   ============================================================ */
+[data-theme="desert"] {
+  --navy-950: #050f1e;
+  --navy-900: #0a1a2f; /* midnight navy */
+  --navy-800: #12284a; /* deep navy */
+  --navy-700: #1b3560;
+  --navy-600: #3b5b84; /* dusk blue */
+  --navy-100: #dce4ee;
+  --navy-50: #edf1f6;
+  --copper: #b8643a;
+  --copper-deep: #a05228; /* copper darkened for AA text/fills on light */
+  --copper-light: #d08a5a;
+  --sand: #d9c7a3;
+  --cream: #f6efe0;
+  --ink: #14243d;
+  --caption: #46586e; /* 6.4:1 on the sandstone page background */
+  --page-bg: linear-gradient(180deg, #fbf7ec 0%, #f6efe0 45%, #efe4cc 100%);
+  --border-card: rgba(10, 26, 47, 0.09);
+  --shadow-card: 0 1px 2px rgba(10, 26, 47, 0.05), 0 12px 32px -20px rgba(10, 26, 47, 0.3);
+  --shadow-lift: 0 2px 4px rgba(10, 26, 47, 0.06), 0 20px 40px -20px rgba(10, 26, 47, 0.38);
+  --shadow-nav: 0 10px 36px -6px rgba(10, 26, 47, 0.3), 0 2px 10px rgba(10, 26, 47, 0.15);
+  --shadow-pop: 0 16px 44px -12px rgba(10, 26, 47, 0.38), 0 3px 10px rgba(10, 26, 47, 0.13);
+  /* fit badge darkened a step vs Classic so its 11px text holds AA
+     (5.15:1); Classic's own pair (3.98:1) is pre-existing and the
+     Classic theme is not touched by this layer. */
+  --badge-fit-bg: #f5ecd9; --badge-fit-fg: #7a5e30;
+  --badge-neutral-bg: #e9e2cf; --badge-neutral-fg: #46586e;
+}
+[data-theme="desert"].dark {
+  --caption: rgba(245, 241, 230, 0.74); /* contrail white, ~7.4:1 on deep navy */
+  --page-bg: linear-gradient(180deg, #0e2140 0%, #0a1a2f 48%, #050f1e 100%);
+  --surface: #12284a;
+  --ink: #f2ecdd; /* contrail white */
+  --border-card: rgba(255, 255, 255, 0.1);
+  --badge-fit-bg: rgba(184, 151, 90, 0.18); --badge-fit-fg: #e6cf9e;
+  --badge-neutral-bg: rgba(255, 255, 255, 0.1); --badge-neutral-fg: #ccd6e4;
+}
+/* Selected states carry the copper sunset accent in Desert. */
+[data-theme="desert"] .chip-active {
+  background-color: var(--copper-deep);
+  color: #ffffff;
+  box-shadow: 0 4px 14px -6px rgba(160, 82, 40, 0.6);
+}
+[data-theme="desert"] .chip-active:hover {
+  background-color: var(--copper-deep);
+  color: #ffffff;
+}
+[data-theme="desert"].dark .chip-active {
+  /* Solid copper-deep, not a gradient: no single text color holds
+     AA across the full copper ramp, and white on #A05228 is 5.63:1. */
+  background-color: var(--copper-deep);
+  color: #ffffff;
+  box-shadow: 0 4px 14px -6px rgba(0, 0, 0, 0.6);
+}
+[data-theme="desert"].dark .chip-active:hover {
+  background-color: var(--copper-deep);
+  color: #ffffff;
+}
+/* Stronger focus ring under Desert (copper-deep = 4.9:1 on the
+   sandstone page background, vs gold's 2.6:1 non-text contrast). */
+[data-theme="desert"] a:focus-visible,
+[data-theme="desert"] button:focus-visible,
+[data-theme="desert"] input:focus-visible,
+[data-theme="desert"] select:focus-visible,
+[data-theme="desert"] textarea:focus-visible,
+[data-theme="desert"] [tabindex]:focus-visible {
+  outline-color: var(--copper-deep);
+}
+[data-theme="desert"] ::selection {
+  background: rgba(184, 100, 58, 0.32);
+}
+/* Table identity under Desert: midnight header, gold rule kept. */
+[data-theme="desert"] .tbl-grad thead th {
+  background-color: #0a1a2f;
+}
+[data-theme="desert"].dark .tbl-grad thead th {
+  background-color: #12284a;
+}
+[data-theme="desert"].dark .card-surface {
+  background-color: #12284a;
+}
+[data-theme="desert"].dark :where(input, select, textarea) {
+  background-color: #0a1a2f;
+}
+
+/* Desert motifs (spec §3): present in markup, rendered ONLY under
+   the Desert theme (and the star field only in its dark mode) so
+   Classic is untouched. All motifs are small inline SVGs — see
+   components/theme/DesertMotifs.tsx. */
+.motif { display: none; }
+[data-theme="desert"] .motif { display: block; }
+.motif-dark { display: none; }
+[data-theme="desert"].dark .motif-dark { display: block; }
+
+/* Instrument tick marks + corner brackets on key metric tiles
+   (Desert only): four copper corner ticks drawn as background
+   gradients — no extra markup, no layout shift. */
+[data-theme="desert"] .tile-brackets {
+  background-image:
+    linear-gradient(var(--copper), var(--copper)),
+    linear-gradient(var(--copper), var(--copper)),
+    linear-gradient(var(--copper), var(--copper)),
+    linear-gradient(var(--copper), var(--copper)),
+    linear-gradient(var(--copper), var(--copper)),
+    linear-gradient(var(--copper), var(--copper)),
+    linear-gradient(var(--copper), var(--copper)),
+    linear-gradient(var(--copper), var(--copper));
+  background-repeat: no-repeat;
+  background-size: 10px 2px, 2px 10px, 10px 2px, 2px 10px, 10px 2px, 2px 10px, 10px 2px, 2px 10px;
+  background-position:
+    left 6px top 6px, left 6px top 6px,
+    right 6px top 6px, right 6px top 6px,
+    left 6px bottom 6px, left 6px bottom 6px,
+    right 6px bottom 6px, right 6px bottom 6px;
+}
+
+/* Mono/tabular data figures (spec §3 typography): instrument-grade
+   numbers for metric values and table figures. */
+.mono-num {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
 /* Reduced motion (spec §7/§9): every animation and transition in
    the app collapses; smooth scrolling turns off. Component-level
    gates (count-up, pill slide) also check matchMedia in JS. */

@@ -21,6 +21,7 @@ import {
 } from "recharts";
 import { useTheme } from "@/components/ThemeProvider";
 import { fmtMoney, fmtMoneyCompact } from "@/lib/format";
+import { chartPalette } from "@/lib/chart-palette";
 
 export interface FinChartPoint {
   label: string;
@@ -37,7 +38,8 @@ function fmtPct(v: number | null | undefined): string {
 }
 
 export function FinancialChart({ data }: { data: FinChartPoint[] }) {
-  const { theme } = useTheme();
+  const { theme, namedTheme } = useTheme();
+  const pal = chartPalette(namedTheme);
   const dark = theme === "dark";
   const grid = dark ? "rgba(255,255,255,0.08)" : "#e2e8f0";
   const tick = dark ? "rgba(255,255,255,0.55)" : "#64748b";
@@ -72,10 +74,10 @@ export function FinancialChart({ data }: { data: FinChartPoint[] }) {
             ]}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill="#0d1f3c" radius={[2, 2, 0, 0]} />
-          <Bar yAxisId="left" dataKey="ebitda" name="EBITDA" fill="#b8975a" radius={[2, 2, 0, 0]} />
-          <Line yAxisId="right" type="monotone" dataKey="grossMarginPct" name="Gross margin %" stroke="#54708f" strokeWidth={2} dot={false} />
-          <Line yAxisId="right" type="monotone" dataKey="ebitdaMarginPct" name="EBITDA margin %" stroke="#8a6f3c" strokeWidth={2} dot={false} />
+          <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill={pal.primary} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="left" dataKey="ebitda" name="EBITDA" fill={pal.accent} radius={[2, 2, 0, 0]} />
+          <Line yAxisId="right" type="monotone" dataKey="grossMarginPct" name="Gross margin %" stroke={pal.line1} strokeWidth={2} dot={false} />
+          <Line yAxisId="right" type="monotone" dataKey="ebitdaMarginPct" name="EBITDA margin %" stroke={pal.line2} strokeWidth={2} dot={false} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

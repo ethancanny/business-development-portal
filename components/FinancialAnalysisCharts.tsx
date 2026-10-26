@@ -29,14 +29,21 @@ import {
 } from "recharts";
 import { useTheme } from "@/components/ThemeProvider";
 import { fmtDate, fmtMoney, fmtMoneyCompact } from "@/lib/format";
+import { chartPalette, CHART_PALETTES, type ChartPalette } from "@/lib/chart-palette";
 
 /* ---------------- shared ---------------- */
 
 function useChartTheme() {
-  const { theme } = useTheme();
+  const { theme, namedTheme } = useTheme();
   const dark = theme === "dark";
   return {
     dark,
+    /** Named-theme series palette (Focus & Theme, Oct 26, 2026):
+     * classic returns the exact colors these charts shipped with;
+     * desert swaps the navy/gold pair for the dusk ramp. Semantic
+     * colors (teal, red) are deliberately NOT in the palette — they
+     * stay consistent across themes. */
+    pal: chartPalette(namedTheme),
     grid: dark ? "rgba(255,255,255,0.08)" : "#e2e8f0",
     tick: dark ? "rgba(255,255,255,0.55)" : "#64748b",
     tooltipStyle: {
@@ -113,10 +120,10 @@ export function TrendChart({
             ]}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill="#0d1f3c" radius={[2, 2, 0, 0]} />
-          <Bar yAxisId="left" dataKey="ebitda" name="EBITDA" fill="#b8975a" radius={[2, 2, 0, 0]} />
-          <Line yAxisId="right" type="monotone" dataKey="grossMarginPct" name="Gross margin %" stroke="#54708f" strokeWidth={2} dot={false} />
-          <Line yAxisId="right" type="monotone" dataKey="ebitdaMarginPct" name="EBITDA margin %" stroke="#8a6f3c" strokeWidth={2} dot={false} />
+          <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill={t.pal.primary} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="left" dataKey="ebitda" name="EBITDA" fill={t.pal.accent} radius={[2, 2, 0, 0]} />
+          <Line yAxisId="right" type="monotone" dataKey="grossMarginPct" name="Gross margin %" stroke={t.pal.line1} strokeWidth={2} dot={false} />
+          <Line yAxisId="right" type="monotone" dataKey="ebitdaMarginPct" name="EBITDA margin %" stroke={t.pal.line2} strokeWidth={2} dot={false} />
           {points
             .filter((p) => p.periodEnd && flagged.has(p.periodEnd))
             .map((p) => {
@@ -163,10 +170,11 @@ function waterfall(
   start: number,
   items: { label: string; amount: number }[],
   endLabel: string,
-  end: number | null
+  end: number | null,
+  pal: ChartPalette = CHART_PALETTES.classic
 ): WaterfallDatum[] {
   const rows: WaterfallDatum[] = [
-    { name: startLabel, base: 0, value: start, fill: "#0d1f3c", total: start },
+    { name: startLabel, base: 0, value: start, fill: pal.primary, total: start },
   ];
   let running = start;
   for (const item of items) {
@@ -181,7 +189,7 @@ function waterfall(
     running += item.amount;
   }
   const final = end ?? running;
-  rows.push({ name: endLabel, base: 0, value: final, fill: "#b8975a", total: final });
+  rows.push({ name: endLabel, base: 0, value: final, fill: pal.accent, total: final });
   return rows;
 }
 
@@ -195,7 +203,8 @@ export function MarginBridgeChart({ bridge }: { bridge: MarginBridgeData }) {
     bridge.reportedEbitda,
     bridge.items,
     "Adjusted EBITDA",
-    bridge.adjustedEbitda
+    bridge.adjustedEbitda,
+    t.pal
   );
   return (
     <div className="h-64">
@@ -287,15 +296,15 @@ export function WorkingCapitalChart({
               yAxisId="left"
               y1={peg.low as number}
               y2={peg.high as number}
-              fill="#b8975a"
+              fill={t.pal.accent}
               fillOpacity={0.18}
-              stroke="#b8975a"
+              stroke={t.pal.accent}
               strokeOpacity={0.4}
               label={{ value: "Peg band", fontSize: 11, fill: t.tick, position: "insideTopLeft" }}
             />
           )}
-          <Bar yAxisId="left" dataKey="wc" name="Working capital" fill="#0d1f3c" radius={[2, 2, 0, 0]} />
-          <Line yAxisId="right" type="monotone" dataKey="wcPct" name="WC % of revenue" stroke="#b8975a" strokeWidth={2} dot={false} />
+          <Bar yAxisId="left" dataKey="wc" name="Working capital" fill={t.pal.primary} radius={[2, 2, 0, 0]} />
+          <Line yAxisId="right" type="monotone" dataKey="wcPct" name="WC % of revenue" stroke={t.pal.accent} strokeWidth={2} dot={false} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>
@@ -351,8 +360,8 @@ export function MonthlyChart({ data: raw }: { data: MonthlyPoint[] }) {
             ]}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill="#0d1f3c" radius={[2, 2, 0, 0]} />
-          <Bar yAxisId="left" dataKey="ebitda" name="EBITDA" fill="#b8975a" radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill={t.pal.primary} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="left" dataKey="ebitda" name="EBITDA" fill={t.pal.accent} radius={[2, 2, 0, 0]} />
           <Line yAxisId="right" type="monotone" dataKey="seasonalityIndex" name="Seasonality index" stroke="#2f7f79" strokeWidth={2} dot={false} />
         </ComposedChart>
       </ResponsiveContainer>
@@ -450,11 +459,17 @@ export function BsCompositionChart({ data: raw }: { data: BsCompositionPoint[] }
     <div className="grid gap-4 lg:grid-cols-2">
       <div>
         <p className="micro-label mb-1.5">Assets mix</p>
-        {chart(assets as unknown as Record<string, unknown>[], ASSET_SERIES)}
+        {chart(
+          assets as unknown as Record<string, unknown>[],
+          ASSET_SERIES.map((s) => (s.fill === "#0d1f3c" ? { ...s, fill: t.pal.primary } : s))
+        )}
       </div>
       <div>
         <p className="micro-label mb-1.5">Liabilities &amp; equity mix</p>
-        {chart(liab as unknown as Record<string, unknown>[], LIAB_SERIES)}
+        {chart(
+          liab as unknown as Record<string, unknown>[],
+          LIAB_SERIES.map((s) => (s.fill === "#0d1f3c" ? { ...s, fill: t.pal.primary } : s))
+        )}
       </div>
     </div>
   );
@@ -479,8 +494,8 @@ export interface CashConversionPoint {
 export function CashConversionChart({ data }: { data: CashConversionPoint }) {
   const t = useChartTheme();
   const steps: { name: string; level: number | null; fill: string }[] = [
-    { name: "EBITDA", level: data.ebitda, fill: "#b8975a" },
-    { name: "CFO", level: data.cfo, fill: "#0d1f3c" },
+    { name: "EBITDA", level: data.ebitda, fill: t.pal.accent },
+    { name: "CFO", level: data.cfo, fill: t.pal.primary },
     { name: "FCF (CFO + CFI)", level: data.fcf, fill: "#2f7f79" },
   ];
   // Waterfall segments between consecutive levels.
