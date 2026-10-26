@@ -225,8 +225,8 @@ export async function listDirectory(
           WHERE tg2.entity_kind = 'person' AND tg2.entity_id = p.id
             AND lower(tg2.tag) = lower(${tagParam})))
         AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
-        AND (${lastTouchBefore} = '' OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
-        AND (${lastTouchAfter} = '' OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz)
+        AND (${lastTouchBefore}::timestamptz IS NULL OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
+        AND (${lastTouchAfter}::timestamptz IS NULL OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz)
       UNION ALL
       SELECT 'organization'::text AS kind, o.id, o.name, ''::text AS title,
         o.kind AS core_kind, ''::text AS email, ''::text AS phone,
@@ -266,8 +266,8 @@ export async function listDirectory(
           WHERE tg2.entity_kind = 'organization' AND tg2.entity_id = o.id
             AND lower(tg2.tag) = lower(${tagParam})))
         AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
-        AND (${lastTouchBefore} = '' OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
-        AND (${lastTouchAfter} = '' OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz)
+        AND (${lastTouchBefore}::timestamptz IS NULL OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
+        AND (${lastTouchAfter}::timestamptz IS NULL OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz)
     ) u
     ORDER BY
       CASE WHEN ${sortParam} = 'name' THEN u.name END ASC,
