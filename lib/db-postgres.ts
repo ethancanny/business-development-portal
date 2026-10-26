@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { bumpDatasets } from "./platform/versions";
 import type {
   ActivityEvent,
   Attachment,
@@ -604,6 +605,7 @@ export async function saveDeals(deals: Deal[]): Promise<void> {
         )`
     ),
   ]);
+  await bumpDatasets("deals", "bd_bootstrap");
 }
 
 // --- Executives ---
@@ -650,6 +652,7 @@ export async function saveExecutives(execs: Executive[]): Promise<void> {
         )`
     ),
   ]);
+  await bumpDatasets("executives");
 }
 
 // --- Tasks ---
@@ -709,6 +712,7 @@ export async function saveTasks(tasks: Task[]): Promise<void> {
         )`
     ),
   ]);
+  await bumpDatasets("tasks", "badge", "directory");
 }
 
 // --- Activity ---
@@ -836,6 +840,7 @@ export async function saveInteractions(
         )`
     ),
   ]);
+  await bumpDatasets("interactions");
 }
 
 // --- Attachments ---
@@ -924,4 +929,5 @@ export async function saveDealFlow(items: DealFlowItem[]): Promise<void> {
         )`
     ),
   ]);
+  await bumpDatasets("dealflow", "badge");
 }
