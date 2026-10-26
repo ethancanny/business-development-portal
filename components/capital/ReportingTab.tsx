@@ -9,7 +9,7 @@
  * never filled in here.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, EmptyState, ErrorState, SkeletonRows, StatTile } from "@/components/ui";
 import {
   API,
@@ -33,6 +33,51 @@ import {
   type ReportTemplate,
   type ReportTotals,
 } from "@/components/capital/types";
+import {
+  fetchBundle,
+  typeKeyOf,
+  typeLabelOf,
+  type WorkspaceBundle,
+} from "@/components/capital/workspace/shared";
+
+interface DeliveryRow {
+  key: string;
+  investorName: string;
+  what: string;
+  sentAt: string;
+  opened: string | null;
+}
+
+/** Delivery records, IF the reporting payload carries any
+ * (deliveries / deliveryLog / communications / sends). Returns []
+ * when the payload has none — the tab says so rather than
+ * inventing a log. */
+function normalizeDeliveries(data: ReportingData & Record<string, unknown>): DeliveryRow[] {
+  const raw =
+    (data as Record<string, unknown>).deliveries ??
+    (data as Record<string, unknown>).deliveryLog ??
+    (data as Record<string, unknown>).communications ??
+    (data as Record<string, unknown>).sends;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((r, i) => {
+    const rec = (r ?? {}) as Record<string, unknown>;
+    const openedRaw = rec.openedAt ?? rec.opened_at ?? rec.opened;
+    return {
+      key: String(rec.id ?? i),
+      investorName: String(rec.investorName ?? rec.investorPersonId ?? "Investor"),
+      what: String(rec.what ?? rec.subject ?? rec.templateName ?? rec.kind ?? "Report"),
+      sentAt: String(rec.sentAt ?? rec.sent_at ?? rec.createdAt ?? rec.asOf ?? ""),
+      opened:
+        openedRaw === true
+          ? "Yes"
+          : openedRaw === false
+            ? "No"
+            : typeof openedRaw === "string" && openedRaw
+              ? openedRaw
+              : null,
+    };
+  });
+}
 
 interface ReportingData {
   entries: ReportEntry[];
@@ -102,6 +147,12 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
   const [adding, setAdding] = useState(false);
   const [busyId, setBusyId] = useState("");
 
+  // Redesign Step 1: raise bundle for recipient selection + type,
+  // and any delivery records the reporting payload carries.
+  const [bundle, setBundle] = useState<WorkspaceBundle | null>(null);
+  const [recipients, setRecipients] = useState<Set<string> | null>(null);
+  const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
+
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
   const [tplForm, setTplForm] = useState({ name: "", kind: "investor_update", body: "" });
   const [creatingTpl, setCreatingTpl] = useState(false);
@@ -118,6 +169,7 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
         entries: Array.isArray(d.entries) ? d.entries : [],
         totals: d.totals ?? { called: 0, distributed: 0, navLatest: 0, byInvestor: null },
       });
+      setDeliveries(normalizeDeliveries(d as ReportingData & Record<string, unknown>));
     } catch {
       setLoadFailed(true);
     } finally {
@@ -140,6 +192,62 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
     void load();
     void loadTemplates();
   }, [load, loadTemplates]);
+
+  useEffect(() => {
+    let live = true;
+    fetchBundle(dealId)
+      .then((b) => {
+        if (live) setBundle(b);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [dealId]);
+
+  /** Raise participants (unique commitment investors) — the
+   * recipient list defaults to all of them. */
+  const participants = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const c of bundle?.commitments ?? []) {
+      if (c.investorPersonId && !seen.has(c.investorPersonId)) {
+        seen.set(c.investorPersonId, c.investorName || c.investorPersonId);
+      }
+    }
+    return Array.from(seen.entries()).map(([personId, name]) => ({ personId, name }));
+  }, [bundle]);
+
+  useEffect(() => {
+    if (bundle && recipients === null) {
+      setRecipients(new Set(participants.map((p) => p.personId)));
+    }
+  }, [bundle, participants, recipients]);
+
+  /** Type-flavored ordering: templates whose name/kind mentions the
+   * deal's type come first and are labeled as matching it. */
+  const typeKey = typeKeyOf(bundle);
+  const typeLabel = typeLabelOf(bundle);
+  const templateMatchesType = useCallback(
+    (t: ReportTemplate) => {
+      if (!bundle) return false;
+      const hay = `${t.name} ${t.kind}`.toLowerCase();
+      const tokens = [
+        typeKey,
+        typeLabel.toLowerCase(),
+        ...typeKey.split("_"),
+        ...typeLabel.toLowerCase().split(/\s+/),
+      ].filter((tok) => tok.length >= 3);
+      return tokens.some((tok) => hay.includes(tok));
+    },
+    [bundle, typeKey, typeLabel]
+  );
+  const sortedTemplates = useMemo(() => {
+    const withFlag = templates.map((t) => ({ t, match: templateMatchesType(t) }));
+    return [
+      ...withFlag.filter((x) => x.match).map((x) => x.t),
+      ...withFlag.filter((x) => !x.match).map((x) => x.t),
+    ];
+  }, [templates, templateMatchesType]);
 
   useEffect(() => {
     let live = true;
@@ -221,6 +329,16 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
     setRendering(true);
     setError("");
     try {
+      // The existing render endpoint renders for ONE investor or the
+      // whole deal — there is no multi-recipient send endpoint, so
+      // the recipient selection is honored exactly when it resolves
+      // to a single investor (or the explicit pick below); otherwise
+      // the render is whole-deal. No send API is invented here.
+      const selected = recipients ? Array.from(recipients) : [];
+      const effectiveInvestorId =
+        renderSel.investorPersonId ||
+        (selected.length === 1 ? selected[0] : "") ||
+        "";
       const d = await api<{ text: string; values: Record<string, unknown> }>(
         `${API}/report-templates/render`,
         {
@@ -228,7 +346,7 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
           body: JSON.stringify({
             dealId,
             templateId: renderSel.templateId,
-            investorPersonId: renderSel.investorPersonId || undefined,
+            investorPersonId: effectiveInvestorId || undefined,
           }),
         }
       );
@@ -294,6 +412,54 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
           </div>
         </div>
       )}
+
+      {/* Delivery log — only when the payload carries records */}
+      <div className={cardCls}>
+        <h3 className="font-display text-lg font-semibold text-[#0d1f3c] dark:text-white">
+          Delivery log
+        </h3>
+        {deliveries.length === 0 ? (
+          <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-white/50">
+            No delivery records are returned by the reporting endpoints for this
+            deal. The existing flow renders reports (below) but has no send
+            endpoint and no sent/opened tracking in its payloads — so no log is
+            shown rather than an invented one. The ledger below is the record of
+            capital calls, distributions and NAV marks, not of sends.
+          </p>
+        ) : (
+          <>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[560px]">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-white/5">
+                    <th className={thCls}>Investor</th>
+                    <th className={thCls}>What was sent</th>
+                    <th className={thCls}>Sent</th>
+                    <th className={thCls}>
+                      {deliveries.some((d) => d.opened !== null) ? "Opened" : "Opened (not tracked)"}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deliveries.map((d) => (
+                    <tr key={d.key} className="border-t border-slate-100 dark:border-white/5">
+                      <td className={`${tdCls} font-semibold`}>{d.investorName}</td>
+                      <td className={tdCls}>{d.what}</td>
+                      <td className={tdCls}>{d.sentAt ? fmtDateShort(d.sentAt) : "—"}</td>
+                      <td className={tdCls}>{d.opened ?? "Not tracked"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!deliveries.some((d) => d.opened !== null) && (
+              <p className="mt-2 text-xs text-slate-400 dark:text-white/40">
+                Open tracking isn&apos;t recorded for these sends — the column is labeled accordingly.
+              </p>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Ledger */}
       <div className={cardCls}>
@@ -401,14 +567,67 @@ export default function ReportingTab({ dealId, refreshSummary }: CapitalTabProps
           that module exists — the rendered text is shown exactly as the
           API returns it.
         </p>
+
+        {/* Recipients — from this raise's investors */}
+        <div className="mt-4 rounded-2xl border border-slate-100 p-4 dark:border-white/5">
+          <h4 className="text-sm font-semibold text-[#0d1f3c] dark:text-white">
+            Recipients — this raise&apos;s investors
+          </h4>
+          {participants.length === 0 ? (
+            <p className="mt-1 text-sm text-slate-500 dark:text-white/50">
+              No investors are in this raise yet, so there is no one to select.
+            </p>
+          ) : (
+            <>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {participants.map((p) => {
+                  const checked = recipients?.has(p.personId) ?? false;
+                  return (
+                    <label key={p.personId} className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm text-[#0d1f3c] dark:bg-white/5 dark:text-white/90">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) =>
+                          setRecipients((prev) => {
+                            const next = new Set(prev ?? []);
+                            if (e.target.checked) next.add(p.personId);
+                            else next.delete(p.personId);
+                            return next;
+                          })
+                        }
+                      />
+                      {p.name}
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-xs text-slate-400 dark:text-white/40">
+                {recipients ? `${recipients.size} of ${participants.length} selected. ` : ""}
+                Honest limit: the existing render endpoint renders for one investor
+                or the whole deal and there is no multi-recipient send endpoint —
+                when exactly one recipient is selected the render is personalized
+                to them; otherwise it renders whole-deal. Sending itself is not
+                part of the existing reporting endpoints, so nothing is marked sent here.
+              </p>
+            </>
+          )}
+        </div>
+        {bundle && templates.some((t) => templateMatchesType(t)) && (
+          <p className="mt-3 flex flex-wrap gap-1.5">
+            <span className="text-xs text-slate-400 dark:text-white/40">Templates matching this deal&apos;s type ({typeLabel}), listed first:</span>
+            {templates.filter((t) => templateMatchesType(t)).map((t) => (
+              <span key={t.id} className="badge badge-fit">{t.name} — matches {typeLabel}</span>
+            ))}
+          </p>
+        )}
         <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
           <div>
             <label className={labelCls}>Template</label>
             <select className={`${selectCls} min-h-[44px]`} value={renderSel.templateId} onChange={(e) => setRenderSel((s) => ({ ...s, templateId: e.target.value }))}>
               <option value="">Select template…</option>
-              {templates.map((t) => (
+              {sortedTemplates.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name}{t.isSystem ? " (system)" : ""}
+                  {t.name}{t.isSystem ? " (system)" : ""}{templateMatchesType(t) ? ` — matches ${typeLabel}` : ""}
                 </option>
               ))}
             </select>

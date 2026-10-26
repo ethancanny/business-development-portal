@@ -37,6 +37,20 @@ import {
   type EconomicsResult,
   type ValuationParams,
 } from "@/components/capital/types";
+import {
+  fetchBundle,
+  metricNum,
+  metricText,
+  metricsOf,
+  typeKeyOf,
+  typeLabelOf,
+  type WorkspaceBundle,
+} from "@/components/capital/workspace/shared";
+
+type EconProps = CapitalTabProps & {
+  /** Shell hook: jump to another workspace tab (used for the IC link). */
+  onOpenTab?: (key: string) => void;
+};
 
 type FieldKind = "money" | "multiple" | "pct" | "years";
 
@@ -86,7 +100,7 @@ interface EconData {
   result: EconomicsResult | null;
 }
 
-export default function EconomicsTab({ dealId }: CapitalTabProps) {
+export default function EconomicsTab({ dealId, onOpenTab }: EconProps) {
   const url = `${API}/deals/${encodeURIComponent(dealId)}/economics`;
   const [data, setData] = useState<EconData | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
@@ -94,6 +108,22 @@ export default function EconomicsTab({ dealId }: CapitalTabProps) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [computing, setComputing] = useState(false);
   const [error, setError] = useState("");
+  // Type-aware section data (deal type + bd metrics + raise entity)
+  // from the workspace bundle — best-effort, the model below stands
+  // on its own endpoint either way.
+  const [bundle, setBundle] = useState<WorkspaceBundle | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetchBundle(dealId)
+      .then((b) => {
+        if (live) setBundle(b);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [dealId]);
 
   const apply = useCallback((d: EconData) => {
     setData(d);
@@ -152,11 +182,162 @@ export default function EconomicsTab({ dealId }: CapitalTabProps) {
   const ret = r?.returns ?? null;
   const su = r?.sourcesUses ?? null;
 
+  /* ---- Type-aware section inputs (Part B §3) — read only from
+   * metrics actually present on the deal; missing pieces render as
+   * an honest empty state, never an estimate. ---- */
+  const typeKey = typeKeyOf(bundle);
+  const typeLabel = typeLabelOf(bundle);
+  const metrics = metricsOf(bundle);
+  const entityName = bundle?.raise?.entityName ?? "";
+  const mFundingSource = metricText(metrics, "funding_source");
+  const mFundingAmount =
+    metricNum(metrics, "funding_amount") ??
+    metricNum(metrics, "equity_check") ??
+    metricNum(metrics, "check_size");
+  const mPlatformLev =
+    metricNum(metrics, "platform_leverage_x") ??
+    metricNum(metrics, "parent_leverage_x");
+  const mPostLev =
+    metricNum(metrics, "post_leverage_x") ??
+    metricNum(metrics, "pro_forma_leverage_x") ??
+    metricNum(metrics, "post_addon_leverage_x");
+  const mRoundSize = metricNum(metrics, "round_size");
+  const mInstrument =
+    metricText(metrics, "instrument") || metricText(metrics, "mg_instrument");
+  const mPreMoney =
+    metricNum(metrics, "pre_money") ?? metricNum(metrics, "mg_pre_money");
+  const mValCap = metricNum(metrics, "valuation_cap");
+  const mCheck = metricNum(metrics, "check_size");
+  const esBasis = mPreMoney ?? mValCap;
+  const esPost = esBasis !== null && mRoundSize !== null ? esBasis + mRoundSize : null;
+  const esOwnership =
+    esPost !== null && esPost > 0 && mCheck !== null ? mCheck / esPost : null;
+  const prefShown = data.inputs?.prefPct ?? params?.prefPct ?? null;
+  const carryShown = data.inputs?.carryPct ?? params?.carryPct ?? null;
+
   return (
     <div className="space-y-5">
       {error && (
         <p role="alert" className="rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">{error}</p>
       )}
+
+      {/* Type-aware section (Part B §3) */}
+      <div className={cardCls}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-display text-lg font-semibold text-[#0d1f3c] dark:text-white">
+              {typeLabel} economics
+            </h3>
+            <p className="mt-0.5 text-sm text-slate-500 dark:text-white/50">
+              Type-specific terms from this deal&apos;s recorded metrics
+              {entityName ? ` · Entity / SPV: ${entityName}` : " · no entity / SPV name recorded on the raise yet"}
+            </p>
+          </div>
+          {onOpenTab ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm min-h-[44px]"
+              onClick={() => onOpenTab("ic")}
+            >
+              IC record →
+            </button>
+          ) : (
+            <span className="text-xs text-slate-400 dark:text-white/40">IC record: see the IC tab</span>
+          )}
+        </div>
+
+        {typeKey === "add_on" ? (
+          <div className="mt-3 space-y-2 text-sm text-slate-600 dark:text-white/80">
+            <p>
+              <span className="font-semibold text-[#0d1f3c] dark:text-white">Funding plan: </span>
+              {mFundingSource || "funding source not recorded (metrics.funding_source)"}
+              {mFundingAmount !== null ? ` — ${fmtMoneyN(mFundingAmount)}` : ""}
+            </p>
+            {mPlatformLev !== null || mPostLev !== null ? (
+              <p>
+                <span className="font-semibold text-[#0d1f3c] dark:text-white">Pro forma leverage: </span>
+                platform {mPlatformLev !== null ? fmtMultiple(mPlatformLev) : "not recorded"}
+                {" → "}post-add-on {mPostLev !== null ? fmtMultiple(mPostLev) : "not recorded"}
+                {mPlatformLev !== null && mPostLev !== null
+                  ? ` (${mPostLev >= mPlatformLev ? "+" : ""}${(mPostLev - mPlatformLev).toFixed(2)}×)`
+                  : ""}
+              </p>
+            ) : (
+              <p className="text-slate-500 dark:text-white/50">
+                Pro forma leverage impact can&apos;t be shown — neither the platform&apos;s
+                leverage (platform_leverage_x) nor a post-add-on figure is recorded in this
+                deal&apos;s metrics. Nothing is estimated in its place.
+              </p>
+            )}
+          </div>
+        ) : typeKey === "early_stage" ? (
+          <div className="mt-3 space-y-2 text-sm text-slate-600 dark:text-white/80">
+            <p>
+              <span className="font-semibold text-[#0d1f3c] dark:text-white">Round terms: </span>
+              {mRoundSize !== null ? `round ${fmtMoneyN(mRoundSize)}` : "round size not recorded"}
+              {mInstrument ? ` · ${mInstrument}` : ""}
+              {mPreMoney !== null ? ` · pre-money ${fmtMoneyN(mPreMoney)}` : ""}
+              {mValCap !== null ? ` · valuation cap ${fmtMoneyN(mValCap)}` : ""}
+            </p>
+            <p>
+              <span className="font-semibold text-[#0d1f3c] dark:text-white">Our allocation: </span>
+              {mCheck !== null ? fmtMoneyN(mCheck) : "check size not recorded"}
+              {entityName ? ` · optional SPV: ${entityName}` : " · no SPV recorded (direct check)"}
+            </p>
+            {esOwnership !== null ? (
+              <p className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-white/5">
+                Ownership math: check {fmtMoneyN(mCheck)} ÷ ({mPreMoney !== null ? "pre-money" : "valuation cap"}{" "}
+                {fmtMoneyN(esBasis)} + round {fmtMoneyN(mRoundSize)}) = {fmtMoneyN(esPost)} post-money →{" "}
+                <span className="font-semibold text-[#0d1f3c] dark:text-white">{fmtPct(esOwnership)} ownership</span>
+              </p>
+            ) : (
+              <p className="text-slate-500 dark:text-white/50">
+                Ownership math needs the check size plus a pre-money (or valuation cap) and the
+                round size — one or more are not recorded yet, so no percentage is shown.
+              </p>
+            )}
+          </div>
+        ) : typeKey === "minority_growth" ? (
+          <div className="mt-3 space-y-2 text-sm text-slate-600 dark:text-white/80">
+            <p>
+              <span className="font-semibold text-[#0d1f3c] dark:text-white">Preferred terms: </span>
+              {mInstrument || "instrument not recorded (mg_instrument)"}
+              {mPreMoney !== null ? ` · pre-money ${fmtMoneyN(mPreMoney)}` : " · pre-money not recorded (mg_pre_money)"}
+              {prefShown !== null ? ` · pref ${fmtPct(prefShown)}` : ""}
+            </p>
+            {ret ? (
+              <p>
+                <span className="font-semibold text-[#0d1f3c] dark:text-white">Returns case (model below): </span>
+                gross {fmtPct(ret.grossIrr)} IRR · {fmtMoic(ret.grossMoic)} MOIC — net to investors{" "}
+                {fmtPct(ret.netIrr)} IRR · {fmtMoic(ret.netMoic)} MOIC
+              </p>
+            ) : (
+              <p className="text-slate-500 dark:text-white/50">
+                No computed returns case yet — save inputs and compute in the model below.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="mt-3 space-y-2 text-sm text-slate-600 dark:text-white/80">
+            <p>
+              <span className="font-semibold text-[#0d1f3c] dark:text-white">Capital stack: </span>
+              {su
+                ? `debt ${fmtMoneyN(su.sources.debt)} · rollover ${fmtMoneyN(su.sources.rolloverEquity)} · investor equity ${fmtMoneyN(su.sources.equity)} (full sources & uses below)`
+                : "compute the model below for the full sources & uses / capital stack"}
+            </p>
+            <p>
+              <span className="font-semibold text-[#0d1f3c] dark:text-white">Sponsor fees &amp; promote: </span>
+              {prefShown !== null || carryShown !== null
+                ? `pref ${prefShown !== null ? fmtPct(prefShown) : "—"} · carry / promote ${carryShown !== null ? fmtPct(carryShown) : "—"}${(r?.feeStack ?? []).length > 0 ? ` · fees in stack: ${r!.feeStack.map((f) => `${f.label} ${fmtMoneyN(f.amount)}`).join(", ")}` : ""}`
+                : "no pref / carry recorded in the inputs or global parameters"}
+            </p>
+            <p>
+              <span className="font-semibold text-[#0d1f3c] dark:text-white">SPV / entity: </span>
+              {entityName || "not recorded on the raise — set it in Overview → Raise settings"}
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* Inputs */}
       <div className={cardCls}>
