@@ -145,6 +145,7 @@ export interface DirectoryListFilters {
   lastTouchBefore?: string;
   lastTouchAfter?: string;
   sort?: DirectoryListSort | string;
+  sortDir?: string;
 }
 
 export async function listDirectory(
@@ -178,6 +179,15 @@ export async function listDirectory(
   )
     ? (filters.sort as string)
     : "updated";
+  // Sort direction: the Directory UI always sends sortDir; API callers
+  // may omit it, in which case each column keeps its natural default
+  // (name/nextDue ascending, updated/lastTouch descending).
+  const dirParam =
+    filters.sortDir === "asc" || filters.sortDir === "desc"
+      ? filters.sortDir
+      : sortParam === "name" || sortParam === "nextDue"
+        ? "asc"
+        : "desc";
 
   const rows = await db`
     SELECT u.kind, u.id, u.name, u.title, u.core_kind, u.email, u.phone,
@@ -270,10 +280,14 @@ export async function listDirectory(
         AND (${lastTouchAfter}::timestamptz IS NULL OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz)
     ) u
     ORDER BY
-      CASE WHEN ${sortParam} = 'name' THEN u.name END ASC,
-      CASE WHEN ${sortParam} = 'lastTouch' THEN u.last_touch_at END DESC NULLS LAST,
-      CASE WHEN ${sortParam} = 'nextDue' THEN u.next_touch_due END ASC NULLS LAST,
-      CASE WHEN ${sortParam} = 'updated' THEN u.updated_at END DESC NULLS LAST,
+      CASE WHEN ${sortParam} = 'name' AND ${dirParam} = 'asc' THEN u.name END ASC,
+      CASE WHEN ${sortParam} = 'name' AND ${dirParam} <> 'asc' THEN u.name END DESC,
+      CASE WHEN ${sortParam} = 'lastTouch' AND ${dirParam} = 'asc' THEN u.last_touch_at END ASC NULLS LAST,
+      CASE WHEN ${sortParam} = 'lastTouch' AND ${dirParam} <> 'asc' THEN u.last_touch_at END DESC NULLS LAST,
+      CASE WHEN ${sortParam} = 'nextDue' AND ${dirParam} = 'asc' THEN u.next_touch_due END ASC NULLS LAST,
+      CASE WHEN ${sortParam} = 'nextDue' AND ${dirParam} <> 'asc' THEN u.next_touch_due END DESC NULLS LAST,
+      CASE WHEN ${sortParam} = 'updated' AND ${dirParam} = 'asc' THEN u.updated_at END ASC NULLS LAST,
+      CASE WHEN ${sortParam} = 'updated' AND ${dirParam} <> 'asc' THEN u.updated_at END DESC NULLS LAST,
       u.updated_at DESC, u.name ASC
     LIMIT ${limit} OFFSET ${offset}`;
 

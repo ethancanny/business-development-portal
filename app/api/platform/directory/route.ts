@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
     lastTouchBefore: sp.get("lastTouchBefore") ?? undefined,
     lastTouchAfter: sp.get("lastTouchAfter") ?? undefined,
     sort: sp.get("sort") ?? undefined,
+    sortDir: sp.get("sortDir") ?? undefined,
     limit: Math.min(50, Math.max(1, isFinite(limitRaw) ? limitRaw : 25)),
     offset: Math.max(0, isFinite(offsetRaw) ? offsetRaw : 0),
   };
