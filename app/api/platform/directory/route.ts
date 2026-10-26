@@ -25,7 +25,12 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const limitRaw = Number(sp.get("limit") ?? 25);
   const offsetRaw = Number(sp.get("offset") ?? 0);
-  const { items, total } = await listDirectory({
+  // CRM Phase 1: tier/stage/owner/tag/overdue/last-touch filters and
+  // sort are Lane A's extended DirectoryListFilters (DESIGN.md). The
+  // cast bridges Lane B's tree, where service.ts predates that
+  // extension; at merge time the extended type accepts these fields
+  // directly.
+  const filters = {
     // People only (Ethan, Oct 23, 2026): the Directory is a contacts
     // list — a contact's company must not appear as a second contact.
     // Organization records stay in core.organizations and remain
@@ -33,9 +38,20 @@ export async function GET(req: NextRequest) {
     kind: "person",
     type: sp.get("type") ?? undefined,
     q: sp.get("q") ?? undefined,
+    tier: sp.get("tier") ?? undefined,
+    stage: sp.get("stage") ?? undefined,
+    owner: sp.get("owner") ?? undefined,
+    tag: sp.get("tag") ?? undefined,
+    overdueOnly: sp.get("overdueOnly") === "1" || sp.get("overdueOnly") === "true",
+    lastTouchBefore: sp.get("lastTouchBefore") ?? undefined,
+    lastTouchAfter: sp.get("lastTouchAfter") ?? undefined,
+    sort: sp.get("sort") ?? undefined,
     limit: Math.min(50, Math.max(1, isFinite(limitRaw) ? limitRaw : 25)),
     offset: Math.max(0, isFinite(offsetRaw) ? offsetRaw : 0),
-  });
+  };
+  const { items, total } = await listDirectory(
+    filters as unknown as Parameters<typeof listDirectory>[0]
+  );
   return NextResponse.json(
     { items, total },
     { headers: { "Cache-Control": "private, max-age=300" } }

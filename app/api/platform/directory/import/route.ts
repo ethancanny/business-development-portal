@@ -15,7 +15,12 @@ export async function POST(req: NextRequest) {
     rows?: unknown;
     mapping?: unknown;
     kind?: unknown;
+    dryRun?: unknown;
   };
+  // CRM Phase 1: dryRun passthrough — importRows (Lane A extension)
+  // runs identical validation/dedupe and reports
+  // { wouldCreate, wouldSkip, errors } with zero writes.
+  const dryRun = body.dryRun === true || body.dryRun === "true" || body.dryRun === 1;
   const rows = Array.isArray(body.rows)
     ? (body.rows as Record<string, string>[])
     : [];
@@ -37,12 +42,15 @@ export async function POST(req: NextRequest) {
     );
   }
   try {
+    // The dryRun field is Lane A's importRows extension (DESIGN.md);
+    // the cast bridges Lane B's tree, where service.ts predates it.
     const result = await importRows({
       rows,
       mapping,
       kind,
       actor: user.name || user.email,
-    });
+      dryRun,
+    } as unknown as Parameters<typeof importRows>[0]);
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(
