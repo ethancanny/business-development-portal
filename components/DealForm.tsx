@@ -24,6 +24,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useFocus } from "@/components/focus/FocusProvider";
+import { AD_SECTOR_NAME } from "@/lib/platform/focus-shared";
 import {
   EARLY_STAGE_STAGES,
   INVESTMENT_TYPE_LABELS,
@@ -189,11 +191,16 @@ export default function DealForm({
 }: DealFormProps) {
   const router = useRouter();
   const isNew = !deal;
+  // Focus & Theme (Oct 26, 2026): a NEW deal defaults its industry to
+  // Aerospace & Defense while Focus is on (the field stays a free-text
+  // input and fully editable). Existing deals keep their stored
+  // industry untouched — Focus never alters records.
+  const { focus } = useFocus();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
     companyName: deal?.companyName ?? "",
-    industry: deal?.industry ?? "",
+    industry: deal?.industry ?? (focus === "ad" ? AD_SECTOR_NAME : ""),
     stage: deal?.stage ?? ("Sourced" as Deal["stage"]),
     investmentType: (deal?.investmentType ??
       (initialType as InvestmentTypeKey) ??
