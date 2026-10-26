@@ -1,4 +1,5 @@
 import { sql, str, num, isoOrNull } from "./db";
+import { bumpDatasets } from "./versions";
 import { cacheInvalidate, cached } from "./cache";
 import { CACHE_TTLS } from "./config";
 import { logUsage } from "./usage";
@@ -555,6 +556,9 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
     ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`;
   cacheInvalidate("overview");
   logUsage("refresh_overview_summary", portfolioRows.length + stageRows.length, 0);
+  // Performance Fix Pass (DESIGN.md §2): "overview" bumps HERE, after
+  // the summary write commits — never at event publish time.
+  await bumpDatasets("overview");
   return summary;
 }
 

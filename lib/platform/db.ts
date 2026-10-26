@@ -379,6 +379,27 @@ export function ensurePlatformSchema(): Promise<void> {
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`;
 
+      // Dataset version stamps (Performance Fix Pass, DESIGN.md §1):
+      // one row per dataset in lib/platform/versions.ts DATASETS —
+      // the names are duplicated here because versions.ts imports
+      // this module (importing it back would cycle). Seed rows land
+      // at the column default (version 1); bumps increment in place.
+      await db`
+        CREATE TABLE IF NOT EXISTS core.dataset_versions (
+          dataset TEXT PRIMARY KEY,
+          version BIGINT NOT NULL DEFAULT 1,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
+      await db`
+        INSERT INTO core.dataset_versions (dataset) VALUES
+          ('overview'), ('bd_bootstrap'), ('deals'), ('executives'),
+          ('tasks'), ('interactions'), ('dealflow'), ('calendar'),
+          ('investors'), ('market_multiples'), ('market_rates'),
+          ('market_indicators'), ('market_tailwind'), ('market_companies'),
+          ('hospitality_settings'), ('candidates'), ('directory'),
+          ('capital'), ('badge')
+        ON CONFLICT (dataset) DO NOTHING`;
+
       await db`
         CREATE TABLE IF NOT EXISTS core.usage_log (
           id BIGSERIAL PRIMARY KEY,

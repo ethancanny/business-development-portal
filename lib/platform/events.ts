@@ -1,6 +1,7 @@
 import { sql, num } from "./db";
 import { cacheInvalidate } from "./cache";
 import { enqueueUniqueJob } from "./jobs";
+import { bumpDatasets, type DatasetName } from "./versions";
 
 /**
  * Internal event system (PROJECT_RULES.md): key actions publish events;
@@ -55,10 +56,32 @@ const SUMMARY_EVENTS: ReadonlySet<EventType> = new Set<EventType>([
   "contact_updated",
 ]);
 
+/**
+ * EVENT→DATASETS bump map (Performance Fix Pass, DESIGN.md §2):
+ * publish-time bumps — the underlying service writes commit before
+ * publish in this codebase. Do NOT bump "overview" here: the summary
+ * refresh job lands later, and bumping early would let clients cache
+ * a stale summary under the new version. refreshOverviewSummary()
+ * bumps "overview" after its write commits (financials_posted and
+ * document_uploaded therefore map to no publish-time bump — their
+ * only dataset effect is the overview summary, via that refresh).
+ */
+const EVENT_DATASETS: Partial<Record<EventType, DatasetName[]>> = {
+  deal_stage_changed: ["deals", "dealflow"],
+  deal_closed: ["deals", "dealflow"],
+  investor_commitment_changed: ["capital"],
+  interaction_logged: ["directory"],
+  task_completed: ["tasks", "badge", "directory"],
+  stage_changed: ["directory"],
+  contact_updated: ["directory"],
+};
+
 async function builtinHandler(evt: PlatformEvent): Promise<void> {
   // Invalidate only the cache keys this entity can affect.
   cacheInvalidate("overview");
   if (evt.entityId) cacheInvalidate(`company:${evt.entityId}`);
+  const datasets = EVENT_DATASETS[evt.type];
+  if (datasets?.length) await bumpDatasets(...datasets);
   if (SUMMARY_EVENTS.has(evt.type)) {
     await enqueueUniqueJob("refresh_overview_summary", { reason: evt.type });
   }

@@ -41,6 +41,11 @@ import type {
 
 let platformReady: Promise<void> | null = null;
 let backfillSettled = false;
+// Push-job drain throttle (Performance Fix Pass, DESIGN.md §3):
+// per-instance, in-memory — a throttled check is a timestamp compare
+// and costs zero queries.
+let lastDrainAt = 0;
+let drainInFlight = false;
 
 export async function ensurePlatform(): Promise<void> {
   if (!platformReady) {
@@ -88,71 +93,93 @@ export async function ensurePlatform(): Promise<void> {
     } catch (err) {
       console.error("[platform] summary bootstrap failed", err);
     }
+    // Per-instance one-time block (Performance Fix Pass, DESIGN.md
+    // §3): everything below up to the throttled drain used to run on
+    // EVERY ensurePlatform() call. It now runs inside this block —
+    // awaited on the instance's first platform call only — so warm
+    // calls run zero bookkeeping queries. All of these are
+    // marker-guarded one-timers / hourly internally; a fresh instance
+    // per deploy still runs them before serving its first request,
+    // so semantics are preserved. Every try/catch "never breaks
+    // reads" behavior is preserved.
+    // Backfill top-up: rows created in the legacy tables after the
+    // one-time backfill (e.g. by the Oct 21 outage-recovery import) are
+    // picked up by an idempotent re-run, gated to once per hour by the
+    // 'phase1-backfill-topup' marker. Never breaks reads.
+    try {
+      await topUpBackfill(sql());
+    } catch (err) {
+      console.error("[platform] backfill top-up failed", err);
+    }
+    // One-time normalized_name repair (Phase 2; marker-guarded inside).
+    // Never breaks reads.
+    try {
+      await repairNormalizedNames(sql());
+    } catch (err) {
+      console.error("[platform] normalized-name repair failed", err);
+    }
+    // Investment Types Step 1 (Oct 23, 2026): one-time deal stage/type
+    // migration — marker-guarded inside lib/bd/migrate.ts, writes its
+    // own persistent report. Runs on the first platform boot after the
+    // deploy that carries it. Never breaks reads.
+    try {
+      const { runBdMigrationIfNeeded } = await import("../bd/migrate");
+      await runBdMigrationIfNeeded();
+    } catch (err) {
+      console.error("[platform] bd investment-types migration failed (will retry)", err);
+    }
+    // New investment form (Oct 24, 2026): one-time form-section
+    // assignment on bd.metric_definitions — marker-guarded inside
+    // lib/bd/form-migration.ts. Runs after the Step 1 migration so the
+    // definition catalog exists. Never breaks reads.
+    try {
+      const { runFormSectionsMigrationIfNeeded } = await import(
+        "../bd/form-migration"
+      );
+      await runFormSectionsMigrationIfNeeded();
+    } catch (err) {
+      console.error("[platform] bd form-sections migration failed (will retry)", err);
+    }
+    // Due Diligence workspace backfill (Oct 24, 2026): deals that
+    // reached a diligence stage without a workspace (seeded, imported,
+    // or moved before the BD → DD handoff was wired) get one —
+    // marker-guarded inside lib/diligence/backfill.ts. Runs after the
+    // backfill top-up above so core.deals is as fresh as this boot can
+    // make it. Never breaks reads.
+    try {
+      const { runDdWorkspaceBackfillIfNeeded } = await import(
+        "../diligence/backfill"
+      );
+      await runDdWorkspaceBackfillIfNeeded();
+    } catch (err) {
+      console.error("[platform] dd workspace backfill failed (will retry)", err);
+    }
+    // Event-driven push (Oct 21, 2026): keep the daily digest job
+    // scheduled — one-time per instance (above pattern); the drain
+    // itself stays per-call but throttled, below. Never breaks reads.
+    try {
+      const { ensureMorningDigestJob } = await import("../push-schedule");
+      await ensureMorningDigestJob();
+    } catch (err) {
+      console.error("[platform] push schedule failed", err);
+    }
   }
-  // Backfill top-up: rows created in the legacy tables after the
-  // one-time backfill (e.g. by the Oct 21 outage-recovery import) are
-  // picked up by an idempotent re-run, gated to once per hour by the
-  // 'phase1-backfill-topup' marker. Never breaks reads.
-  try {
-    await topUpBackfill(sql());
-  } catch (err) {
-    console.error("[platform] backfill top-up failed", err);
-  }
-  // One-time normalized_name repair (Phase 2; marker-guarded inside).
+  // Drain due push jobs opportunistically on platform activity —
+  // one of the queue's drain triggers (no polling loop) — throttled
+  // per instance to at most once per 30s, with an in-flight guard.
+  // When throttled this costs a timestamp compare: zero queries.
   // Never breaks reads.
-  try {
-    await repairNormalizedNames(sql());
-  } catch (err) {
-    console.error("[platform] normalized-name repair failed", err);
-  }
-  // Investment Types Step 1 (Oct 23, 2026): one-time deal stage/type
-  // migration — marker-guarded inside lib/bd/migrate.ts, writes its
-  // own persistent report. Runs on the first platform boot after the
-  // deploy that carries it. Never breaks reads.
-  try {
-    const { runBdMigrationIfNeeded } = await import("../bd/migrate");
-    await runBdMigrationIfNeeded();
-  } catch (err) {
-    console.error("[platform] bd investment-types migration failed (will retry)", err);
-  }
-  // New investment form (Oct 24, 2026): one-time form-section
-  // assignment on bd.metric_definitions — marker-guarded inside
-  // lib/bd/form-migration.ts. Runs after the Step 1 migration so the
-  // definition catalog exists. Never breaks reads.
-  try {
-    const { runFormSectionsMigrationIfNeeded } = await import(
-      "../bd/form-migration"
-    );
-    await runFormSectionsMigrationIfNeeded();
-  } catch (err) {
-    console.error("[platform] bd form-sections migration failed (will retry)", err);
-  }
-  // Due Diligence workspace backfill (Oct 24, 2026): deals that
-  // reached a diligence stage without a workspace (seeded, imported,
-  // or moved before the BD → DD handoff was wired) get one —
-  // marker-guarded inside lib/diligence/backfill.ts. Runs after the
-  // backfill top-up above so core.deals is as fresh as this boot can
-  // make it. Never breaks reads.
-  try {
-    const { runDdWorkspaceBackfillIfNeeded } = await import(
-      "../diligence/backfill"
-    );
-    await runDdWorkspaceBackfillIfNeeded();
-  } catch (err) {
-    console.error("[platform] dd workspace backfill failed (will retry)", err);
-  }
-  // Event-driven push (Oct 21, 2026): keep the daily digest job
-  // scheduled and drain due push jobs opportunistically on platform
-  // activity — this is one of the queue's drain triggers (no polling
-  // loop). Never breaks reads.
-  try {
-    const { ensureMorningDigestJob, drainPushJobs } = await import(
-      "../push-schedule"
-    );
-    await ensureMorningDigestJob();
-    await drainPushJobs(3);
-  } catch (err) {
-    console.error("[platform] push schedule/drain failed", err);
+  if (!drainInFlight && Date.now() - lastDrainAt >= 30_000) {
+    lastDrainAt = Date.now();
+    drainInFlight = true;
+    try {
+      const { drainPushJobs } = await import("../push-schedule");
+      await drainPushJobs(3);
+    } catch (err) {
+      console.error("[platform] push drain failed", err);
+    } finally {
+      drainInFlight = false;
+    }
   }
 }
 
