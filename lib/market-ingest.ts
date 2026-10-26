@@ -29,6 +29,7 @@ import { ingestAdhs } from "./adhs-ingest";
 import { ingestTailwind, type TailwindIngestOpts } from "./tailwind-ingest";
 import { runTransitionSignalsPass } from "./signals";
 import { classifyIndustry, INDUSTRY_KEYWORDS, kwMatch } from "./industry-classify";
+import { bumpDatasets } from "./platform/versions";
 
 /* ---------------- FRED indicators ---------------- */
 
@@ -2098,5 +2099,19 @@ export async function runMarketIngest(
       out[name] = -1;
     }
   }
+  // Performance Fix Pass (DESIGN.md §2): this is the shared
+  // completion point for every ingest entry in this file — there is
+  // no separate market-events ingest function here; the events sweep
+  // enters through runMarketIngest (source=news/econ_events/… via
+  // /api/market/ingest) like every other source. Bump the whole
+  // market family on completion (over-bumping inside the family is
+  // acceptable — clients treat it as one perceived unit).
+  await bumpDatasets(
+    "market_multiples",
+    "market_rates",
+    "market_indicators",
+    "market_tailwind",
+    "market_companies"
+  );
   return out;
 }
