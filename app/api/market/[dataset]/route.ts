@@ -38,7 +38,7 @@ import {
 } from "@/lib/market-db";
 import { markNotInstitutional } from "@/lib/institutional-db";
 import {
-  datasetVersionHeader,
+  getDatasetVersion,
   type DatasetName,
 } from "@/lib/platform/versions";
 
@@ -48,17 +48,48 @@ import {
  * tailwind / companies) are all served by THIS [dataset] route in
  * the repo — there are no app/api/market/<name>/route.ts files.
  * Versioned cases return Cache-Control: private, max-age=300 plus
- * their X-Dataset-Version header, read after the payload computes.
+ * their X-Dataset-Version header. Heavy versioned cases are served
+ * through versionedJsonCached (below): the version is read before
+ * computing and keys the serialized-response cache.
  */
-async function versionedJson(
-  data: unknown,
-  dataset: DatasetName
+/**
+ * Serialized-response cache (CPU close-out, Oct 26, 2026): the heavy
+ * versioned market payloads (indicators = 1.66 MB of FRED history,
+ * companies, multiples, tailwind) were re-read from Neon and
+ * re-serialized on EVERY request, while their data only changes when
+ * an ingest bumps the dataset version (runMarketIngest bumps the
+ * whole market family together; external spine writes move
+ * market_companies' derived stamp). Cache the serialized body per
+ * (dataset, params) key, keyed on the dataset version read BEFORE
+ * computing: a write landing mid-compute bumps the version, so the
+ * next request misses and recomputes — the cache can never serve
+ * past a version change. Same bytes, same headers as versionedJson.
+ */
+const responseCache = new Map<string, { version: number; body: string }>();
+const RESPONSE_CACHE_MAX = 32;
+
+async function versionedJsonCached(
+  dataset: DatasetName,
+  cacheKey: string,
+  compute: () => Promise<unknown>
 ): Promise<NextResponse> {
-  return NextResponse.json(data, {
-    headers: {
-      "Cache-Control": "private, max-age=300",
-      ...(await datasetVersionHeader(dataset)),
-    },
+  const version = await getDatasetVersion(dataset);
+  const key = dataset + "|" + cacheKey;
+  const hit = responseCache.get(key);
+  const headers = {
+    "Cache-Control": "private, max-age=300",
+    "X-Dataset-Version": String(version),
+  };
+  if (hit && hit.version === version) {
+    return new NextResponse(hit.body, {
+      headers: { ...headers, "Content-Type": "application/json" },
+    });
+  }
+  const body = JSON.stringify(await compute());
+  if (responseCache.size >= RESPONSE_CACHE_MAX) responseCache.clear();
+  responseCache.set(key, { version, body });
+  return new NextResponse(body, {
+    headers: { ...headers, "Content-Type": "application/json" },
   });
 }
 
@@ -96,7 +127,9 @@ export async function GET(
     switch (dataset) {
       case "indicators": {
         const series = (sp.get("series") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-        return versionedJson(await getIndicatorSeries(series), "market_indicators");
+        return versionedJsonCached("market_indicators", series.join(","), () =>
+          getIndicatorSeries(series)
+        );
       }
       case "latest":
         return NextResponse.json(await getLatestIndicators());
@@ -113,8 +146,14 @@ export async function GET(
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean);
-          const { companies, fitTotal } = await getFitCompanies(sectors.length ? sectors : undefined);
-          return versionedJson({ companies, fitTotal, limit: FITS_DISPLAY_LIMIT, mode: "fits" }, "market_companies");
+          return versionedJsonCached(
+            "market_companies",
+            "fits|" + sectors.join(","),
+            async () => {
+              const { companies, fitTotal } = await getFitCompanies(sectors.length ? sectors : undefined);
+              return { companies, fitTotal, limit: FITS_DISPLAY_LIMIT, mode: "fits" };
+            }
+          );
         }
         // Filtered Out feed (chain/franchise filter, Oct 16, 2026;
         // institutional filter, Oct 17, 2026): chain-flagged AND
@@ -126,50 +165,67 @@ export async function GET(
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean);
-          const { companies, chainTotal, institutionalTotal, filteredTotal } = await getFilteredCompanies(sectors.length ? sectors : undefined);
-          return versionedJson({ companies, chainTotal, institutionalTotal, filteredTotal, mode: "filtered" }, "market_companies");
+          return versionedJsonCached(
+            "market_companies",
+            "filtered|" + sectors.join(","),
+            async () => {
+              const { companies, chainTotal, institutionalTotal, filteredTotal } = await getFilteredCompanies(sectors.length ? sectors : undefined);
+              return { companies, chainTotal, institutionalTotal, filteredTotal, mode: "filtered" };
+            }
+          );
         }
         const sector = sp.get("sector") ?? undefined;
         const off = Number(sp.get("offset") ?? 0);
-        const [companies, total, fitTotal, unscoredTotal] = await Promise.all([
-          getCompanies(sector, Number(sp.get("limit") ?? 600), off),
-          countCompanies(sector),
-          countFits(sector),
-          countUnscored(sector),
-        ]);
-        return versionedJson({ companies, total, fitTotal, unscoredTotal, offset: off }, "market_companies");
+        const limit = Number(sp.get("limit") ?? 600);
+        return versionedJsonCached(
+          "market_companies",
+          `list|${sector ?? ""}|${limit}|${off}`,
+          async () => {
+            const [companies, total, fitTotal, unscoredTotal] = await Promise.all([
+              getCompanies(sector, limit, off),
+              countCompanies(sector),
+              countFits(sector),
+              countUnscored(sector),
+            ]);
+            return { companies, total, fitTotal, unscoredTotal, offset: off };
+          }
+        );
       }
       case "updates": {
         return NextResponse.json(await getUpdates());
       }
       case "multiples":
-        return versionedJson(await getMultiples(), "market_multiples");
+        return versionedJsonCached("market_multiples", "multiples", () =>
+          getMultiples()
+        );
       case "rates": {
-        const rows = await getIndicatorSeries(["DPRIME", "SOFR", "DGS10", "DGS2", "DFF"]);
-        const latest = (id: string) => {
-          const r = rows
-            .filter((o) => o.seriesId === id && o.value !== null)
-            .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
-          const l = r[r.length - 1];
-          return l ? { value: l.value, date: l.obsDate } : null;
-        };
-        const primeLatest = latest("DPRIME");
-        const primeVal = primeLatest?.value ?? null;
-        return versionedJson({
-          prime: primeLatest,
-          sba: primeLatest && primeVal !== null
-            ? {
-                value: Math.round((primeVal + 3) * 100) / 100,
-                date: primeLatest.date,
-                spread: 3,
-                basis: "Prime + 3.00% — SBA 7(a) max, loans over $350K",
-              }
-            : null,
-          sofr: latest("SOFR"),
-          treasury10y: latest("DGS10"),
-          treasury2y: latest("DGS2"),
-          fedFunds: latest("DFF"),
-        }, "market_rates");
+        return versionedJsonCached("market_rates", "rates", async () => {
+          const rows = await getIndicatorSeries(["DPRIME", "SOFR", "DGS10", "DGS2", "DFF"]);
+          const latest = (id: string) => {
+            const r = rows
+              .filter((o) => o.seriesId === id && o.value !== null)
+              .sort((a, b) => a.obsDate.localeCompare(b.obsDate));
+            const l = r[r.length - 1];
+            return l ? { value: l.value, date: l.obsDate } : null;
+          };
+          const primeLatest = latest("DPRIME");
+          const primeVal = primeLatest?.value ?? null;
+          return {
+            prime: primeLatest,
+            sba: primeLatest && primeVal !== null
+              ? {
+                  value: Math.round((primeVal + 3) * 100) / 100,
+                  date: primeLatest.date,
+                  spread: 3,
+                  basis: "Prime + 3.00% — SBA 7(a) max, loans over $350K",
+                }
+              : null,
+            sofr: latest("SOFR"),
+            treasury10y: latest("DGS10"),
+            treasury2y: latest("DGS2"),
+            fedFunds: latest("DFF"),
+          };
+        });
       }
       case "acquisitions":
         return NextResponse.json(await getAcquisitions(sp.get("status") ?? undefined));
@@ -192,7 +248,9 @@ export async function GET(
       case "competing-buyers":
         return NextResponse.json(await getCompetingBuyers());
       case "tailwind":
-        return versionedJson(await getTailwindReport(), "market_tailwind");
+        return versionedJsonCached("market_tailwind", "tailwind", () =>
+          getTailwindReport()
+        );
       default:
         return NextResponse.json({ error: "Unknown dataset" }, { status: 404 });
     }

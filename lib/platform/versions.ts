@@ -36,7 +36,6 @@ export const DATASETS = [
   "directory",
   "capital",
   "badge",
-  "focus_theme",
 ] as const;
 
 export type DatasetName = (typeof DATASETS)[number];
@@ -60,6 +59,21 @@ const DERIVED_TABLES: Partial<Record<DatasetName, string>> = {
 };
 
 /**
+ * Derived-stamp cache (CPU close-out, Oct 26, 2026): the derived
+ * aggregate over mi_companies scans ~62K rows and sits on the hottest
+ * read path in the app — every GET /api/platform/versions and every
+ * market-companies / candidates response header. The external writers
+ * it exists to catch are batch jobs (weekly spine builders, twice-
+ * daily drains), and every in-app writer ALSO bumps the stored
+ * counter instantly, so a short per-instance TTL loses nothing that
+ * matters: external changes surface within one TTL instead of
+ * instantly. Failed reads are NOT cached (a transient error must not
+ * mask a change for the TTL window).
+ */
+const DERIVED_TTL_MS = 10_000;
+const derivedCache = new Map<DatasetName, { stamp: number; at: number }>();
+
+/**
  * Derived stamp for one dataset: count * 2^33 + epochSec(max(updated_at)).
  * JS numbers are safe to 2^53: count ≤ ~1e5 → count * 2^33 ≈ 8.6e14,
  * epochSec ≈ 1.8e9 — the sum with the stored version stays exact.
@@ -69,6 +83,8 @@ const DERIVED_TABLES: Partial<Record<DatasetName, string>> = {
 async function derivedStamp(name: DatasetName): Promise<number> {
   const table = DERIVED_TABLES[name];
   if (!table) return 0;
+  const hit = derivedCache.get(name);
+  if (hit && Date.now() - hit.at < DERIVED_TTL_MS) return hit.stamp;
   try {
     const db = sql();
     const rows = await db.query(
@@ -84,7 +100,9 @@ async function derivedStamp(name: DatasetName): Promise<number> {
         raw instanceof Date ? raw.getTime() : new Date(String(raw)).getTime();
       if (isFinite(ms)) epochSec = Math.floor(ms / 1000);
     }
-    return count * 2 ** 33 + epochSec;
+    const stamp = count * 2 ** 33 + epochSec;
+    derivedCache.set(name, { stamp, at: Date.now() });
+    return stamp;
   } catch {
     return 0;
   }
