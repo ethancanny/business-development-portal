@@ -670,7 +670,10 @@ function rowToTask(r: Record<string, unknown>): Task {
     completedAt: r.completed_at ? iso(r.completed_at) : null,
     owner: String(r.owner ?? ""),
     relatedKind:
-      r.related_kind === "deal" || r.related_kind === "executive"
+      r.related_kind === "deal" ||
+      r.related_kind === "executive" ||
+      r.related_kind === "person" ||
+      r.related_kind === "organization"
         ? r.related_kind
         : null,
     relatedId: r.related_id ? String(r.related_id) : null,

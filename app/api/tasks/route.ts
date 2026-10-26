@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTasks, saveTasks, newId, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { scheduleTaskPushJobs } from "@/lib/push-schedule";
+import { recountTaskLink } from "@/lib/directory/crm";
 import type { Task, TaskType } from "@/lib/types";
 
 const TASK_TYPES: TaskType[] = ["Call", "Email", "Meeting", "Send docs", "Other"];
@@ -43,9 +44,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "title is required" }, { status: 400 });
   }
 
+  // CRM Phase 1: 'person' / 'organization' links are also accepted so
+  // CRM-created follow-ups can point at Directory records (cast past
+  // the legacy TaskRelatedKind union, which only names deal/executive;
+  // the stored value is what the CRM summary recount reads).
   const relatedKind =
-    body.relatedKind === "deal" || body.relatedKind === "executive"
-      ? body.relatedKind
+    body.relatedKind === "deal" ||
+    body.relatedKind === "executive" ||
+    body.relatedKind === "person" ||
+    body.relatedKind === "organization"
+      ? (body.relatedKind as Task["relatedKind"])
       : null;
 
   const now = new Date().toISOString();
@@ -71,6 +79,9 @@ export async function POST(req: NextRequest) {
   const tasks = await getTasks();
   tasks.push(task);
   await saveTasks(tasks);
+  // CRM Phase 1 hook: a new person/organization/executive-linked task
+  // changes that record's open_task_count summary.
+  await recountTaskLink(task.relatedKind, task.relatedId).catch(() => undefined);
   // Phase 2: keep the calendar generated-events layer fresh.
   try {
     const { requestGeneratedEventsRefresh } = await import("@/lib/calgen/service");

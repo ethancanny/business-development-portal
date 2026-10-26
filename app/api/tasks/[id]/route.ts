@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTasks, saveTasks, logActivity } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { cancelPushJobs, scheduleTaskPushJobs } from "@/lib/push-schedule";
+import { publishEvent } from "@/lib/platform/events";
+import { recountTaskLink } from "@/lib/directory/crm";
 import type { Task, TaskType } from "@/lib/types";
 
 type Params = { params: { id: string } };
@@ -56,8 +58,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
   let relatedId = prev.relatedId;
   let relatedName = prev.relatedName;
   if (body.relatedKind !== undefined) {
-    if (body.relatedKind === "deal" || body.relatedKind === "executive") {
-      relatedKind = body.relatedKind;
+    if (
+      body.relatedKind === "deal" ||
+      body.relatedKind === "executive" ||
+      // CRM Phase 1: Directory person/organization links (see POST).
+      body.relatedKind === "person" ||
+      body.relatedKind === "organization"
+    ) {
+      relatedKind = body.relatedKind as Task["relatedKind"];
       relatedId = String(body.relatedId ?? "") || null;
       relatedName = String(body.relatedName ?? "").trim();
     } else {
@@ -101,6 +109,23 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   tasks[idx] = updated;
   await saveTasks(tasks);
+  // CRM Phase 1 hook: a done false→true transition publishes
+  // task_completed, and any done/link change recounts the linked
+  // Directory record's open_task_count summary.
+  if (updated.done && !prev.done) {
+    await publishEvent("task_completed", {
+      entityKind: updated.relatedKind ?? "",
+      entityId: updated.relatedId ?? "",
+      payload: { taskId: updated.id },
+      actor: getSessionUser()?.name ?? "",
+    });
+  }
+  if (updated.done !== prev.done || updated.relatedId !== prev.relatedId || updated.relatedKind !== prev.relatedKind) {
+    await recountTaskLink(updated.relatedKind, updated.relatedId).catch(() => undefined);
+    if (prev.relatedId !== updated.relatedId || prev.relatedKind !== updated.relatedKind) {
+      await recountTaskLink(prev.relatedKind, prev.relatedId).catch(() => undefined);
+    }
+  }
   // Phase 2: keep the calendar generated-events layer fresh.
   try {
     const { requestGeneratedEventsRefresh } = await import("@/lib/calgen/service");
@@ -154,6 +179,9 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     }
   }
   await saveTasks(tasks);
+  // CRM Phase 1 hook: deleting a linked task recounts the record's
+  // open_task_count summary.
+  await recountTaskLink(removed.relatedKind, removed.relatedId).catch(() => undefined);
   // Phase 2: keep the calendar generated-events layer fresh.
   try {
     const { requestGeneratedEventsRefresh } = await import("@/lib/calgen/service");

@@ -500,7 +500,7 @@ export interface TaskEventSyncInput {
   type?: string;
   notes?: string;
   done: boolean;
-  relatedKind: "deal" | "executive" | null;
+  relatedKind: "deal" | "executive" | "person" | "organization" | null;
   relatedId: string | null;
   relatedName: string;
   calendarEventId: string | null;
@@ -655,7 +655,10 @@ export async function syncTaskEvent(
 
   // A genuinely new event for a linked follow-up keeps the standing
   // behavior: a dated note on the account's profile.
-  if (task.relatedKind && task.relatedId) {
+  if (
+    (task.relatedKind === "deal" || task.relatedKind === "executive") &&
+    task.relatedId
+  ) {
     const execs = await getExecutives();
     const deals = await getDeals();
     const hit =
