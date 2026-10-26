@@ -6,6 +6,7 @@ import ChainFilterSettings from "@/components/ChainFilterSettings";
 import ManualSourcesSettings from "@/components/ManualSourcesSettings";
 import JobQueuePanel from "@/components/JobQueuePanel";
 import ValuationParamsSettings from "@/components/ValuationParamsSettings";
+import MatchingWeightsCard from "@/components/capital/MatchingWeightsCard";
 import SettingsNav from "@/components/settings/SettingsNav";
 import SettingsSectionNav from "@/components/settings/SettingsSectionNav";
 import StageGatesCard from "@/components/settings/StageGatesCard";
@@ -144,6 +145,23 @@ export default function SettingsPage() {
             A deal inherits these wherever its own inputs are blank.
           </p>
           <ValuationParamsSettings />
+        </section>
+
+        <section
+          id="settings-matching-weights"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Matching weights
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            How investor matches are scored for a raise in Investors
+            &amp; Capital — investment type, check size, sector,
+            structure, geography, and prior activity. Points are
+            relative: raising one weight makes it count more against
+            the others.
+          </p>
+          <MatchingWeightsCard />
         </section>
 
         <section

@@ -71,6 +71,19 @@ export interface InvestorProfile {
   structurePrefs: string;
   notes: string;
   updatedAt?: string | null;
+  /** Redesign Step 1: Directory capital-profile tab fields. The
+   * API always returns them; optional here so lane extension
+   * interfaces can redeclare them defensively. */
+  geography?: string;
+  accreditedStatus?: string;
+  relationshipOwner?: string;
+  investsInTypes?: string[];
+  checkByType?: Record<string, CheckRange>;
+}
+
+export interface CheckRange {
+  min: number | null;
+  max: number | null;
 }
 
 /** One row of GET /investors. */
@@ -150,6 +163,10 @@ export interface RaiseSummary {
   calledTotal: number;
   distributedTotal: number;
   navTotal: number;
+  /** Redesign Step 1 (always returned by the API). */
+  indicatedTotal?: number;
+  byStage?: Record<string, unknown>;
+  pipelineByStage?: Record<string, number>;
 }
 
 /** One row of GET /deals. */
@@ -160,13 +177,31 @@ export interface CapitalDeal {
   companyId: string;
   stage: string;
   summary: RaiseSummary | null;
+  /** Redesign Step 1 extensions (always returned by the API). */
+  raise?: Raise | null;
+  investmentType?: { key: string; label: string; enabled: boolean } | null;
+  isTestData?: boolean;
+  nextMilestoneLabel?: string | null;
+  nextMilestoneDate?: string | null;
+  entityName?: string | null;
+  parentDeal?: { id: string; name: string } | null;
+  metrics?: Record<string, number | string | null>;
+  leadInvestorName?: string | null;
+  investorAvatars?: Array<{ personId: string; name: string }>;
 }
 
 export interface Raise {
   id: string;
+  dealId?: string;
   targetRaise: number;
   status: string;
   notes: string;
+  /** Redesign Step 1 (always returned by the API). */
+  entityName?: string;
+  nextMilestone?: string;
+  nextMilestoneDate?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Commitment {
@@ -179,7 +214,42 @@ export interface Commitment {
   stage: string; // indicated | committed | funded | passed
   notes: string;
   updatedAt?: string;
+  /** Redesign Step 1 participation-link fields. Bucket amounts are
+   * null until set explicitly (the server derives them from the
+   * legacy amount/kind/stage until then). */
+  pipelineStage?: string; // PIPELINE_STAGES key
+  indicatedAmount?: number | null;
+  softAmount?: number | null;
+  hardAmount?: number | null;
+  fundedAmount?: number | null;
+  owner?: string;
+  docStatus?: string; // DOC_STATUSES key
+  wireStatus?: string;
+  expectedFundingDate?: string | null;
+  stageDates?: Record<string, string> | null;
 }
+
+/** Mirrors PIPELINE_STAGES in lib/capital/schema.ts (Kanban). */
+export const PIPELINE_STAGES: Array<{ key: string; label: string }> = [
+  { key: "prospect", label: "Prospect" },
+  { key: "intro", label: "Intro" },
+  { key: "meeting", label: "Meeting" },
+  { key: "interested", label: "Interested" },
+  { key: "soft_circled", label: "Soft-circled" },
+  { key: "committed", label: "Committed" },
+  { key: "funded", label: "Funded" },
+  { key: "passed", label: "Passed" },
+];
+
+/** Mirrors DOC_STATUSES in lib/capital/schema.ts. */
+export const DOC_STATUSES: Array<{ key: string; label: string }> = [
+  { key: "none", label: "None" },
+  { key: "draft", label: "Draft" },
+  { key: "sent", label: "Sent" },
+  { key: "signed", label: "Signed" },
+  { key: "countersigned", label: "Countersigned" },
+  { key: "filed", label: "Filed" },
+];
 
 /** Mirrors COMMITMENT_KINDS / COMMITMENT_STAGES in lib/capital/schema.ts. */
 export const COMMITMENT_KINDS: Array<{ key: string; label: string }> = [
@@ -205,6 +275,138 @@ export function commitmentStageBadge(stage: string): string {
     default:
       return "badge-neutral";
   }
+}
+
+/* --------------------- redesign Step 1: page data --------------------- */
+
+export interface MatchingWeights {
+  type: number;
+  checkSize: number;
+  sector: number;
+  structure: number;
+  geography: number;
+  activity: number;
+}
+
+export interface MatchReason {
+  criterion:
+    | "type"
+    | "checkSize"
+    | "sector"
+    | "structure"
+    | "geography"
+    | "activity";
+  matched: boolean;
+  partial: boolean;
+  text: string;
+}
+
+/** One scored investor from GET /deals/[dealId]/matching. */
+export interface MatchResult {
+  personId: string;
+  name: string;
+  firm: string;
+  score: number;
+  reasons: MatchReason[];
+  profileExists: boolean;
+  inRaise: boolean;
+}
+
+export interface CapitalTypeOption {
+  key: string;
+  label: string;
+  enabled: boolean;
+}
+
+/** GET /summary — the capital summary strip + allocation by type. */
+export interface PageSummary {
+  target: number;
+  indicated: number;
+  soft: number;
+  hard: number;
+  funded: number;
+  remaining: number;
+  closingsNext30: Array<{
+    dealId: string;
+    dealName: string;
+    label: string;
+    date: string;
+  }>;
+  byType: Array<{
+    typeKey: string;
+    label: string;
+    enabled: boolean;
+    raiseCount: number;
+    target: number;
+    soft: number;
+    hard: number;
+    funded: number;
+  }>;
+  types: CapitalTypeOption[];
+}
+
+/** GET /matching-matrix. */
+export interface MatrixRaise {
+  raiseId: string;
+  dealId: string;
+  dealName: string;
+  typeKey: string;
+  typeLabel: string;
+  target: number;
+}
+
+export interface MatrixCell {
+  pipelineStage: string;
+  stage: string;
+  hard: number;
+  funded: number;
+}
+
+export interface MatrixInvestor {
+  personId: string;
+  name: string;
+  firm: string;
+  types: string[];
+  exposure: number;
+  capacity: number | null;
+  cells: Record<string, MatrixCell>;
+}
+
+export interface MatchingMatrix {
+  raises: MatrixRaise[];
+  investors: MatrixInvestor[];
+  total: number;
+  suggestions: Record<
+    string,
+    Array<{ personId: string; name: string; score: number }>
+  >;
+}
+
+/** GET /action-items. */
+export interface ActionItem {
+  kind:
+    | "stale_touch"
+    | "unsigned_doc"
+    | "unfunded"
+    | "closing"
+    | "behind_target";
+  severity: "info" | "amber" | "red";
+  title: string;
+  detail: string;
+  href: string;
+  date: string | null;
+}
+
+/** GET /deals/[dealId]/templates. */
+export interface TemplateGroup {
+  key: string;
+  label: string;
+  templates: Array<{
+    id: string;
+    name: string;
+    key: string;
+    status: string;
+  }>;
 }
 
 /* ------------------------------ economics ------------------------------ */
