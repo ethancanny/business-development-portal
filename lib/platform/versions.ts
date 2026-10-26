@@ -36,6 +36,12 @@ export const DATASETS = [
   "directory",
   "capital",
   "badge",
+  /* Focus & Theme (Oct 26, 2026): workspace focus + per-user theme
+     settings. NOTE: this entry was landed by the Focus & Theme build
+     (d273c91a), dropped by the perf close-out push (built from a
+     pre-focus tree), and is restored here on top of the close-out's
+     TTL-cache version — both changes are required. */
+  "focus_theme",
 ] as const;
 
 export type DatasetName = (typeof DATASETS)[number];
