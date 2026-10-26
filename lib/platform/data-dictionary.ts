@@ -71,6 +71,20 @@ export const TABLE_DESCRIPTIONS: Record<string, string> = {
     "In-portal notifications for a user (mentions and collaboration alerts).",
   "directory.type_tags":
     "Directory type taxonomy for people and organizations (operator, investor, lender, broker, attorney…).",
+  "directory.relationship_profiles":
+    "One relationship summary row per Directory person or organization: tier, stage, owner, cadence, source, communication preferences, important dates, and the pre-computed touch summaries (last touch, next touch due, touches in the last 90 days, open task count) that Directory lists read instead of computing live.",
+  "directory.interactions":
+    "The single contact-activity system: calls, meetings, emails, texts, notes, events and intros with participants, direction, outcome, next step, visibility (shared/private), and an optional predicted reply % locked once saved. Soft-deleted rows keep deleted_at set.",
+  "directory.interaction_participants":
+    "Who took part in an interaction: one row per person per interaction, with the primary contact flagged.",
+  "directory.interaction_templates":
+    "Saved Quick Log templates (for example Intro call, Broker coffee) that pre-fill an interaction's type, summary and outcome.",
+  "directory.tags":
+    "Free-form tags on Directory people and organizations, one row per tag per record.",
+  "directory.lists":
+    "Named static lists of Directory records (people and organizations) built by hand for outreach and follow-up.",
+  "directory.list_members":
+    "Membership rows for directory.lists: which person or organization belongs to which list.",
   "dataroom.rooms":
     "Data rooms — one active room per deal, holding its folders, checklist, guests, and documents.",
   "dataroom.guests":

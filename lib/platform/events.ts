@@ -19,6 +19,9 @@ export const EVENT_TYPES = [
   "initiative_updated",
   "investor_commitment_changed",
   "contact_updated",
+  "interaction_logged",
+  "task_completed",
+  "stage_changed",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];

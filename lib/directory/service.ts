@@ -7,6 +7,12 @@ import {
   isDirectoryType,
   TYPE_TAXONOMY,
 } from "./schema";
+import {
+  ensureCrmSchema,
+  getEntityTags,
+  getRelationship,
+  type RelationshipProfile,
+} from "./crm";
 
 export { ensureDirectory, TYPE_TAXONOMY };
 export type { DirectoryType } from "./schema";
@@ -109,7 +115,20 @@ export interface DirectoryListItem {
   logoVersion: number;
   linkedDealCount: number;
   updatedAt: string | null;
+  /* Relationship CRM summary columns (directory.relationship_profiles
+   * + directory.tags) — pre-computed by the CRM service, never
+   * derived live here. */
+  tier: string;
+  stage: string;
+  relOwner: string;
+  lastTouchAt: string | null;
+  nextTouchDue: string | null;
+  touchCount90d: number;
+  openTaskCount: number;
+  tags: string[];
 }
+
+export type DirectoryListSort = "name" | "updated" | "lastTouch" | "nextDue";
 
 export interface DirectoryListFilters {
   kind?: string;
@@ -117,12 +136,23 @@ export interface DirectoryListFilters {
   q?: string;
   limit?: number;
   offset?: number;
+  /* Relationship CRM filters (Phase 1) — all read summary columns. */
+  tier?: string;
+  stage?: string;
+  owner?: string;
+  tag?: string;
+  overdueOnly?: boolean;
+  lastTouchBefore?: string;
+  lastTouchAfter?: string;
+  sort?: DirectoryListSort | string;
 }
 
 export async function listDirectory(
   filters: DirectoryListFilters
 ): Promise<{ items: DirectoryListItem[]; total: number }> {
   await ensureDirectory();
+  // Relationship summary columns live in directory.relationship_profiles.
+  await ensureCrmSchema().catch(() => undefined);
   // Organization rows carry Deal Identity columns (logo_version).
   await ensureIdentitySchema().catch(() => undefined);
   const db = sql();
@@ -132,11 +162,26 @@ export async function listDirectory(
   const like = `%${q}%`;
   const limit = Math.min(50, Math.max(1, filters.limit || 25));
   const offset = Math.max(0, filters.offset || 0);
+  // CRM filters — all against pre-computed summary columns / tags.
+  const tierParam = (filters.tier ?? "").trim();
+  const stageParam = (filters.stage ?? "").trim();
+  const ownerParam = (filters.owner ?? "").trim();
+  const tagParam = (filters.tag ?? "").trim();
+  const overdueParam = filters.overdueOnly ? 1 : 0;
+  const lastTouchBefore = (filters.lastTouchBefore ?? "").trim();
+  const lastTouchAfter = (filters.lastTouchAfter ?? "").trim();
+  const sortParam = ["name", "updated", "lastTouch", "nextDue"].includes(
+    filters.sort ?? ""
+  )
+    ? (filters.sort as string)
+    : "updated";
 
   const rows = await db`
     SELECT u.kind, u.id, u.name, u.title, u.core_kind, u.email, u.phone,
       u.photo_url, u.organization_name, u.website, u.updated_at,
-      u.linked_deal_count, u.types, u.logo_version
+      u.linked_deal_count, u.types, u.logo_version,
+      u.tier, u.stage, u.rel_owner, u.last_touch_at, u.next_touch_due,
+      u.touch_count_90d, u.open_task_count, u.tags
     FROM (
       SELECT 'person'::text AS kind, p.id, p.name, p.title,
         p.kind AS core_kind, p.email, p.phone, p.photo_url,
@@ -147,8 +192,19 @@ export async function listDirectory(
           AS linked_deal_count,
         (SELECT coalesce(array_agg(t.type ORDER BY t.type), ARRAY[]::text[])
           FROM directory.type_tags t
-          WHERE t.entity_kind = 'person' AND t.entity_id = p.id) AS types
+          WHERE t.entity_kind = 'person' AND t.entity_id = p.id) AS types,
+        coalesce(rp.tier, '') AS tier,
+        coalesce(rp.stage, 'New') AS stage,
+        coalesce(rp.owner, '') AS rel_owner,
+        rp.last_touch_at, rp.next_touch_due,
+        coalesce(rp.touch_count_90d, 0) AS touch_count_90d,
+        coalesce(rp.open_task_count, 0) AS open_task_count,
+        (SELECT coalesce(array_agg(tg.tag ORDER BY tg.tag), ARRAY[]::text[])
+          FROM directory.tags tg
+          WHERE tg.entity_kind = 'person' AND tg.entity_id = p.id) AS tags
       FROM core.people p
+      LEFT JOIN directory.relationship_profiles rp
+        ON rp.entity_kind = 'person' AND rp.entity_id = p.id
       WHERE p.deleted_at IS NULL
         AND (${kindParam} = '' OR ${kindParam} = 'person')
         AND (${typeParam} = '' OR EXISTS (
@@ -158,6 +214,16 @@ export async function listDirectory(
         AND (${q} = '' OR p.normalized_name ILIKE ${like}
           OR p.name ILIKE ${like} OR p.email ILIKE ${like}
           OR p.search_vector @@ plainto_tsquery('english', ${q}))
+        AND (${tierParam} = '' OR rp.tier = ${tierParam})
+        AND (${stageParam} = '' OR rp.stage = ${stageParam})
+        AND (${ownerParam} = '' OR rp.owner = ${ownerParam})
+        AND (${tagParam} = '' OR EXISTS (
+          SELECT 1 FROM directory.tags tg2
+          WHERE tg2.entity_kind = 'person' AND tg2.entity_id = p.id
+            AND lower(tg2.tag) = lower(${tagParam})))
+        AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
+        AND (${lastTouchBefore} = '' OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
+        AND (${lastTouchAfter} = '' OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz)
       UNION ALL
       SELECT 'organization'::text AS kind, o.id, o.name, ''::text AS title,
         o.kind AS core_kind, ''::text AS email, ''::text AS phone,
@@ -168,8 +234,19 @@ export async function listDirectory(
           AS linked_deal_count,
         (SELECT coalesce(array_agg(t.type ORDER BY t.type), ARRAY[]::text[])
           FROM directory.type_tags t
-          WHERE t.entity_kind = 'organization' AND t.entity_id = o.id) AS types
+          WHERE t.entity_kind = 'organization' AND t.entity_id = o.id) AS types,
+        coalesce(rp.tier, '') AS tier,
+        coalesce(rp.stage, 'New') AS stage,
+        coalesce(rp.owner, '') AS rel_owner,
+        rp.last_touch_at, rp.next_touch_due,
+        coalesce(rp.touch_count_90d, 0) AS touch_count_90d,
+        coalesce(rp.open_task_count, 0) AS open_task_count,
+        (SELECT coalesce(array_agg(tg.tag ORDER BY tg.tag), ARRAY[]::text[])
+          FROM directory.tags tg
+          WHERE tg.entity_kind = 'organization' AND tg.entity_id = o.id) AS tags
       FROM core.organizations o
+      LEFT JOIN directory.relationship_profiles rp
+        ON rp.entity_kind = 'organization' AND rp.entity_id = o.id
       WHERE o.deleted_at IS NULL
         AND (${kindParam} = '' OR ${kindParam} = 'organization')
         AND (${typeParam} = '' OR EXISTS (
@@ -178,8 +255,23 @@ export async function listDirectory(
             AND (ft.type = ${typeParam} OR (${typeParam} = 'investor' AND ft.type = 'lp'))))
         AND (${q} = '' OR o.normalized_name ILIKE ${like}
           OR o.name ILIKE ${like} OR o.website ILIKE ${like})
+        AND (${tierParam} = '' OR rp.tier = ${tierParam})
+        AND (${stageParam} = '' OR rp.stage = ${stageParam})
+        AND (${ownerParam} = '' OR rp.owner = ${ownerParam})
+        AND (${tagParam} = '' OR EXISTS (
+          SELECT 1 FROM directory.tags tg2
+          WHERE tg2.entity_kind = 'organization' AND tg2.entity_id = o.id
+            AND lower(tg2.tag) = lower(${tagParam})))
+        AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
+        AND (${lastTouchBefore} = '' OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
+        AND (${lastTouchAfter} = '' OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz)
     ) u
-    ORDER BY u.updated_at DESC, u.name ASC
+    ORDER BY
+      CASE WHEN ${sortParam} = 'name' THEN u.name END ASC,
+      CASE WHEN ${sortParam} = 'lastTouch' THEN u.last_touch_at END DESC NULLS LAST,
+      CASE WHEN ${sortParam} = 'nextDue' THEN u.next_touch_due END ASC NULLS LAST,
+      CASE WHEN ${sortParam} = 'updated' THEN u.updated_at END DESC NULLS LAST,
+      u.updated_at DESC, u.name ASC
     LIMIT ${limit} OFFSET ${offset}`;
 
   const items: DirectoryListItem[] = rows.map((r) => {
@@ -200,12 +292,24 @@ export async function listDirectory(
       logoVersion: num(rec.logo_version),
       linkedDealCount: num(rec.linked_deal_count),
       updatedAt: isoOrNull(rec.updated_at),
+      tier: str(rec.tier),
+      stage: str(rec.stage) || "New",
+      relOwner: str(rec.rel_owner),
+      lastTouchAt: isoOrNull(rec.last_touch_at),
+      nextTouchDue: isoOrNull(rec.next_touch_due),
+      touchCount90d: num(rec.touch_count_90d),
+      openTaskCount: num(rec.open_task_count),
+      tags: Array.isArray(rec.tags)
+        ? rec.tags.map((t) => String(t)).filter(Boolean)
+        : parseTypes(rec.tags),
     };
   });
 
   const countRows = await db`
     SELECT (
       (SELECT count(*)::int FROM core.people p
+        LEFT JOIN directory.relationship_profiles rp
+          ON rp.entity_kind = 'person' AND rp.entity_id = p.id
         WHERE p.deleted_at IS NULL
           AND (${kindParam} = '' OR ${kindParam} = 'person')
           AND (${typeParam} = '' OR EXISTS (
@@ -214,9 +318,21 @@ export async function listDirectory(
               AND (ft.type = ${typeParam} OR (${typeParam} = 'investor' AND ft.type = 'lp'))))
           AND (${q} = '' OR p.normalized_name ILIKE ${like}
             OR p.name ILIKE ${like} OR p.email ILIKE ${like}
-            OR p.search_vector @@ plainto_tsquery('english', ${q})))
+            OR p.search_vector @@ plainto_tsquery('english', ${q}))
+          AND (${tierParam} = '' OR rp.tier = ${tierParam})
+          AND (${stageParam} = '' OR rp.stage = ${stageParam})
+          AND (${ownerParam} = '' OR rp.owner = ${ownerParam})
+          AND (${tagParam} = '' OR EXISTS (
+            SELECT 1 FROM directory.tags tg2
+            WHERE tg2.entity_kind = 'person' AND tg2.entity_id = p.id
+              AND lower(tg2.tag) = lower(${tagParam})))
+          AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
+          AND (${lastTouchBefore} = '' OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
+          AND (${lastTouchAfter} = '' OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz))
       +
       (SELECT count(*)::int FROM core.organizations o
+        LEFT JOIN directory.relationship_profiles rp
+          ON rp.entity_kind = 'organization' AND rp.entity_id = o.id
         WHERE o.deleted_at IS NULL
           AND (${kindParam} = '' OR ${kindParam} = 'organization')
           AND (${typeParam} = '' OR EXISTS (
@@ -224,7 +340,17 @@ export async function listDirectory(
             WHERE ft.entity_kind = 'organization' AND ft.entity_id = o.id
               AND (ft.type = ${typeParam} OR (${typeParam} = 'investor' AND ft.type = 'lp'))))
           AND (${q} = '' OR o.normalized_name ILIKE ${like}
-            OR o.name ILIKE ${like} OR o.website ILIKE ${like}))
+            OR o.name ILIKE ${like} OR o.website ILIKE ${like})
+          AND (${tierParam} = '' OR rp.tier = ${tierParam})
+          AND (${stageParam} = '' OR rp.stage = ${stageParam})
+          AND (${ownerParam} = '' OR rp.owner = ${ownerParam})
+          AND (${tagParam} = '' OR EXISTS (
+            SELECT 1 FROM directory.tags tg2
+            WHERE tg2.entity_kind = 'organization' AND tg2.entity_id = o.id
+              AND lower(tg2.tag) = lower(${tagParam})))
+          AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
+          AND (${lastTouchBefore} = '' OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
+          AND (${lastTouchAfter} = '' OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz))
     ) AS n`;
   const total = countRows.length ? num((countRows[0] as Record<string, unknown>).n) : 0;
   logUsage("directory_list", items.length, JSON.stringify(items).length);
@@ -258,6 +384,26 @@ export interface DirectoryDetail {
   types: string[];
   linkedDeals: DirectoryLinkedDeal[];
   legacyInvestor: LegacyInvestorInfo | null;
+  /** Relationship CRM profile (directory.relationship_profiles) or
+   *  null when the record has no profile yet — additive, Phase 1. */
+  relationship: RelationshipProfile | null;
+  /** Free-form CRM tags (directory.tags). */
+  tags: string[];
+}
+
+async function getRelationshipBits(
+  kind: DirectoryEntityKind,
+  id: string
+): Promise<{ relationship: RelationshipProfile | null; tags: string[] }> {
+  try {
+    const relationship = await getRelationship(kind, id);
+    if (relationship) return { relationship, tags: relationship.tags };
+    const tags = await getEntityTags(kind, id).catch(() => [] as string[]);
+    return { relationship: null, tags };
+  } catch (err) {
+    console.error("[directory] relationship lookup failed", err);
+    return { relationship: null, tags: [] };
+  }
 }
 
 async function getTypes(
@@ -366,12 +512,20 @@ export async function getDirectoryDetail(
         console.error("[directory] legacy investor lookup failed", err);
       }
     }
-    const [types, linkedDeals] = await Promise.all([
+    const [types, linkedDeals, rel] = await Promise.all([
       getTypes("person", id),
       getLinkedDeals("person", id),
+      getRelationshipBits("person", id),
     ]);
     logUsage("directory_detail", 1 + linkedDeals.length, 0);
-    return { record, types, linkedDeals, legacyInvestor };
+    return {
+      record,
+      types,
+      linkedDeals,
+      legacyInvestor,
+      relationship: rel.relationship,
+      tags: rel.tags,
+    };
   }
 
   await ensureIdentitySchema().catch(() => undefined);
@@ -407,12 +561,20 @@ export async function getDirectoryDetail(
     createdAt: isoOrNull(rec.created_at),
     updatedAt: isoOrNull(rec.updated_at),
   };
-  const [types, linkedDeals] = await Promise.all([
+  const [types, linkedDeals, rel] = await Promise.all([
     getTypes("organization", id),
     getLinkedDeals("organization", id),
+    getRelationshipBits("organization", id),
   ]);
   logUsage("directory_detail", 1 + linkedDeals.length, 0);
-  return { record, types, linkedDeals, legacyInvestor: null };
+  return {
+    record,
+    types,
+    linkedDeals,
+    legacyInvestor: null,
+    relationship: rel.relationship,
+    tags: rel.tags,
+  };
 }
 
 /* ------------------------------ create ------------------------------- */
@@ -801,11 +963,17 @@ export async function importRows(input: {
   mapping: Record<string, string>;
   kind: string;
   actor?: string;
+  /** CRM Phase 1: when true, run the identical validation/dedupe
+   *  pass and report wouldCreate/wouldSkip with ZERO writes. */
+  dryRun?: boolean;
 }): Promise<{
   created: number;
   duplicates: ImportDuplicate[];
   errors: ImportError[];
   total: number;
+  dryRun: boolean;
+  wouldCreate: number;
+  wouldSkip: number;
 }> {
   await ensureDirectory();
   const kind = normalizeEntityKind(input.kind);
@@ -848,6 +1016,12 @@ export async function importRows(input: {
         duplicates.push({ row, rowIndex: i, matchId: match.id, matchName: match.name });
         continue;
       }
+      if (input.dryRun) {
+        // Identical validation/dedupe as the commit path above; the
+        // only difference is that nothing is written.
+        created++;
+        continue;
+      }
       await createRecord({
         kind,
         name,
@@ -871,7 +1045,15 @@ export async function importRows(input: {
     }
   }
   logUsage("directory_import", created, 0);
-  return { created, duplicates, errors, total: rows.length };
+  return {
+    created: input.dryRun ? 0 : created,
+    duplicates,
+    errors,
+    total: rows.length,
+    dryRun: Boolean(input.dryRun),
+    wouldCreate: created,
+    wouldSkip: duplicates.length,
+  };
 }
 
 /* ----------------------------- templates ----------------------------- */

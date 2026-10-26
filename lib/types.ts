@@ -287,7 +287,7 @@ export const PARTNER_NAMES = [
 
 // --- Tasks & follow-ups ---
 
-export type TaskRelatedKind = "deal" | "executive";
+export type TaskRelatedKind = "deal" | "executive" | "person" | "organization";
 
 export type TaskType = "Call" | "Email" | "Meeting" | "Send docs" | "Other";
 export type TaskPriority = "normal" | "high";

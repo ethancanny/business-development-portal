@@ -20,6 +20,8 @@ export const TYPE_TAXONOMY = [
   "seller",
   "portfolio_contact",
   "contact",
+  "owner",
+  "ad_contact",
 ] as const;
 
 export type DirectoryType = (typeof TYPE_TAXONOMY)[number];
