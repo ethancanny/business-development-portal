@@ -168,8 +168,11 @@ export async function listDirectory(
   const ownerParam = (filters.owner ?? "").trim();
   const tagParam = (filters.tag ?? "").trim();
   const overdueParam = filters.overdueOnly ? 1 : 0;
-  const lastTouchBefore = (filters.lastTouchBefore ?? "").trim();
-  const lastTouchAfter = (filters.lastTouchAfter ?? "").trim();
+  // NULL when unset: ''::timestamptz throws SQLSTATE 22007 in Postgres
+  // (constant-folded even behind a boolean guard) — the IS NULL checks
+  // below are the safe form.
+  const lastTouchBefore = (filters.lastTouchBefore ?? "").trim() || null;
+  const lastTouchAfter = (filters.lastTouchAfter ?? "").trim() || null;
   const sortParam = ["name", "updated", "lastTouch", "nextDue"].includes(
     filters.sort ?? ""
   )
@@ -327,8 +330,8 @@ export async function listDirectory(
             WHERE tg2.entity_kind = 'person' AND tg2.entity_id = p.id
               AND lower(tg2.tag) = lower(${tagParam})))
           AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
-          AND (${lastTouchBefore} = '' OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
-          AND (${lastTouchAfter} = '' OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz))
+          AND (${lastTouchBefore}::timestamptz IS NULL OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
+          AND (${lastTouchAfter}::timestamptz IS NULL OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz))
       +
       (SELECT count(*)::int FROM core.organizations o
         LEFT JOIN directory.relationship_profiles rp
@@ -349,8 +352,8 @@ export async function listDirectory(
             WHERE tg2.entity_kind = 'organization' AND tg2.entity_id = o.id
               AND lower(tg2.tag) = lower(${tagParam})))
           AND (${overdueParam} = 0 OR (rp.next_touch_due IS NOT NULL AND rp.next_touch_due < now()))
-          AND (${lastTouchBefore} = '' OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
-          AND (${lastTouchAfter} = '' OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz))
+          AND (${lastTouchBefore}::timestamptz IS NULL OR rp.last_touch_at < ${lastTouchBefore}::timestamptz)
+          AND (${lastTouchAfter}::timestamptz IS NULL OR rp.last_touch_at >= ${lastTouchAfter}::timestamptz))
     ) AS n`;
   const total = countRows.length ? num((countRows[0] as Record<string, unknown>).n) : 0;
   logUsage("directory_list", items.length, JSON.stringify(items).length);

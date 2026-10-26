@@ -31,11 +31,12 @@ export async function GET(req: NextRequest) {
   // extension; at merge time the extended type accepts these fields
   // directly.
   const filters = {
-    // People only (Ethan, Oct 23, 2026): the Directory is a contacts
-    // list — a contact's company must not appear as a second contact.
-    // Organization records stay in core.organizations and remain
-    // reachable via the record routes; only this list is scoped.
-    kind: "person",
+    // People by default (Ethan, Oct 23, 2026): the Directory is a
+    // contacts list — a contact's company must not appear as a second
+    // contact. CRM Phase 1 adds the explicit Organizations view the
+    // spec requires, so an explicit kind=organization is honored;
+    // absent the param, the list stays people-only exactly as before.
+    kind: sp.get("kind") === "organization" ? "organization" : "person",
     type: sp.get("type") ?? undefined,
     q: sp.get("q") ?? undefined,
     tier: sp.get("tier") ?? undefined,
