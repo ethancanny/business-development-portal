@@ -104,6 +104,9 @@ export interface DeliveryRow {
   emailDetail: string;
   deliveredBy: string;
   deliveredAt: string;
+  /** Open-pixel stamp (delivery email image fetched) — distinct from
+   * openedAt/viewedAt, which record portal-link access. */
+  emailOpenedAt: string | null;
   openedAt: string | null;
   viewedAt: string | null;
   downloadedAt: string | null;
@@ -214,7 +217,7 @@ export function rowToReport(r: Record<string, unknown>): ReportRow {
 const DELIVERY_COLS = `
   id, report_id, version, recipient_person_id, recipient_name,
   recipient_email, audience, allow_pdf, token_last4, status, email_status,
-  email_detail, delivered_by, delivered_at, opened_at, viewed_at,
+  email_detail, delivered_by, delivered_at, email_opened_at, opened_at, viewed_at,
   downloaded_at, revoked_at, revoked_by, expires_at`;
 
 export function rowToDelivery(r: Record<string, unknown>): DeliveryRow {
@@ -235,6 +238,7 @@ export function rowToDelivery(r: Record<string, unknown>): DeliveryRow {
     emailDetail: str(r.email_detail),
     deliveredBy: str(r.delivered_by),
     deliveredAt: isoOrNull(r.delivered_at) ?? "",
+    emailOpenedAt: isoOrNull(r.email_opened_at),
     openedAt: isoOrNull(r.opened_at),
     viewedAt: isoOrNull(r.viewed_at),
     downloadedAt: isoOrNull(r.downloaded_at),
@@ -647,6 +651,39 @@ async function writeVersion(
     WHERE id = ${report.id}
     RETURNING ${db.unsafe(REPORT_COLS)}`;
   return rowToReport(rows[0] as Record<string, unknown>);
+}
+
+/**
+ * Store a render produced OUTSIDE the comms assembler (Send anywhere,
+ * Oct 25, 2026): the capital module renders investor reports from its
+ * own templates (lib/capital/reporting.ts renderReport) and bridges
+ * the finished render in here so delivery reuses the full comms
+ * pipeline (pre-send check, tokens, codename handling, revocation).
+ * The render lands as version 1 in 'draft'; the caller then runs the
+ * normal submit → approve transitions before deliverReport. The
+ * comms_generate_report job enqueued by createReport can never
+ * clobber it afterwards: generateReportNow refuses terminal states,
+ * and a delivered report is 'sent'.
+ */
+export async function storeExternalRender(
+  reportId: string,
+  render: ReportRender,
+  actor: string,
+  note = "Imported render"
+): Promise<ReportRow> {
+  await ready();
+  const report = await requireReport(reportId);
+  if (report.status === "sent" || report.status === "discarded") {
+    throw new Error("report_locked");
+  }
+  const updated = await writeVersion(report, render, [], actor, note, {
+    narrativeStatus: "none",
+    status: "draft",
+  });
+  await writeAudit(reportId, actor, "external_render_stored", {
+    version: updated.currentVersion,
+  });
+  return updated;
 }
 
 /**

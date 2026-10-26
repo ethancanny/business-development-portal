@@ -346,6 +346,13 @@ export function ensureComms(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS comms_deliveries_report_idx
         ON comms.deliveries (report_id, delivered_at DESC)`;
+      // Open pixel (Send anywhere, Oct 25, 2026): the moment the
+      // delivery email's 1×1 tracking image was fetched. Deliberately
+      // separate from opened_at/viewed_at, which record the recipient
+      // opening the portal link itself.
+      await db`
+        ALTER TABLE comms.deliveries
+        ADD COLUMN IF NOT EXISTS email_opened_at TIMESTAMPTZ`;
 
       await db`
         CREATE TABLE IF NOT EXISTS comms.access_log (
