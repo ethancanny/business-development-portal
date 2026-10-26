@@ -124,8 +124,9 @@ export default function DirectoryDetail({
   const [relForm, setRelForm] = useState<{
     tier: string; stage: string; cadenceDays: string; owner: string;
     source: string; introducedByPersonId: string; commPrefs: string;
+    adCertifications: string; adItar: string; adClearance: string; adPrimeCustomers: string;
     importantDates: { label: string; date: string }[];
-  }>({ tier: "", stage: "New", cadenceDays: "", owner: "", source: "", introducedByPersonId: "", commPrefs: "", importantDates: [] });
+  }>({ tier: "", stage: "New", cadenceDays: "", owner: "", source: "", introducedByPersonId: "", commPrefs: "", adCertifications: "", adItar: "", adClearance: "", adPrimeCustomers: "", importantDates: [] });
   const [relTags, setRelTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState("");
   const [relSaving, setRelSaving] = useState(false);
@@ -184,6 +185,10 @@ export default function DirectoryDetail({
           source: rel?.source ?? "",
           introducedByPersonId: rel?.introducedByPersonId ?? "",
           commPrefs: rel?.commPrefs ?? "",
+          adCertifications: rel?.adCertifications ?? "",
+          adItar: rel?.adItar ?? "",
+          adClearance: rel?.adClearance ?? "",
+          adPrimeCustomers: rel?.adPrimeCustomers ?? "",
           importantDates: Array.isArray(rel?.importantDates) ? rel!.importantDates : [],
         });
         setRelTags(Array.isArray(data.tags) ? data.tags : []);
@@ -387,6 +392,10 @@ export default function DirectoryDetail({
         source: relForm.source,
         introducedByPersonId: relForm.introducedByPersonId || null,
         commPrefs: relForm.commPrefs,
+        adCertifications: relForm.adCertifications,
+        adItar: relForm.adItar,
+        adClearance: relForm.adClearance,
+        adPrimeCustomers: relForm.adPrimeCustomers,
         importantDates: relForm.importantDates.filter((d) => d.label.trim() || d.date),
         tags: relTags,
       };
@@ -758,6 +767,22 @@ export default function DirectoryDetail({
                   <div>
                     <label className={labelCls} htmlFor="rel-comm">Communication preferences</label>
                     <input id="rel-comm" value={relForm.commPrefs} onChange={(e) => setRelForm({ ...relForm, commPrefs: e.target.value })} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="rel-ad-certifications">Certifications</label>
+                    <input id="rel-ad-certifications" value={relForm.adCertifications} onChange={(e) => setRelForm({ ...relForm, adCertifications: e.target.value })} placeholder="e.g. AS9100, ISO 9001, CMMC" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="rel-ad-itar">ITAR</label>
+                    <input id="rel-ad-itar" value={relForm.adItar} onChange={(e) => setRelForm({ ...relForm, adItar: e.target.value })} placeholder="e.g. Registered" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="rel-ad-clearance">Clearance level</label>
+                    <input id="rel-ad-clearance" value={relForm.adClearance} onChange={(e) => setRelForm({ ...relForm, adClearance: e.target.value })} placeholder="e.g. Secret" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="rel-ad-prime-customers">Prime customers</label>
+                    <input id="rel-ad-prime-customers" value={relForm.adPrimeCustomers} onChange={(e) => setRelForm({ ...relForm, adPrimeCustomers: e.target.value })} placeholder="e.g. Raytheon" className={inputCls} />
                   </div>
                 </div>
                 <div className="mt-3">
