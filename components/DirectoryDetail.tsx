@@ -23,8 +23,11 @@ import {
   KindBadge,
   TypeBadge,
   typeLabel,
+  isOverdueItem,
   type DirectoryDetailPayload,
   type DirectoryKind,
+  type RelationshipProfile,
+  type TimelineItem,
 } from "@/components/DirectoryUnified";
 import { fmtDate } from "@/lib/format";
 
@@ -117,6 +120,27 @@ export default function DirectoryDetail({
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailMsg, setEmailMsg] = useState("");
 
+  /* ---- CRM Phase 1: relationship + timeline ---- */
+  const [relForm, setRelForm] = useState<{
+    tier: string; stage: string; cadenceDays: string; owner: string;
+    source: string; introducedByPersonId: string; commPrefs: string;
+    importantDates: { label: string; date: string }[];
+  }>({ tier: "", stage: "New", cadenceDays: "", owner: "", source: "", introducedByPersonId: "", commPrefs: "", importantDates: [] });
+  const [relTags, setRelTags] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState("");
+  const [relSaving, setRelSaving] = useState(false);
+  const [relMsg, setRelMsg] = useState("");
+  const [introQ, setIntroQ] = useState("");
+  const [introResults, setIntroResults] = useState<{ id: string; name: string }[]>([]);
+  const [introName, setIntroName] = useState("");
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [timelineFilter, setTimelineFilter] = useState("All");
+  const [timelineOffset, setTimelineOffset] = useState(0);
+  const [timelineHasMore, setTimelineHasMore] = useState(false);
+  const [timelineBusy, setTimelineBusy] = useState(false);
+  const [openTasks, setOpenTasks] = useState<TimelineItem[]>([]);
+  const [relatedPeople, setRelatedPeople] = useState<{ id: string; name: string; sub?: string }[]>([]);
+
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   /** Wrong-deal protection (Deal Identity, Oct 24, 2026): deleting an
    *  ORGANIZATION record goes through the naming dialog. */
@@ -147,7 +171,23 @@ export default function DirectoryDetail({
           types: Array.isArray(data.types) ? data.types : [],
           linkedDeals: Array.isArray(data.linkedDeals) ? data.linkedDeals : [],
           legacyInvestor: data.legacyInvestor ?? null,
+          relationship: data.relationship ?? null,
+          tags: Array.isArray(data.tags) ? data.tags : [],
         });
+        // Seed the relationship editor from the detail payload.
+        const rel = data.relationship ?? null;
+        setRelForm({
+          tier: rel?.tier ?? "",
+          stage: rel?.stage ?? "New",
+          cadenceDays: rel?.cadenceDays != null ? String(rel.cadenceDays) : "",
+          owner: rel?.owner ?? "",
+          source: rel?.source ?? "",
+          introducedByPersonId: rel?.introducedByPersonId ?? "",
+          commPrefs: rel?.commPrefs ?? "",
+          importantDates: Array.isArray(rel?.importantDates) ? rel!.importantDates : [],
+        });
+        setRelTags(Array.isArray(data.tags) ? data.tags : []);
+        setRelMsg("");
         const rec = data.record;
         setForm({
           name: rec.name || "",
@@ -200,6 +240,176 @@ export default function DirectoryDetail({
     void loadEmailLinks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, id]);
+
+  /* ---- CRM Phase 1 data: timeline / tasks / related people ---- */
+  const TIMELINE_FILTERS: { label: string; kinds: string; type?: string }[] = [
+    { label: "All", kinds: "" },
+    { label: "Interactions", kinds: "interaction" },
+    { label: "Calls", kinds: "interaction", type: "call" },
+    { label: "Meetings", kinds: "interaction", type: "meeting" },
+    { label: "Emails", kinds: "email" },
+    { label: "Tasks", kinds: "task" },
+    { label: "Documents", kinds: "document" },
+    { label: "Events", kinds: "event" },
+  ];
+
+  const fetchTimeline = async (offset: number, append: boolean) => {
+    const f = TIMELINE_FILTERS.find((x) => x.label === timelineFilter) ?? TIMELINE_FILTERS[0];
+    setTimelineBusy(true);
+    try {
+      const params = new URLSearchParams({ limit: "20", offset: String(offset) });
+      if (f.kinds) params.set("kinds", f.kinds);
+      const r = await fetch(
+        `/api/platform/directory/record/${kind}/${encodeURIComponent(id)}/timeline?${params.toString()}`
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data: unknown = await r.json().catch(() => null);
+      const raw: TimelineItem[] =
+        data && typeof data === "object" && Array.isArray((data as { items?: unknown }).items)
+          ? ((data as { items: TimelineItem[] }).items)
+          : Array.isArray(data) ? (data as TimelineItem[]) : [];
+      const items = f.type
+        ? raw.filter((it) => !it.type || it.type === f.type)
+        : raw;
+      setTimelineHasMore(raw.length >= 20);
+      setTimelineOffset(offset);
+      setTimeline((prev) => (append ? [...prev, ...items] : items));
+    } catch {
+      if (!append) setTimeline([]);
+      setTimelineHasMore(false);
+    } finally { setTimelineBusy(false); }
+  };
+
+  useEffect(() => {
+    if (!payload) return;
+    void fetchTimeline(0, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, id, timelineFilter, payload?.record?.id]);
+
+  useEffect(() => {
+    if (!payload) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const params = new URLSearchParams({ kinds: "task", limit: "50", offset: "0" });
+        const r = await fetch(
+          `/api/platform/directory/record/${kind}/${encodeURIComponent(id)}/timeline?${params.toString()}`
+        );
+        if (!r.ok || cancelled) return;
+        const data: unknown = await r.json().catch(() => null);
+        const items: TimelineItem[] =
+          data && typeof data === "object" && Array.isArray((data as { items?: unknown }).items)
+            ? ((data as { items: TimelineItem[] }).items)
+            : [];
+        if (!cancelled) setOpenTasks(items.filter((it) => it.done !== true));
+      } catch { /* side panel is an enhancement */ }
+    })();
+    return () => { cancelled = true; };
+  }, [kind, id, payload]);
+
+  // Related people: same organization (people) / people at org (orgs),
+  // plus the introduced-by person when set.
+  useEffect(() => {
+    if (!payload) return;
+    let cancelled = false;
+    (async () => {
+      const out: { id: string; name: string; sub?: string }[] = [];
+      const orgName = kind === "person" ? payload.record.organizationName : payload.record.name;
+      if (orgName) {
+        try {
+          const params = new URLSearchParams({ kind: "person", q: String(orgName), limit: "20", offset: "0" });
+          const r = await fetch(`/api/platform/directory?${params.toString()}`);
+          if (r.ok) {
+            const data: unknown = await r.json().catch(() => null);
+            const items = data && typeof data === "object" && Array.isArray((data as { items?: unknown }).items)
+              ? ((data as { items: Array<Record<string, unknown>> }).items) : [];
+            for (const it of items) {
+              if (String(it.id) === id) continue;
+              const matchesOrg = kind === "organization"
+                || String(it.organizationName ?? "").toLowerCase() === String(orgName).toLowerCase();
+              if (matchesOrg) out.push({ id: String(it.id), name: String(it.name ?? ""), sub: String(it.title ?? "") || undefined });
+              if (out.length >= 8) break;
+            }
+          }
+        } catch { /* related people are an enhancement */ }
+      }
+      const introId = payload.relationship?.introducedByPersonId;
+      if (introId && !cancelled) {
+        try {
+          const r = await fetch(`/api/platform/directory/record/person/${encodeURIComponent(introId)}`);
+          if (r.ok) {
+            const d: unknown = await r.json().catch(() => null);
+            const rec = d && typeof d === "object" ? (d as { record?: { name?: string } }).record : null;
+            if (rec?.name) {
+              setIntroName(rec.name);
+              if (!out.some((o) => o.id === introId)) out.unshift({ id: introId, name: rec.name, sub: "Introduced by" });
+            }
+          }
+        } catch { /* optional */ }
+      }
+      if (!cancelled) setRelatedPeople(out);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, id, payload?.record?.id]);
+
+  // Introduced-by search
+  useEffect(() => {
+    const q = introQ.trim();
+    if (!q) { setIntroResults([]); return; }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      (async () => {
+        try {
+          const params = new URLSearchParams({ kind: "person", q, limit: "8", offset: "0" });
+          const r = await fetch(`/api/platform/directory?${params.toString()}`);
+          if (!r.ok || cancelled) return;
+          const data: unknown = await r.json().catch(() => null);
+          const items = data && typeof data === "object" && Array.isArray((data as { items?: unknown }).items)
+            ? ((data as { items: Array<Record<string, unknown>> }).items) : [];
+          if (!cancelled) setIntroResults(items.map((it) => ({ id: String(it.id), name: String(it.name ?? "") })).filter((x) => x.id && x.id !== id));
+        } catch { /* best-effort */ }
+      })();
+    }, 200);
+    return () => { cancelled = true; window.clearTimeout(t); };
+  }, [introQ, id]);
+
+  const saveRelationship = async () => {
+    if (relSaving) return;
+    setRelSaving(true);
+    setRelMsg("");
+    try {
+      const patch: Record<string, unknown> = {
+        tier: relForm.tier,
+        stage: relForm.stage,
+        cadenceDays: relForm.cadenceDays.trim() === "" ? null : Number(relForm.cadenceDays),
+        owner: relForm.owner,
+        source: relForm.source,
+        introducedByPersonId: relForm.introducedByPersonId || null,
+        commPrefs: relForm.commPrefs,
+        importantDates: relForm.importantDates.filter((d) => d.label.trim() || d.date),
+        tags: relTags,
+      };
+      const r = await fetch(
+        `/api/platform/directory/record/${kind}/${encodeURIComponent(id)}/relationship`,
+        { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data: unknown = await r.json().catch(() => null);
+      const rel = (data && typeof data === "object"
+        ? ((data as { relationship?: RelationshipProfile }).relationship ?? (data as RelationshipProfile))
+        : null) as RelationshipProfile | null;
+      setPayload((prev) => prev ? {
+        ...prev,
+        relationship: rel && typeof rel === "object" && "tier" in rel ? rel : prev.relationship,
+        tags: relTags,
+      } : prev);
+      setRelMsg("Relationship saved.");
+      if (onChanged) onChanged();
+    } catch {
+      setRelMsg("Could not save the relationship — please try again.");
+    } finally { setRelSaving(false); }
+  };
 
   const record = payload?.record ?? null;
   const types = payload?.types ?? [];
@@ -392,6 +602,15 @@ export default function DirectoryDetail({
                 {types.map((t) => (
                   <TypeBadge key={t} typeId={t} />
                 ))}
+                {payload?.relationship?.tier && (
+                  <span className="chip">Tier {payload.relationship.tier}</span>
+                )}
+                {payload?.relationship?.stage && (
+                  <span className="chip">{payload.relationship.stage}</span>
+                )}
+                {payload?.relationship?.owner && (
+                  <span className="chip">Owner: {payload.relationship.owner}</span>
+                )}
               </div>
               <h3 className="mt-3 flex items-center gap-3 text-2xl font-bold text-[#0d1f3c] dark:text-white">
                 {kind === "organization" ? (
@@ -431,6 +650,28 @@ export default function DirectoryDetail({
                   ? ` · Last updated ${fmtDate(record.updatedAt)}`
                   : ""}
               </p>
+              {(payload?.relationship?.lastTouchAt || payload?.relationship?.nextTouchDue) && (
+                <p className="mt-1 text-xs text-slate-500 dark:text-white/55">
+                  {payload.relationship.lastTouchAt
+                    ? `Last touch ${fmtDate(payload.relationship.lastTouchAt)}`
+                    : "No touches yet"}
+                  {payload.relationship.nextTouchDue ? (
+                    <>
+                      {" · Next due "}
+                      <span className={payload.relationship && isOverdueItem(payload.relationship) ? "font-semibold text-red-600 dark:text-red-300" : ""}>
+                        {fmtDate(payload.relationship.nextTouchDue)}
+                        {payload.relationship && isOverdueItem(payload.relationship) ? " (overdue)" : ""}
+                      </span>
+                    </>
+                  ) : ""}
+                  {typeof payload.relationship.touchCount90d === "number"
+                    ? ` · ${payload.relationship.touchCount90d} touches / 90d`
+                    : ""}
+                  {typeof payload.relationship.openTaskCount === "number"
+                    ? ` · ${payload.relationship.openTaskCount} open tasks`
+                    : ""}
+                </p>
+              )}
 
               {/* Facts */}
               <div className="mt-5 grid grid-cols-2 gap-4">
@@ -484,6 +725,96 @@ export default function DirectoryDetail({
                   </div>
                 </div>
               )}
+
+
+              {/* Relationship panel (CRM Phase 1) */}
+              <div className="mt-6 border-t border-slate-100 pt-4 dark:border-white/10">
+                <p className={labelCls}>Relationship</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className={labelCls} htmlFor="rel-tier">Tier</label>
+                    <select id="rel-tier" value={relForm.tier} onChange={(e) => setRelForm({ ...relForm, tier: e.target.value })} className={inputCls}>
+                      <option value="">—</option><option value="A">A</option><option value="B">B</option><option value="C">C</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="rel-stage">Stage</label>
+                    <select id="rel-stage" value={relForm.stage} onChange={(e) => setRelForm({ ...relForm, stage: e.target.value })} className={inputCls}>
+                      {["New", "Engaged", "Active", "Dormant"].map((st) => <option key={st} value={st}>{st}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="rel-cadence">Cadence (days)</label>
+                    <input id="rel-cadence" type="number" min={1} value={relForm.cadenceDays} onChange={(e) => setRelForm({ ...relForm, cadenceDays: e.target.value })} placeholder="Tier default" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="rel-owner">Owner</label>
+                    <input id="rel-owner" value={relForm.owner} onChange={(e) => setRelForm({ ...relForm, owner: e.target.value })} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="rel-source">Source</label>
+                    <input id="rel-source" value={relForm.source} onChange={(e) => setRelForm({ ...relForm, source: e.target.value })} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="rel-comm">Communication preferences</label>
+                    <input id="rel-comm" value={relForm.commPrefs} onChange={(e) => setRelForm({ ...relForm, commPrefs: e.target.value })} className={inputCls} />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <label className={labelCls} htmlFor="rel-intro">Introduced by</label>
+                  {relForm.introducedByPersonId ? (
+                    <p className="flex min-h-[44px] items-center gap-2 text-sm text-[#0d1f3c] dark:text-white">
+                      <span className="flex-1">{introName || relForm.introducedByPersonId}</span>
+                      <button type="button" onClick={() => { setRelForm({ ...relForm, introducedByPersonId: "" }); setIntroName(""); }} className="btn btn-ghost btn-sm">Clear</button>
+                    </p>
+                  ) : (
+                    <>
+                      <input id="rel-intro" value={introQ} onChange={(e) => setIntroQ(e.target.value)} placeholder="Search people…" className={inputCls} />
+                      {introResults.length > 0 && (
+                        <ul className="mt-1 overflow-hidden rounded-xl border border-slate-200 dark:border-white/10">
+                          {introResults.map((r) => (
+                            <li key={r.id}>
+                              <button type="button" onClick={() => { setRelForm({ ...relForm, introducedByPersonId: r.id }); setIntroName(r.name); setIntroQ(""); setIntroResults([]); }} className="flex min-h-[44px] w-full items-center px-3 py-2 text-left text-sm text-[#0d1f3c] hover:bg-slate-50 dark:text-white dark:hover:bg-white/5">{r.name}</button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="mt-3">
+                  <p className={labelCls}>Important dates</p>
+                  <div className="space-y-2">
+                    {relForm.importantDates.map((d, i) => (
+                      <div key={i} className="flex gap-2">
+                        <input value={d.label} onChange={(e) => setRelForm({ ...relForm, importantDates: relForm.importantDates.map((x, xi) => xi === i ? { ...x, label: e.target.value } : x) })} placeholder="Label (e.g. Birthday)" className={`${inputCls} flex-1`} />
+                        <input type="date" value={d.date} onChange={(e) => setRelForm({ ...relForm, importantDates: relForm.importantDates.map((x, xi) => xi === i ? { ...x, date: e.target.value } : x) })} className={`${inputCls} w-40`} />
+                        <button type="button" aria-label="Remove date" onClick={() => setRelForm({ ...relForm, importantDates: relForm.importantDates.filter((_, xi) => xi !== i) })} className="btn btn-ghost btn-sm min-h-[44px]">×</button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => setRelForm({ ...relForm, importantDates: [...relForm.importantDates, { label: "", date: "" }] })} className="btn btn-secondary btn-sm min-h-[44px]">Add date</button>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <p className={labelCls}>Tags</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {relTags.map((t) => (
+                      <span key={t} className="inline-flex items-center gap-1 rounded-full bg-[#0d1f3c] py-1 pl-2.5 pr-1.5 text-xs font-semibold text-white dark:bg-[#b8975a] dark:text-[#0d1f3c]">
+                        {t}
+                        <button type="button" aria-label={`Remove tag ${t}`} onClick={() => setRelTags(relTags.filter((x) => x !== t))} className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-[11px]">×</button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    <input value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const t = tagDraft.trim(); if (t && !relTags.includes(t)) setRelTags([...relTags, t]); setTagDraft(""); } }} placeholder="Add a tag + Enter" className={`${inputCls} flex-1`} />
+                    <button type="button" onClick={() => { const t = tagDraft.trim(); if (t && !relTags.includes(t)) setRelTags([...relTags, t]); setTagDraft(""); }} className="btn btn-secondary btn-sm min-h-[44px]">Add tag</button>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button type="button" disabled={relSaving} onClick={() => void saveRelationship()} className="btn btn-primary btn-sm min-h-[44px]">{relSaving ? "Saving…" : "Save relationship"}</button>
+                  {relMsg && <span className="text-xs text-slate-500 dark:text-white/55">{relMsg}</span>}
+                </div>
+              </div>
 
               {/* Type tag editor */}
               <div className="mt-6 border-t border-slate-100 pt-4 dark:border-white/10">
@@ -679,6 +1010,80 @@ export default function DirectoryDetail({
                             <span className="badge badge-neutral shrink-0">{d.status}</span>
                           )}
                         </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+
+              {/* Timeline (CRM Phase 1) */}
+              <div className="mt-6 border-t border-slate-100 pt-4 dark:border-white/10">
+                <p className={labelCls}>Timeline</p>
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                  {TIMELINE_FILTERS.map((f) => (
+                    <button key={f.label} type="button" onClick={() => setTimelineFilter(f.label)} aria-pressed={timelineFilter === f.label} className={`chip min-h-[36px] ${timelineFilter === f.label ? "chip-active" : ""}`}>{f.label}</button>
+                  ))}
+                </div>
+                {timelineBusy && timeline.length === 0 ? (
+                  <SkeletonRows rows={3} />
+                ) : timeline.length === 0 ? (
+                  <p className="text-sm text-slate-400 dark:text-white/40">Nothing on the timeline yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {timeline.map((it) => {
+                      const inner = (
+                        <>
+                          <p className="text-sm font-medium text-[#0d1f3c] dark:text-white">{it.title}</p>
+                          <p className="mt-0.5 text-xs text-slate-400 dark:text-white/40">
+                            {[it.kind, it.type, it.ts ? fmtDate(it.ts) : null].filter(Boolean).join(" · ")}
+                          </p>
+                          {it.detail && <p className="mt-1 whitespace-pre-wrap text-xs text-slate-500 dark:text-white/55">{it.detail}</p>}
+                        </>
+                      );
+                      return (
+                        <li key={it.key} className="rounded-xl border border-slate-100 p-3 dark:border-white/10">
+                          {it.href ? <Link href={it.href} className="block hover:underline">{inner}</Link> : inner}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {timelineHasMore && (
+                  <button type="button" disabled={timelineBusy} onClick={() => void fetchTimeline(timelineOffset + 20, true)} className="btn btn-secondary btn-sm mt-3 min-h-[44px]">
+                    {timelineBusy ? "Loading…" : "Load more"}
+                  </button>
+                )}
+              </div>
+
+              {/* Open tasks (side panel, CRM Phase 1) */}
+              <div className="mt-6 border-t border-slate-100 pt-4 dark:border-white/10">
+                <p className={labelCls}>Open tasks · {openTasks.length}</p>
+                {openTasks.length === 0 ? (
+                  <p className="text-sm text-slate-400 dark:text-white/40">No tasks on the timeline.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {openTasks.map((t) => (
+                      <li key={t.key} className="flex flex-wrap items-baseline gap-2 text-sm text-[#0d1f3c] dark:text-white">
+                        <span className="min-w-0 flex-1">{t.title}</span>
+                        {t.ts && <span className="text-xs text-slate-400 dark:text-white/40">{fmtDate(t.ts)}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Related people / people at org (CRM Phase 1) */}
+              <div className="mt-6 border-t border-slate-100 pt-4 dark:border-white/10">
+                <p className={labelCls}>{kind === "organization" ? "People at organization" : "Related people"} · {relatedPeople.length}</p>
+                {relatedPeople.length === 0 ? (
+                  <p className="text-sm text-slate-400 dark:text-white/40">No related people found.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {relatedPeople.map((rp) => (
+                      <li key={rp.id} className="flex flex-wrap items-baseline gap-2 text-sm">
+                        <span className="font-medium text-[#0d1f3c] dark:text-white">{rp.name}</span>
+                        {rp.sub && <span className="text-xs text-slate-400 dark:text-white/40">{rp.sub}</span>}
                       </li>
                     ))}
                   </ul>
