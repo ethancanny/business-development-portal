@@ -20,7 +20,7 @@ import {
  * of extra bottom padding to every page (globals.css), whether or
  * not the button is momentarily scrolled away. Menu order:
  *   Add follow-up → /overview?newtask=1   (Overview consumes this)
- *   Log touch     → /directory?touch=1
+ *   Log interaction → opens QuickLog (global provider)
  *   Add deal      → /pipeline?new=deal
  *   Add contact   → /directory?new=contact
  * Desktop placement/behavior is unchanged from Phase 2.
@@ -28,11 +28,12 @@ import {
 
 const ACTIONS: {
   label: string;
-  href: string;
+  href?: string;
+  action?: "quicklog";
   Icon: (p: { className?: string }) => React.ReactNode;
 }[] = [
   { label: "Add follow-up", href: "/overview?newtask=1", Icon: IconFollowUp },
-  { label: "Log touch", href: "/directory?touch=1", Icon: IconLogTouch },
+  { label: "Log interaction", action: "quicklog", Icon: IconLogTouch },
   { label: "Add deal", href: "/pipeline?new=deal", Icon: IconAddDeal },
   { label: "Add contact", href: "/directory?new=contact", Icon: IconAddContact },
 ];
@@ -42,6 +43,9 @@ const HIDDEN_ROUTES = ["/market-intel", "/analytics", "/settings/audit-trail", "
 export default function Fab() {
   const pathname = usePathname();
   const router = useRouter();
+  // Fab renders outside AppShell in app/layout.tsx, so it opens
+  // QuickLog via the provider's window-event bridge.
+  const openQuickLog = () => window.dispatchEvent(new CustomEvent("ccp:open-quicklog"));
   const [open, setOpen] = useState(false);
   const [scrollHidden, setScrollHidden] = useState(false);
 
@@ -117,7 +121,10 @@ export default function Fab() {
           ACTIONS.map((a, i) => (
             <button
               key={a.label}
-              onClick={() => go(a.href)}
+              onClick={() => {
+                if (a.action === "quicklog") { setOpen(false); openQuickLog(); }
+                else if (a.href) go(a.href);
+              }}
               style={{ transitionDelay: `${i * 35}ms` }}
               className="toast-in flex min-h-[44px] items-center gap-2.5 rounded-full bg-white py-2.5 pl-4 pr-5 text-sm font-semibold text-[#0d1f3c] shadow-pop ring-1 ring-navy-900/[0.06] transition hover:bg-slate-50 active:scale-95 dark:bg-[#1a3358] dark:text-white dark:ring-white/10 dark:hover:bg-[#24436f]"
             >

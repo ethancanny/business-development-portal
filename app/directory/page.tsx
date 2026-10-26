@@ -23,12 +23,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
-import { CardSkeleton, EmptyState, ErrorState, SavedViewChips } from "@/components/ui";
+import { BulkActionBar, CardSkeleton, EmptyState, ErrorState, SavedViewChips } from "@/components/ui";
+import { useQuickLog } from "@/components/directory/QuickLog";
+import { showToast } from "@/components/Toast";
 import DirectoryGrid, {
   DIRECTORY_TYPES,
   DirectoryTable,
   type DirectoryItem,
   type DirectoryKind,
+  type DirectorySortDir,
+  type DirectorySortKey,
 } from "@/components/DirectoryUnified";
 import DirectoryDetail from "@/components/DirectoryDetail";
 import DirectoryImport from "@/components/DirectoryImport";
@@ -45,20 +49,39 @@ function buildListUrl(opts: {
   type: string;
   q: string;
   offset: number;
+  kind?: DirectoryKind;
+  tier?: string;
+  stage?: string;
+  owner?: string;
+  tag?: string;
+  overdueOnly?: boolean;
+  lastTouchBefore?: string;
+  lastTouchAfter?: string;
+  sort?: string;
+  sortDir?: string;
 }): string {
   const params = new URLSearchParams();
-  params.set("kind", "person");
+  params.set("kind", opts.kind ?? "person");
   if (opts.type !== "all") params.set("type", opts.type);
   if (opts.q.trim()) params.set("q", opts.q.trim());
+  if (opts.tier) params.set("tier", opts.tier);
+  if (opts.stage) params.set("stage", opts.stage);
+  if (opts.owner?.trim()) params.set("owner", opts.owner.trim());
+  if (opts.tag?.trim()) params.set("tag", opts.tag.trim());
+  if (opts.overdueOnly) { params.set("overdueOnly", "true"); params.set("overdue", "true"); }
+  if (opts.lastTouchBefore) params.set("lastTouchBefore", opts.lastTouchBefore);
+  if (opts.lastTouchAfter) params.set("lastTouchAfter", opts.lastTouchAfter);
+  if (opts.sort) params.set("sort", opts.sort);
+  if (opts.sortDir) params.set("sortDir", opts.sortDir);
   params.set("limit", String(PAGE_SIZE));
   params.set("offset", String(opts.offset));
   return `/api/platform/directory?${params.toString()}`;
 }
 
-function buildExportHref(format: "xlsx" | "csv", type: string, q: string): string {
+function buildExportHref(format: "xlsx" | "csv", type: string, q: string, kind: DirectoryKind = "person"): string {
   const params = new URLSearchParams();
   params.set("format", format);
-  params.set("kind", "person");
+  params.set("kind", kind);
   if (type !== "all") params.set("type", type);
   if (q.trim()) params.set("q", q.trim());
   return `/api/platform/directory/export?${params.toString()}`;
@@ -275,7 +298,28 @@ function AddRecordModal({
 
 export default function Directory() {
   const router = useRouter();
+  const { openQuickLog } = useQuickLog();
   const [typeFilter, setTypeFilter] = useState("all");
+  /* CRM Phase 1 list state */
+  const [kindFilter, setKindFilter] = useState<DirectoryKind>("person");
+  const [tierFilter, setTierFilter] = useState("");
+  const [stageFilter, setStageFilter] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [lastTouchBefore, setLastTouchBefore] = useState("");
+  const [lastTouchAfter, setLastTouchAfter] = useState("");
+  const [sortKey, setSortKey] = useState<DirectorySortKey>("updated");
+  const [sortDir, setSortDir] = useState<DirectorySortDir>("desc");
+  const [crmView, setCrmView] = useState<"all" | "overdue" | "atier">("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAction, setBulkAction] = useState("assign_owner");
+  const [bulkValue, setBulkValue] = useState("");
+  const [bulkDue, setBulkDue] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState("");
+  const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
+  const [newListName, setNewListName] = useState("");
   const [q, setQ] = useState("");
   const [items, setItems] = useState<DirectoryItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -344,7 +388,44 @@ export default function Directory() {
     if (params.get("action") === "add-investor") {
       setShowAdd(true);
     }
+    // ?touch=1 (legacy FAB deep link) opens QuickLog, then the param
+    // is stripped so a refresh does not reopen it.
+    if (params.get("touch") === "1") {
+      openQuickLog();
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("touch");
+        window.history.replaceState(null, "", url.toString());
+      } catch { /* non-fatal */ }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Refresh the list after a QuickLog interaction is saved anywhere.
+  useEffect(() => {
+    const onLogged = () => setReloadTick((t) => t + 1);
+    window.addEventListener("ccp:interaction-logged", onLogged);
+    return () => window.removeEventListener("ccp:interaction-logged", onLogged);
+  }, []);
+
+  // Lists for the bulk "Add to list" picker — loaded lazily when a
+  // selection exists.
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/platform/directory/lists");
+        if (!r.ok || cancelled) return;
+        const data: unknown = await r.json().catch(() => null);
+        const items = data && typeof data === "object" && Array.isArray((data as { items?: unknown }).items)
+          ? ((data as { items: { id: string; name: string }[] }).items)
+          : Array.isArray(data) ? (data as { id: string; name: string }[]) : [];
+        if (!cancelled) setLists(items);
+      } catch { /* picker is optional */ }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedIds.size]);
 
   // Capital investors list — fetched once when the Investors view is
   // first opened (and re-fetched on refresh once loaded). Only the
@@ -392,7 +473,12 @@ export default function Directory() {
     const timer = window.setTimeout(() => {
       (async () => {
         try {
-          const r = await fetch(buildListUrl({ type: typeFilter, q, offset: 0 }));
+          const sortParam = sortKey === "name" ? "name" : sortKey === "lastTouch" ? "lastTouch" : sortKey === "nextDue" ? "nextDue" : "updated";
+          const r = await fetch(buildListUrl({
+            type: typeFilter, q, offset: 0, kind: kindFilter,
+            tier: tierFilter, stage: stageFilter, owner: ownerFilter, tag: tagFilter,
+            overdueOnly, lastTouchBefore, lastTouchAfter, sort: sortParam, sortDir,
+          }));
           if (cancelled) return;
           if (r.status === 401) {
             router.replace("/login");
@@ -414,7 +500,7 @@ export default function Directory() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [typeFilter, q, reloadTick, router]);
+  }, [typeFilter, q, reloadTick, router, kindFilter, tierFilter, stageFilter, ownerFilter, tagFilter, overdueOnly, lastTouchBefore, lastTouchAfter, sortKey, sortDir]);
 
   // Deep-link auto-open: exact match only — the person's name, or
   // their organization's name; never an unrelated first result.
@@ -440,8 +526,13 @@ export default function Directory() {
     if (loadingMore || items.length >= total) return;
     setLoadingMore(true);
     try {
+      const sortParam = sortKey === "name" ? "name" : sortKey === "lastTouch" ? "lastTouch" : sortKey === "nextDue" ? "nextDue" : "updated";
       const r = await fetch(
-        buildListUrl({ type: typeFilter, q, offset: items.length })
+        buildListUrl({
+          type: typeFilter, q, offset: items.length, kind: kindFilter,
+          tier: tierFilter, stage: stageFilter, owner: ownerFilter, tag: tagFilter,
+          overdueOnly, lastTouchBefore, lastTouchAfter, sort: sortParam, sortDir,
+        })
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const parsed = normalizeList(await r.json());
@@ -471,19 +562,124 @@ export default function Directory() {
 
   const selectSavedView = (id: string) => {
     if (id === "investors") {
+      // PRESERVED (Investors & Capital Step 1): the Investors saved
+      // view is a client-side capital-profile membership filter —
+      // see investorIds effect above. Do not change its semantics.
       setInvestorsView(true);
       setTypeFilter("all");
+      setCrmView("all");
+      setOverdueOnly(false);
+      setTierFilter("");
+    } else if (id === "overdue") {
+      setInvestorsView(false);
+      setTypeFilter("all");
+      setCrmView("overdue");
+      setOverdueOnly(true);
+    } else if (id === "atier") {
+      setInvestorsView(false);
+      setTypeFilter("all");
+      setCrmView("atier");
+      setTierFilter("A");
+      setOverdueOnly(false);
     } else {
       setInvestorsView(false);
+      setCrmView("all");
+      setOverdueOnly(false);
+      if (id !== "all" && tierFilter === "A") setTierFilter("");
       setTypeFilter(id);
     }
   };
 
   const typeViews = [
-    { id: "all", label: "All types" },
+    { id: "all", label: "All" },
     ...DIRECTORY_TYPES.map((t) => ({ id: t.id, label: t.label })),
     { id: "investors", label: "Investors" },
+    { id: "overdue", label: "Overdue" },
+    { id: "atier", label: "A tier" },
   ];
+
+  const activeViewId = investorsView
+    ? "investors"
+    : crmView !== "all"
+      ? crmView === "overdue" ? "overdue" : "atier"
+      : typeFilter;
+
+  const onSort = (key: DirectorySortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "name" ? "asc" : "desc");
+    }
+  };
+
+  const toggleSelect = (item: DirectoryItem, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(item.id); else next.delete(item.id);
+      return next;
+    });
+  };
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const i of visibleItems) {
+        if (checked) next.add(i.id); else next.delete(i.id);
+      }
+      return next;
+    });
+  };
+
+  const createListForBulk = async () => {
+    const name = newListName.trim();
+    if (!name) return;
+    try {
+      const r = await fetch("/api/platform/directory/lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data: unknown = await r.json().catch(() => null);
+      const obj = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+      const rec = (obj.list ?? obj.item ?? obj) as Record<string, unknown>;
+      if (typeof rec.id === "string") {
+        setLists((prev) => [...prev, { id: rec.id as string, name: String(rec.name || name) }]);
+        setBulkValue(rec.id as string);
+        setBulkAction("add_to_list");
+      }
+      setNewListName("");
+    } catch { setBulkMsg("Could not create that list."); }
+  };
+
+  const runBulk = async () => {
+    if (bulkBusy || selectedIds.size === 0) return;
+    let value: unknown = bulkValue;
+    if (bulkAction === "create_task") value = { title: bulkValue, dueDate: bulkDue || undefined };
+    if ((bulkAction === "assign_owner" || bulkAction === "add_tag" || bulkAction === "add_to_list") && !String(bulkValue).trim()) {
+      setBulkMsg("Enter a value for the bulk action first.");
+      return;
+    }
+    if (bulkAction === "create_task" && !bulkValue.trim()) {
+      setBulkMsg("Enter a task title first.");
+      return;
+    }
+    setBulkBusy(true);
+    setBulkMsg("");
+    try {
+      const r = await fetch("/api/platform/directory/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: kindFilter, ids: Array.from(selectedIds), action: bulkAction, value }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      showToast(`Bulk action applied to ${selectedIds.size} record${selectedIds.size === 1 ? "" : "s"}`);
+      setSelectedIds(new Set());
+      refresh();
+    } catch {
+      setBulkMsg("Bulk action failed — please try again.");
+    } finally { setBulkBusy(false); }
+  };
 
   // Client-side membership filter for the Investors view.
   const visibleItems =
@@ -533,13 +729,13 @@ export default function Directory() {
             </button>
             <span className="ml-auto flex shrink-0 gap-1.5">
               <a
-                href={buildExportHref("xlsx", typeFilter, q)}
+                href={buildExportHref("xlsx", typeFilter, q, kindFilter)}
                 className="btn btn-ghost btn-sm min-h-[44px]"
               >
                 Export Excel
               </a>
               <a
-                href={buildExportHref("csv", typeFilter, q)}
+                href={buildExportHref("csv", typeFilter, q, kindFilter)}
                 className="btn btn-ghost btn-sm min-h-[44px]"
               >
                 Export CSV
@@ -550,7 +746,7 @@ export default function Directory() {
           <div className="flex flex-wrap items-center gap-3">
             <SavedViewChips
               views={typeViews}
-              activeId={investorsView ? "investors" : typeFilter}
+              activeId={activeViewId}
               onSelect={selectSavedView}
             />
             <span className="ml-auto flex shrink-0 gap-1.5" role="group" aria-label="Directory view">
@@ -572,6 +768,53 @@ export default function Directory() {
               </button>
             </span>
           </div>
+        </div>
+
+        
+        {/* CRM Phase 1: kind toggle + relationship filters */}
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          <div className="flex gap-1.5" role="group" aria-label="Record kind">
+            {(["person", "organization"] as const).map((k) => (
+              <button key={k} type="button" aria-pressed={kindFilter === k}
+                onClick={() => { setKindFilter(k); setSelectedIds(new Set()); }}
+                className={`chip min-h-[44px] ${kindFilter === k ? "chip-active" : ""}`}>
+                {k === "person" ? "People" : "Organizations"}
+              </button>
+            ))}
+          </div>
+          <label className="block">
+            <span className={labelCls}>Tier</span>
+            <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)} className={`${inputCls} min-h-[44px] w-28`}>
+              <option value="">All</option><option value="A">A</option><option value="B">B</option><option value="C">C</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelCls}>Stage</span>
+            <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} className={`${inputCls} min-h-[44px] w-32`}>
+              <option value="">All</option>
+              {["New", "Engaged", "Active", "Dormant"].map((st) => <option key={st} value={st}>{st}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelCls}>Owner</span>
+            <input value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} placeholder="Owner" className={`${inputCls} min-h-[44px] w-32`} />
+          </label>
+          <label className="block">
+            <span className={labelCls}>Tag</span>
+            <input value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} placeholder="Tag" className={`${inputCls} min-h-[44px] w-32`} />
+          </label>
+          <label className="block">
+            <span className={labelCls}>Last touch after</span>
+            <input type="date" value={lastTouchAfter} onChange={(e) => setLastTouchAfter(e.target.value)} className={`${inputCls} min-h-[44px] w-40`} />
+          </label>
+          <label className="block">
+            <span className={labelCls}>Last touch before</span>
+            <input type="date" value={lastTouchBefore} onChange={(e) => setLastTouchBefore(e.target.value)} className={`${inputCls} min-h-[44px] w-40`} />
+          </label>
+          <label className="flex min-h-[44px] items-center gap-2 text-sm text-[#0d1f3c] dark:text-white">
+            <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} className="h-4 w-4 accent-[#b8975a]" />
+            Overdue only
+          </label>
         </div>
 
         {showTemplates && (
@@ -666,6 +909,12 @@ export default function Directory() {
                   items={visibleItems}
                   selectedId={selected ? selected.id : null}
                   onSelect={openRecord}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                  onToggleAll={toggleSelectAll}
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={onSort}
                 />
               ) : (
                 <DirectoryGrid
@@ -692,6 +941,43 @@ export default function Directory() {
           )}
         </div>
       </div>
+
+
+      {selectedIds.size > 0 && (
+        <div className="mt-4">
+          <BulkActionBar count={selectedIds.size}>
+            <select aria-label="Bulk action" value={bulkAction} onChange={(e) => setBulkAction(e.target.value)} className="min-h-[44px] rounded-xl bg-white/10 px-2 text-sm text-white">
+              <option value="assign_owner">Assign owner</option>
+              <option value="add_tag">Add tag</option>
+              <option value="set_tier">Set tier</option>
+              <option value="add_to_list">Add to list</option>
+              <option value="create_task">Create task</option>
+            </select>
+            {bulkAction === "set_tier" ? (
+              <select aria-label="Tier" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} className="min-h-[44px] rounded-xl bg-white/10 px-2 text-sm text-white">
+                <option value="">Tier…</option><option value="A">A</option><option value="B">B</option><option value="C">C</option>
+              </select>
+            ) : bulkAction === "add_to_list" ? (
+              <>
+                <select aria-label="List" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} className="min-h-[44px] rounded-xl bg-white/10 px-2 text-sm text-white">
+                  <option value="">Choose list…</option>
+                  {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+                <input value={newListName} onChange={(e) => setNewListName(e.target.value)} placeholder="New list name" className="min-h-[44px] w-36 rounded-xl bg-white/10 px-2 text-sm text-white placeholder:text-white/50" />
+                <button type="button" onClick={() => void createListForBulk()} className="btn btn-secondary btn-sm min-h-[44px]">Create list</button>
+              </>
+            ) : (
+              <input value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} placeholder={bulkAction === "create_task" ? "Task title" : bulkAction === "add_tag" ? "Tag" : "Owner"} className="min-h-[44px] w-40 rounded-xl bg-white/10 px-2 text-sm text-white placeholder:text-white/50" />
+            )}
+            {bulkAction === "create_task" && (
+              <input type="date" aria-label="Task due date" value={bulkDue} onChange={(e) => setBulkDue(e.target.value)} className="min-h-[44px] rounded-xl bg-white/10 px-2 text-sm text-white" />
+            )}
+            <button type="button" disabled={bulkBusy} onClick={() => void runBulk()} className="btn btn-primary btn-sm min-h-[44px]">{bulkBusy ? "Applying…" : "Apply"}</button>
+            <button type="button" onClick={() => setSelectedIds(new Set())} className="btn btn-ghost btn-sm min-h-[44px] text-white">Clear</button>
+          </BulkActionBar>
+          {bulkMsg && <p className="mt-2 text-center text-xs text-red-600 dark:text-red-300">{bulkMsg}</p>}
+        </div>
+      )}
 
       {selected && (
         <DirectoryDetail

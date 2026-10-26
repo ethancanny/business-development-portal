@@ -20,6 +20,7 @@ import Sidebar, {
   SidebarBrand,
 } from "@/components/Sidebar";
 import GlobalSearch from "@/components/GlobalSearch";
+import { QuickLogProvider } from "@/components/directory/QuickLog";
 import TopBar from "@/components/TopBar";
 import { IconClose } from "@/components/icons";
 
@@ -112,7 +113,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <>
+    <QuickLogProvider>
       <Sidebar collapsed={collapsed} onToggle={toggleCollapsed} />
 
       {drawerOpen && (
@@ -154,6 +155,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <GlobalSearch />
-    </>
+    </QuickLogProvider>
   );
 }

@@ -17,10 +17,61 @@ import { fmtDate } from "@/lib/format";
 
 export type DirectoryKind = "person" | "organization";
 
+/** Relationship profile (CRM Phase 1 — Lane A fills this on detail;
+ * list items carry the summary fields inline, below). */
+export interface RelationshipProfile {
+  entityKind?: string;
+  entityId?: string;
+  tier: string;
+  stage: string;
+  cadenceDays?: number | null;
+  owner: string;
+  source: string;
+  introducedByPersonId?: string | null;
+  commPrefs: string;
+  importantDates: { label: string; date: string }[];
+  lastTouchAt?: string | null;
+  nextTouchDue?: string | null;
+  touchCount90d: number;
+  openTaskCount: number;
+  isTestData?: boolean;
+}
+
+export interface TimelineItem {
+  key: string;
+  kind: string; // interaction | email | task | document | event
+  /** Interaction subtype (call/meeting/…) when the API provides it. */
+  type?: string | null;
+  /** Completion flag for task items (CRM Phase 1). */
+  done?: boolean;
+  ts: string;
+  title: string;
+  detail?: string | null;
+  href?: string | null;
+}
+
+export const RELATIONSHIP_TIERS = ["A", "B", "C"] as const;
+export const RELATIONSHIP_STAGES = ["New", "Engaged", "Active", "Dormant"] as const;
+
+export function isOverdueItem(item: { nextTouchDue?: string | null }): boolean {
+  if (!item.nextTouchDue) return false;
+  const t = Date.parse(item.nextTouchDue);
+  return Number.isFinite(t) && t < Date.now();
+}
+
 export interface DirectoryItem {
   id: string;
   kind: DirectoryKind;
   name: string;
+  /* CRM Phase 1 summary fields (Lane A listDirectory) */
+  tier?: string | null;
+  stage?: string | null;
+  relOwner?: string | null;
+  lastTouchAt?: string | null;
+  nextTouchDue?: string | null;
+  touchCount90d?: number | null;
+  openTaskCount?: number | null;
+  tags?: string[];
   title?: string | null;
   types: string[];
   email?: string | null;
@@ -73,6 +124,9 @@ export interface DirectoryDetailPayload {
   types: string[];
   linkedDeals: LinkedDeal[];
   legacyInvestor: LegacyInvestor | null;
+  /* CRM Phase 1 (Lane A) — additive */
+  relationship?: RelationshipProfile | null;
+  tags?: string[];
 }
 
 /** Type taxonomy (Phase 2 contract — single source for chips/forms). */
@@ -87,6 +141,8 @@ export const DIRECTORY_TYPES: { id: string; label: string }[] = [
   { id: "seller", label: "Seller" },
   { id: "portfolio_contact", label: "Portfolio contact" },
   { id: "contact", label: "Contact" },
+  { id: "owner", label: "Owner" },
+  { id: "ad_contact", label: "A&D contact" },
 ];
 
 export function typeLabel(id: string): string {
@@ -212,6 +268,18 @@ export default function DirectoryGrid({
                 {item.updatedAt ? `Updated ${fmtDate(item.updatedAt)}` : ""}
               </span>
             </span>
+            {(item.tier || item.stage || item.lastTouchAt || item.nextTouchDue) && (
+              <span className="mt-1 flex flex-wrap gap-x-2 text-[11px] text-slate-400 dark:text-white/35">
+                {item.tier ? <span>Tier {item.tier}</span> : null}
+                {item.stage ? <span>{item.stage}</span> : null}
+                {item.lastTouchAt ? <span>Last touch {fmtDate(item.lastTouchAt)}</span> : null}
+                {item.nextTouchDue ? (
+                  <span className={isOverdueItem(item) ? "font-semibold text-red-600 dark:text-red-300" : ""}>
+                    Next due {fmtDate(item.nextTouchDue)}
+                  </span>
+                ) : null}
+              </span>
+            )}
             {item.source && (
               <span className="mt-1 block truncate text-[11px] text-slate-400 dark:text-white/35">
                 Source: {item.source}
@@ -228,35 +296,85 @@ export default function DirectoryGrid({
  * the same records as the card (Kanban) grid in the portal's standard
  * table styling (.tbl-grad: navy header, cream text, gold rule).
  * Clicking a row opens the record, exactly like a card. */
+export type DirectorySortKey = "name" | "lastTouch" | "nextDue" | "updated";
+export type DirectorySortDir = "asc" | "desc";
+
 export function DirectoryTable({
   items,
   selectedId,
   onSelect,
+  selectedIds,
+  onToggleSelect,
+  onToggleAll,
+  sortKey,
+  sortDir,
+  onSort,
 }: {
   items: DirectoryItem[];
   selectedId?: string | null;
   onSelect: (item: DirectoryItem) => void;
+  /* CRM Phase 1: row selection + server sort (optional — the table
+   * renders read-only exactly as before when these are omitted). */
+  selectedIds?: Set<string>;
+  onToggleSelect?: (item: DirectoryItem, checked: boolean) => void;
+  onToggleAll?: (checked: boolean) => void;
+  sortKey?: DirectorySortKey;
+  sortDir?: DirectorySortDir;
+  onSort?: (key: DirectorySortKey) => void;
 }) {
   const th =
     "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider";
   const td = "px-3 py-2.5 text-sm text-slate-700 dark:text-white/80";
+  const selectable = !!selectedIds && !!onToggleSelect;
+  const allSelected =
+    selectable && items.length > 0 && items.every((i) => selectedIds.has(i.id));
+
+  const sortHeader = (label: string, key: DirectorySortKey) => (
+    <button
+      type="button"
+      onClick={() => onSort?.(key)}
+      className="inline-flex min-h-[32px] items-center gap-1 uppercase tracking-wider hover:text-[#d4b37a]"
+      aria-label={`Sort by ${label}`}
+    >
+      {label}
+      <span aria-hidden className="text-[10px]">
+        {sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
+      </span>
+    </button>
+  );
+
   return (
     <div className="card-surface overflow-x-auto">
       <table className="tbl-grad w-full border-collapse">
         <thead>
           <tr>
-            <th className={th}>Name</th>
+            {selectable && (
+              <th className={th}>
+                <input
+                  type="checkbox"
+                  aria-label="Select all"
+                  checked={allSelected}
+                  onChange={(e) => onToggleAll?.(e.target.checked)}
+                  className="h-4 w-4 accent-[#b8975a]"
+                />
+              </th>
+            )}
+            <th className={th}>{onSort ? sortHeader("Name", "name") : "Name"}</th>
             <th className={th}>Title</th>
             <th className={th}>Organization</th>
             <th className={th}>Type</th>
-            <th className={th}>Email</th>
-            <th className={th}>Phone</th>
-            <th className={th}>Updated</th>
+            <th className={th}>Tier</th>
+            <th className={th}>Stage</th>
+            <th className={th}>{onSort ? sortHeader("Last touch", "lastTouch") : "Last touch"}</th>
+            <th className={th}>{onSort ? sortHeader("Next due", "nextDue") : "Next due"}</th>
+            <th className={th}>Tags</th>
+            <th className={th}>{onSort ? sortHeader("Updated", "updated") : "Updated"}</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item) => {
             const active = selectedId === item.id;
+            const overdue = isOverdueItem(item);
             return (
               <tr
                 key={`${item.kind}-${item.id}`}
@@ -265,6 +383,17 @@ export function DirectoryTable({
                   active ? "bg-[#f7f1e3] dark:bg-white/10" : ""
                 }`}
               >
+                {selectable && (
+                  <td className={td} onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${item.name}`}
+                      checked={selectedIds.has(item.id)}
+                      onChange={(e) => onToggleSelect(item, e.target.checked)}
+                      className="h-4 w-4 accent-[#b8975a]"
+                    />
+                  </td>
+                )}
                 <td className={`${td} font-medium`}>
                   <span className="flex items-center gap-2.5">
                     {item.kind === "organization" ? (
@@ -295,8 +424,26 @@ export function DirectoryTable({
                     ))}
                   </span>
                 </td>
-                <td className={td}>{item.email || "—"}</td>
-                <td className={td}>{item.phone || "—"}</td>
+                <td className={td}>{item.tier || "—"}</td>
+                <td className={td}>{item.stage || "—"}</td>
+                <td className={`${td} whitespace-nowrap`}>
+                  {item.lastTouchAt ? fmtDate(item.lastTouchAt) : "—"}
+                </td>
+                <td
+                  className={`${td} whitespace-nowrap ${
+                    overdue ? "font-semibold text-red-600 dark:text-red-300" : ""
+                  }`}
+                >
+                  {item.nextTouchDue ? fmtDate(item.nextTouchDue) : "—"}
+                  {overdue ? " · overdue" : ""}
+                </td>
+                <td className={td}>
+                  <span className="flex flex-wrap gap-1">
+                    {(item.tags ?? []).map((t) => (
+                      <span key={t} className="rounded-full bg-[#b8975a]/15 px-2 py-0.5 text-[10px] font-semibold text-[#0d1f3c] dark:text-[#d4b37a]">{t}</span>
+                    ))}
+                  </span>
+                </td>
                 <td className={`${td} whitespace-nowrap`}>
                   {item.updatedAt ? fmtDate(item.updatedAt) : "—"}
                 </td>

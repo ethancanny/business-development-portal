@@ -90,6 +90,17 @@ interface ImportResult {
   errors: string[];
 }
 
+/** Dry-run / Outlook preview shape (CRM Phase 1, Lane A/B contract):
+ * importRows(dryRun:true) reports wouldCreate/wouldSkip with zero
+ * writes; the Outlook route returns available:false with
+ * reason "contacts_scope_missing" when the Graph scope is absent. */
+interface DryRunResult {
+  wouldCreate: number;
+  wouldSkip: number;
+  errors: string[];
+  duplicates?: { row: Record<string, unknown>; matchName: string }[];
+}
+
 const labelCls =
   "mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-white/40";
 
@@ -114,10 +125,24 @@ export default function DirectoryImport({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<ImportResult | null>(null);
+  /* CRM Phase 1: dry run + Outlook */
+  const [dryRunEnabled, setDryRunEnabled] = useState(true);
+  const [dryRun, setDryRun] = useState<DryRunResult | null>(null);
+  const [dryRunBusy, setDryRunBusy] = useState(false);
+  const [dryRunPassed, setDryRunPassed] = useState(false);
+  const [outlookBusy, setOutlookBusy] = useState(false);
+  const [outlookNote, setOutlookNote] = useState("");
+  const [outlookPreview, setOutlookPreview] = useState<DryRunResult | null>(null);
+
+  const invalidateDryRun = () => {
+    setDryRun(null);
+    setDryRunPassed(false);
+  };
 
   const onFile = (file: File | null) => {
     if (!file) return;
     setResult(null);
+    invalidateDryRun();
     setError("");
     const reader = new FileReader();
     reader.onload = () => {
@@ -172,6 +197,74 @@ export default function DirectoryImport({
     });
   };
 
+  const runDryRun = async () => {
+    const mapping = buildMapping();
+    if (!mapping.name) {
+      setError("Map one column to Name before a dry run.");
+      return;
+    }
+    if (rows.length === 0 || dryRunBusy) return;
+    setDryRunBusy(true);
+    setError("");
+    try {
+      const r = await fetch("/api/platform/directory/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, mapping, rows, dryRun: true }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = (await r.json()) as Partial<DryRunResult> & Partial<ImportResult>;
+      const preview: DryRunResult = {
+        wouldCreate: typeof data.wouldCreate === "number" ? data.wouldCreate : 0,
+        wouldSkip: typeof data.wouldSkip === "number" ? data.wouldSkip
+          : Array.isArray(data.duplicates) ? data.duplicates.length : 0,
+        errors: Array.isArray(data.errors) ? data.errors : [],
+        duplicates: Array.isArray(data.duplicates) ? data.duplicates : [],
+      };
+      setDryRun(preview);
+      setDryRunPassed(preview.errors.length === 0);
+    } catch {
+      setError("Dry run failed — please try again.");
+      setDryRunPassed(false);
+    } finally {
+      setDryRunBusy(false);
+    }
+  };
+
+  const runOutlook = async () => {
+    if (outlookBusy) return;
+    setOutlookBusy(true);
+    setOutlookNote("");
+    setOutlookPreview(null);
+    try {
+      const r = await fetch("/api/platform/directory/import/outlook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, dryRun: true }),
+      });
+      const data: unknown = await r.json().catch(() => null);
+      const obj = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+      if (obj.available === false) {
+        // Honest note (DESIGN.md): never fabricate Outlook contacts.
+        setOutlookNote(
+          "Outlook import needs the Contacts.Read permission in the Microsoft app — exporting contacts from Outlook as CSV works today."
+        );
+        return;
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setOutlookPreview({
+        wouldCreate: typeof obj.wouldCreate === "number" ? (obj.wouldCreate as number) : 0,
+        wouldSkip: typeof obj.wouldSkip === "number" ? (obj.wouldSkip as number) : 0,
+        errors: Array.isArray(obj.errors) ? (obj.errors as string[]) : [],
+      });
+      setOutlookNote("Outlook preview ready — review the counts above before committing from a CSV import.");
+    } catch {
+      setOutlookNote("Outlook import could not be checked — please try again.");
+    } finally {
+      setOutlookBusy(false);
+    }
+  };
+
   const submit = async () => {
     const mapping = buildMapping();
     if (!mapping.name) {
@@ -179,6 +272,10 @@ export default function DirectoryImport({
       return;
     }
     if (rows.length === 0 || busy) return;
+    if (dryRunEnabled && !dryRunPassed) {
+      setError("Run a successful dry run before committing this import.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -239,6 +336,23 @@ export default function DirectoryImport({
           </p>
         )}
 
+        {/* Outlook import (CRM Phase 1) */}
+        <div className="mt-4 rounded-2xl border border-slate-200 p-4 dark:border-white/10">
+          <p className={labelCls}>Outlook contacts</p>
+          <button type="button" disabled={outlookBusy} onClick={() => void runOutlook()} className="btn btn-secondary min-h-[44px]">
+            {outlookBusy ? "Checking…" : "Import from Outlook"}
+          </button>
+          {outlookNote && (
+            <p className="mt-2 text-sm text-slate-500 dark:text-white/60">{outlookNote}</p>
+          )}
+          {outlookPreview && (
+            <p className="mt-2 text-sm font-semibold text-[#0d1f3c] dark:text-white">
+              Would create {outlookPreview.wouldCreate} · would skip {outlookPreview.wouldSkip}
+              {outlookPreview.errors.length > 0 ? ` · ${outlookPreview.errors.length} errors` : ""}
+            </p>
+          )}
+        </div>
+
         {headers.length > 0 && (
           <>
             <p className={`${labelCls} mt-5`}>Map columns</p>
@@ -253,9 +367,10 @@ export default function DirectoryImport({
                   </span>
                   <select
                     value={columnTargets[h] || ""}
-                    onChange={(e) =>
-                      setColumnTargets({ ...columnTargets, [h]: e.target.value })
-                    }
+                    onChange={(e) => {
+                      setColumnTargets({ ...columnTargets, [h]: e.target.value });
+                      invalidateDryRun();
+                    }}
                     className="min-h-[44px] w-44 shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-[#0d1f3c] outline-none focus:border-[#b8975a] dark:border-white/10 dark:bg-white/5 dark:text-white"
                   >
                     <option value="">Ignore</option>
@@ -310,17 +425,60 @@ export default function DirectoryImport({
               </div>
             )}
 
+            <div className="mt-5">
+              <label className="flex min-h-[44px] items-center gap-2 text-sm text-[#0d1f3c] dark:text-white">
+                <input
+                  type="checkbox"
+                  checked={dryRunEnabled}
+                  onChange={(e) => { setDryRunEnabled(e.target.checked); if (!e.target.checked) setDryRunPassed(false); }}
+                  className="h-4 w-4 accent-[#b8975a]"
+                />
+                Dry run before committing
+              </label>
+              {dryRunEnabled && (
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={dryRunBusy || rows.length === 0}
+                    onClick={() => void runDryRun()}
+                    className="btn btn-secondary min-h-[44px]"
+                  >
+                    {dryRunBusy ? "Running dry run…" : "Run dry run"}
+                  </button>
+                  {dryRun && (
+                    <span className="text-sm text-slate-600 dark:text-white/70">
+                      Would create {dryRun.wouldCreate} · would skip {dryRun.wouldSkip}
+                      {dryRun.errors.length > 0 ? ` · ${dryRun.errors.length} error${dryRun.errors.length === 1 ? "" : "s"}` : ""}
+                      {dryRunPassed ? " · ready to commit" : ""}
+                    </span>
+                  )}
+                </div>
+              )}
+              {dryRun && dryRun.errors.length > 0 && (
+                <ul className="mt-2 space-y-1 text-sm text-red-700 dark:text-red-300">
+                  {dryRun.errors.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              )}
+              {dryRun && (dryRun.duplicates?.length ?? 0) > 0 && (
+                <ul className="mt-2 space-y-1 text-sm text-slate-600 dark:text-white/70">
+                  {dryRun.duplicates!.map((d, i) => <li key={i}>Would skip (already exists): {d.matchName}</li>)}
+                </ul>
+              )}
+            </div>
+
             <div className="mt-5 flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                disabled={busy || rows.length === 0}
+                disabled={busy || rows.length === 0 || (dryRunEnabled && !dryRunPassed)}
                 onClick={() => void submit()}
                 className="btn btn-primary min-h-[44px]"
               >
                 {busy ? "Importing…" : `Import ${rows.length} row${rows.length === 1 ? "" : "s"}`}
               </button>
               <span className="text-xs text-slate-400 dark:text-white/40">
-                Records that already exist are reported as duplicates, not re-created.
+                {dryRunEnabled && !dryRunPassed
+                  ? "Commit unlocks after a dry run passes with no errors."
+                  : "Records that already exist are reported as duplicates, not re-created."}
               </span>
             </div>
           </>
