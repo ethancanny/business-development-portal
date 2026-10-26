@@ -18,6 +18,12 @@ import { fmtMoney, fmtMoneyCompact } from "@/lib/format";
 import { resolveDealValue, type MarketRates } from "@/lib/valuation";
 import { FOCUS_SECTOR_NAMES, barGradient, sectorColor, stageColor } from "@/lib/sector-colors";
 import { SectorLegend } from "@/components/SectorChip";
+import { useFocus } from "@/components/focus/FocusProvider";
+
+/** The A&D sector name (AD_SECTOR_NAME in lib/platform/focus — kept
+ * as a literal here so this client page doesn't pull the server
+ * focus module in; sector names are literals throughout the portal). */
+const AD_SECTOR = "Aerospace & Defense";
 
 /** Fit-target sectors — all five focus sectors (Oct 14, 2026: the
  * density view includes Hospitality even at 0). The hospitality spine
@@ -74,6 +80,20 @@ const locText = (loc: string): string => {
 
 export default function Overview() {
   const router = useRouter();
+  // Focus & Theme §2 (Oct 26, 2026): in Focus mode the sector
+  // displays on this page (fit-target probes, the Sourcing sector
+  // bars, the fit total) restrict to Aerospace & Defense only. In
+  // "all" mode displayFitSectors is FIT_SECTORS and everything
+  // renders exactly as before. (Active-deal filtering lives inside
+  // ActiveDealsRow, which owns its own toggle state.)
+  const { focus } = useFocus();
+  const displayFitSectors = useMemo(
+    () =>
+      focus === "ad"
+        ? FIT_SECTORS.filter((s) => s === AD_SECTOR)
+        : FIT_SECTORS,
+    [focus]
+  );
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState("");
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -312,7 +332,12 @@ export default function Overview() {
   // still skips the network fetch when the version is unchanged.
   useEffect(() => {
     let live = true;
-    for (const s of FIT_SECTORS) {
+    // Focus §2: in Focus mode only the A&D probe runs — the other
+    // sectors' counts are neither fetched nor displayed. The effect
+    // re-runs when the focus settings resolve (the provider's first
+    // paint default is "ad"), so switching to "all" probes the rest
+    // then; loadDataset's version gate makes any repeat probe cheap.
+    for (const s of displayFitSectors) {
       loadDataset<{ fitTotal?: number }>(
         "market_companies",
         `/api/market/companies?sector=${encodeURIComponent(s)}&limit=1`
@@ -353,7 +378,12 @@ export default function Overview() {
     return () => {
       live = false;
     };
-  }, []);
+    // displayFitSectors is the only focus-dependent input; the
+    // tailwind / hospitality loads in this effect are focus-agnostic
+    // and re-applying their cached payloads on a focus flip is a
+    // no-op state write of the same values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayFitSectors]);
 
   useEffect(() => {
     load();
@@ -801,10 +831,12 @@ export default function Overview() {
       `${dueTodayCount} follow-up${dueTodayCount === 1 ? "" : "s"} due today`
     );
   if (overdueTasks.length > 0) briefParts.push(`${overdueTasks.length} overdue`);
-  const fitTotalReady = FIT_SECTORS.every(
+  // Focus §2: the fit total follows the displayed sectors — A&D
+  // only in Focus mode, all five in "all" mode (unchanged).
+  const fitTotalReady = displayFitSectors.every(
     (s) => fitCounts[s] !== undefined && fitCounts[s] !== null
   );
-  const fitTotal = FIT_SECTORS.reduce((s, x) => s + (fitCounts[x] ?? 0), 0);
+  const fitTotal = displayFitSectors.reduce((s, x) => s + (fitCounts[x] ?? 0), 0);
   const rateAsOf = rateStrip.length
     ? rateStrip
         .map((r) => r.date)
@@ -1399,12 +1431,12 @@ export default function Overview() {
               Fit targets by sector
             </p>
             <div className="mb-1.5">
-              <SectorLegend sectors={[...FIT_SECTORS]} />
+              <SectorLegend sectors={[...displayFitSectors]} />
             </div>
             <div className="flex flex-col gap-2">
-              {FIT_SECTORS.map((sector) => {
+              {displayFitSectors.map((sector) => {
                 const count = fitCounts[sector] ?? 0;
-                const maxFit = Math.max(1, ...FIT_SECTORS.map((s) => fitCounts[s] ?? 0));
+                const maxFit = Math.max(1, ...displayFitSectors.map((s) => fitCounts[s] ?? 0));
                 return (
                   <div key={sector}>
                     <div className="mb-0.5 flex items-baseline justify-between text-xs">
