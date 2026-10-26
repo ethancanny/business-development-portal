@@ -30,6 +30,11 @@ import { ingestTailwind, type TailwindIngestOpts } from "./tailwind-ingest";
 import { runTransitionSignalsPass } from "./signals";
 import { classifyIndustry, INDUSTRY_KEYWORDS, kwMatch } from "./industry-classify";
 import { bumpDatasets } from "./platform/versions";
+import {
+  getFocusSettings,
+  FOCUS_PAUSED_SOURCES,
+  type FocusSettings,
+} from "./platform/focus";
 
 /* ---------------- FRED indicators ---------------- */
 
@@ -180,6 +185,34 @@ const NEWS_QUERIES = [
   'Arizona (construction OR contractor) (acquired OR acquisition) when:30d',
 ];
 
+/**
+ * Focus mode (A&D) news narrowing (spec §2): while Focus = A&D the
+ * Google News query set shrinks to the A&D topics — defense budgets
+ * and contract awards, the aerospace supply chain, FAA and DoD
+ * announcements, and Arizona A&D companies. Existing queries that
+ * already match the A&D keywords are kept; a dedicated A&D set covers
+ * the topics the all-sector list never queried. All-sector mode uses
+ * NEWS_QUERIES untouched.
+ */
+const AD_NEWS_KEYWORDS =
+  /\b(defense|defence|aerospace|dod|faa|contract awards?|arizona aerospace)\b/i;
+
+const AD_NEWS_QUERIES = [
+  'Arizona (aerospace OR defense) ("contract award" OR "contract awarded" OR "defense contract") when:30d',
+  'Arizona aerospace "supply chain" when:30d',
+  '(FAA OR "Department of Defense" OR DoD) (Arizona OR aerospace) announcement when:30d',
+  '"defense budget" (aerospace OR Arizona) when:30d',
+  '"Arizona aerospace" company when:30d',
+];
+
+function focusNewsQueries(
+  settings: FocusSettings | null | undefined
+): string[] {
+  if (settings?.focus !== "ad") return NEWS_QUERIES;
+  const kept = NEWS_QUERIES.filter((q) => AD_NEWS_KEYWORDS.test(q));
+  return Array.from(new Set([...kept, ...AD_NEWS_QUERIES]));
+}
+
 /** Naive acquirer/target extraction from deal headlines. */
 function parseDealHeadline(headline: string): { acquirer: string; target: string } {
   const h = headline.replace(/\s+-\s+[^-]+$/, "").trim(); // strip " - Publisher"
@@ -305,16 +338,21 @@ const MARKET_POLICY =
 const SCALE_SIGNAL =
   /(million|billion|\$\s?\d|\d[\d,]*\s*(jobs|employees|square|sq\.?\s?ft)|plant|facility|headquarters|campus|factory|warehouse|data center|distribution center|manufacturing|semiconductor|\bfab\b|acre)/i;
 
-export async function ingestNews(): Promise<number> {
+export async function ingestNews(
+  focusSettings?: FocusSettings | null
+): Promise<number> {
   let total = 0;
   const seen = new Set<string>();
+  // Focus mode narrows the query set to A&D (see focusNewsQueries);
+  // all-sector mode is the original NEWS_QUERIES list, unchanged.
+  const baseQueries = focusNewsQueries(focusSettings);
   // Each query runs twice: the 30-day window for breadth, and a
   // 2-day window so fresh stories are not buried under a month of
   // relevance-ranked results (Google News RSS ranks by relevance,
   // not date — a story from this morning competes with all 30
   // days). Dedupe makes the overlap harmless. (Oct 11, 2026 —
   // diagnosed after three days with no storable events.)
-  const queries = NEWS_QUERIES.flatMap((q) => [q, q.replace("when:30d", "when:2d")]);
+  const queries = baseQueries.flatMap((q) => [q, q.replace("when:30d", "when:2d")]);
   for (const q of queries) {
     const url =
       `https://news.google.com/rss/search?q=${encodeURIComponent(q)}` + `&hl=en-US&gl=US&ceid=US:en`;
@@ -355,7 +393,12 @@ export async function ingestNews(): Promise<number> {
     // be polite to Google News
     await new Promise((r) => setTimeout(r, 700));
   }
-  await logSync("news", "ok", total, `Google News: ${NEWS_QUERIES.length} queries`);
+  await logSync(
+    "news",
+    "ok",
+    total,
+    `Google News: ${baseQueries.length} queries${focusSettings?.focus === "ad" ? " (Focus: A&D set)" : ""}`
+  );
   return total;
 }
 
@@ -2061,11 +2104,21 @@ export async function runMarketIngest(
   opts?: { tailwind?: TailwindIngestOpts }
 ): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
+  // Focus settings are read ONCE per run, before the jobs loop: the
+  // pause check below and the news narrowing both consume this single
+  // read (never one read per job). A failed read falls back to
+  // all-sector behavior rather than failing the whole ingest run.
+  const focusSettings = await getFocusSettings().catch(() => null);
+  const pausedSources = new Set<string>(
+    focusSettings?.focus === "ad"
+      ? FOCUS_PAUSED_SOURCES.map((s) => s.source)
+      : []
+  );
   const jobs: [IngestSource, () => Promise<number>][] = [
     ["indicators", ingestIndicators],
     ["commodity_spot", ingestCommoditySpot],
     ["filings", ingestFilings],
-    ["news", ingestNews],
+    ["news", async () => ingestNews(focusSettings)],
     ["econ_events", ingestEconomicEvents],
     ["bankruptcy_news", ingestBankruptcyNews],
     ["warn", ingestWarn],
@@ -2079,7 +2132,7 @@ export async function runMarketIngest(
     ["permits_ci", async () => (await ingestCiPermits()).reduce((sum, r) => sum + r.upserted, 0)],
     ["sector_counts", ingestSectorCounts],
     ["susb_sizes", ingestSusbSizes],
-    ["intel_news", ingestIntelNews],
+    ["intel_news", async () => ingestIntelNews(focusSettings)],
     ["hospitality", ingestHospitality],
     ["adhs", ingestAdhs],
     // Tailwind scores derive from datasets refreshed above (permits,
@@ -2091,6 +2144,24 @@ export async function runMarketIngest(
   ];
   for (const [name, fn] of jobs) {
     if (source !== "all" && source !== name) continue;
+    // Focus pause — skipped AT THE DOOR (hard CPU rule): the check
+    // runs before the job fn is invoked, so a paused source performs
+    // no fetch and no compute at all (~zero CPU), whether it was
+    // reached via source="all" or requested directly (e.g.
+    // source="hospitality"). logSync's status union has no "paused"
+    // value (lib/market-db.ts, another lane's file), so the row is
+    // logged with the existing "skipped" status and the exact
+    // Focus-mode message.
+    if (pausedSources.has(name)) {
+      await logSync(
+        name,
+        "skipped",
+        0,
+        "Skipped — Focus mode (Aerospace & Defense)"
+      );
+      out[name] = 0;
+      continue;
+    }
     try {
       out[name] = await fn();
     } catch (err) {
