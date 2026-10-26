@@ -6,6 +6,11 @@ import { uniqueStrings, dedupeSourceTokens } from "@/lib/format";
 import { normalizeSignalForDisplay } from "@/lib/signals-core";
 import CompanyLogo from "@/components/CompanyLogo";
 import SectorChip from "@/components/SectorChip";
+import {
+  OutOfFocusChip,
+  ShowOutOfFocusToggle,
+  useFocus,
+} from "@/components/focus/FocusProvider";
 
 /** Named company targets for ONE focus industry, built from public
  * registry spines (USASpending recipients, AZ ROC, NPPES, SAM.gov).
@@ -41,6 +46,14 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
   const [view, setView] = useState<"fits" | "filtered">("fits");
   const [filteredRows, setFilteredRows] = useState<MiCompany[] | null>(null);
   const [filteredTotal, setFilteredTotal] = useState<number | null>(null);
+  // Focus & Theme §2 (Oct 26, 2026): in Focus mode, companies whose
+  // sector is set and not A&D are out of focus — hidden by default
+  // behind this list's local toggle, chip-flagged when shown, never
+  // deleted or altered. Filtering is client-side over the rows this
+  // component already fetched; in "all" mode isOutOfFocus is always
+  // false and the list renders exactly as before.
+  const { isOutOfFocus } = useFocus();
+  const [showOutOfFocus, setShowOutOfFocus] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -100,7 +113,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectorList.join("|"), fitOnly, refreshTick]);
 
-  const visible = useMemo(() => {
+  const visiblePreFocus = useMemo(() => {
     const q = query.trim().toLowerCase();
     const base =
       fitOnly && view === "filtered" ? (filteredRows ?? []) : (rows ?? []);
@@ -122,6 +135,15 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, filteredRows, query, fitOnly, view]);
+
+  // Focus §2 filter, applied AFTER the existing visibility rules:
+  // out-of-focus rows drop out unless this list's toggle is on.
+  const focusHiddenCount = showOutOfFocus
+    ? 0
+    : visiblePreFocus.filter((c) => isOutOfFocus(c.sector)).length;
+  const visible = showOutOfFocus
+    ? visiblePreFocus
+    : visiblePreFocus.filter((c) => !isOutOfFocus(c.sector));
 
   if (rows === null) {
     return <p className="mt-4 text-xs text-slate-400 dark:text-white/30">Loading company targets…</p>;
@@ -679,12 +701,19 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           )}
         </p>
       </div>
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search name, city, or sub-sector…"
-        className="mb-2 w-full max-w-sm rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#b8975a] dark:border-white/10 dark:bg-[#132847]/40 dark:text-white/85"
-      />
+      <div className="mb-2 flex flex-wrap items-center gap-3">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search name, city, or sub-sector…"
+          className="w-full max-w-sm rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#b8975a] dark:border-white/10 dark:bg-[#132847]/40 dark:text-white/85"
+        />
+        <ShowOutOfFocusToggle
+          show={showOutOfFocus}
+          onChange={setShowOutOfFocus}
+          hiddenCount={focusHiddenCount}
+        />
+      </div>
       {fitOnly && visible.length === 0 && (
         <p className="mb-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-500 dark:border-white/10 dark:text-white/50">
           {view === "filtered"
@@ -736,6 +765,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
                     {!c.isChain && c.chainSuspect && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">POSSIBLE FRANCHISE</span>}
                     {c.isInstitutional && <span className="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">INSTITUTIONAL</span>}
                     {!c.isInstitutional && c.institutionalSuspect && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">POSSIBLE INSTITUTION</span>}
+                    {isOutOfFocus(c.sector) && <span className="ml-2 inline-flex align-middle"><OutOfFocusChip /></span>}
                   </td>
                   {multi && <td className={td}><SectorChip sector={c.sector} /></td>}
                   <td className={td}>{c.city || "—"}</td>
@@ -788,6 +818,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
                     {!c.isChain && c.chainSuspect && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">POSSIBLE FRANCHISE</span>}
                     {c.isInstitutional && <span className="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">INSTITUTIONAL</span>}
                     {!c.isInstitutional && c.institutionalSuspect && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">POSSIBLE INSTITUTION</span>}
+                    {isOutOfFocus(c.sector) && <span className="ml-2 inline-flex align-middle"><OutOfFocusChip /></span>}
                   </span>
                   <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-white/50">
                     {[c.city, c.subsector, sinceOf(c) ? `since ${sinceOf(c)}` : ""]

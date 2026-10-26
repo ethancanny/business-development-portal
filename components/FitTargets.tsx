@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import CompanyTargets from "@/components/CompanyTargets";
 import { SectorLegend } from "@/components/SectorChip";
 import { sectorColor, sectorIcon } from "@/lib/sector-colors";
+import { useFocus } from "@/components/focus/FocusProvider";
 
 /** Consolidated ★ Fit Targets (Ethan, Oct 10, 2026): every company
  * passing Canny's fit rules in ONE table. The industry switcher
@@ -25,6 +26,17 @@ const pill = (active: boolean) =>
   `chip text-sm ${active ? "chip-active" : ""}`;
 
 export default function FitTargets() {
+  // Focus & Theme §2 (Oct 26, 2026): in Focus mode the sector
+  // switcher offers Aerospace & Defense only — the other sectors'
+  // pills are absent, "All Industries" scopes to A&D, and its total
+  // counts A&D fits only. In "all" mode the switcher is unchanged.
+  // (CompanyTargets additionally hides out-of-focus rows behind its
+  // own toggle when a mixed list is passed in.)
+  const { focus } = useFocus();
+  const visibleSectors =
+    focus === "ad"
+      ? SECTORS.filter((s) => s === "Aerospace & Defense")
+      : SECTORS;
   const [tab, setTab] = useState<string>("All");
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [unscored, setUnscored] = useState<Record<string, number | null>>({});
@@ -71,7 +83,7 @@ export default function FitTargets() {
     };
   }, []);
 
-  const totalFits = SECTORS.reduce((sum, s) => sum + (counts[s] ?? 0), 0);
+  const totalFits = visibleSectors.reduce((sum, s) => sum + (counts[s] ?? 0), 0);
 
   return (
     <div>
@@ -79,7 +91,7 @@ export default function FitTargets() {
         <button onClick={() => setTab("All")} className={pill(tab === "All")}>
           All Industries · {totalFits ? totalFits.toLocaleString() : "—"}
         </button>
-        {SECTORS.map((s) => (
+        {visibleSectors.map((s) => (
           <button key={s} onClick={() => setTab(s)} className={pill(tab === s)}>
             <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ backgroundColor: sectorColor(s) }} />
             <span className="mr-1" aria-hidden>{sectorIcon(s)}</span>
@@ -89,7 +101,7 @@ export default function FitTargets() {
       </div>
       {tab === "All" && (
         <div className="mb-3">
-          <SectorLegend sectors={SECTORS} />
+          <SectorLegend sectors={visibleSectors} />
         </div>
       )}
       {(tab === "All" || tab === "Healthcare") && (unscored["Healthcare"] ?? 0) > 0 && (
@@ -117,7 +129,7 @@ export default function FitTargets() {
       )}
       <CompanyTargets
         key={tab}
-        sectors={tab === "All" ? SECTORS : [tab]}
+        sectors={tab === "All" ? visibleSectors : [tab]}
         fitOnly
         heading={tab === "All" ? "★ All fit targets" : `★ ${tab} — fit targets`}
       />
