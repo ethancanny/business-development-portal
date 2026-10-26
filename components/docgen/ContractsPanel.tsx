@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { EmptyState, ErrorState, SkeletonRows } from "@/components/ui";
 import { fmtDate } from "@/lib/format";
+import ContractSendDialog from "@/components/docgen/ContractSendDialog";
 
 type ContractStatus = "draft" | "in_review" | "out_for_signature" | "executed";
 
@@ -26,6 +27,9 @@ interface Contract {
   templateKey: string;
   templateVersion: number;
   scope: string;
+  companyId: string | null;
+  dealId: string | null;
+  investorPersonId: string | null;
   companyName: string;
   investorName: string;
   counterpartyName: string;
@@ -282,9 +286,7 @@ function ContractDetail({
     closing: "",
     renewal: "",
   });
-  const [sendLinks, setSendLinks] = useState<
-    Array<{ name: string; email: string; url: string }>
-  >([]);
+  const [showSend, setShowSend] = useState(false);
   const [cmpFrom, setCmpFrom] = useState(0);
   const [cmpTo, setCmpTo] = useState(0);
   const [diff, setDiff] = useState<DiffData | null>(null);
@@ -337,43 +339,6 @@ function ContractDetail({
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const send = async () => {
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const res = await fetch(
-        `/api/platform/docgen/contracts/${contractId}/send`,
-        { method: "POST" }
-      );
-      const data = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        provider?: string;
-        envelopeId?: string;
-        links?: Array<{ name: string; email: string; url: string }>;
-      };
-      if (!res.ok) {
-        throw new Error(
-          data.error === "signer_not_approved_for_room"
-            ? "A signer is not an approved party for this data room (U.S.-persons-only / restricted). Add them to the Directory or the room's domain allowlist first."
-            : data.error === "signable_pdf_unavailable"
-              ? "This version has no signable PDF. Re-upload the current version — a PDF companion is created automatically — then send again."
-              : (data.error ?? `HTTP ${res.status}`)
-        );
-      }
-      setSendLinks(Array.isArray(data.links) ? data.links : []);
-      setNotice(
-        `Sent for signature via ${data.provider ?? "in-house"} signing. Share each signer link below — links are shown once.`
-      );
-      await load();
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Send failed.");
     } finally {
       setBusy(false);
     }
@@ -519,10 +484,10 @@ function ContractDetail({
             Back to draft
           </button>
         )}
-        {(c.status === "draft" || c.status === "in_review") && (
+        {!executed && (
           <button type="button" className="btn btn-primary btn-sm min-h-[44px]" disabled={busy}
-            onClick={() => void send()}>
-            Send for signature
+            onClick={() => setShowSend(true)}>
+            Send…
           </button>
         )}
         {!executed && (
@@ -546,22 +511,6 @@ function ContractDetail({
           </button>
         )}
       </div>
-
-      {sendLinks.length > 0 && (
-        <div className="mt-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
-          <p className="text-sm font-semibold text-[#0d1f3c] dark:text-white">
-            Signer links (shown once — share with each signer)
-          </p>
-          <ul className="mt-2 space-y-1.5">
-            {sendLinks.map((l) => (
-              <li key={l.email} className="break-all text-sm text-slate-600 dark:text-white/70">
-                {l.name} ({l.email}):{" "}
-                <span className="font-mono text-xs">{l.url}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="mt-4 grid gap-5 lg:grid-cols-2">
         {/* Signers */}
@@ -819,6 +768,29 @@ function ContractDetail({
           </ol>
         )}
       </div>
+
+      {showSend && (
+        <ContractSendDialog
+          contract={{
+            id: c.id,
+            title: c.title,
+            status: c.status,
+            signers: signers.map((s) => ({
+              name: s.name,
+              email: s.email,
+              status: s.status,
+            })),
+            counterpartyName: c.counterpartyName,
+            counterpartyEmail: c.counterpartyEmail,
+            investorPersonId: c.investorPersonId,
+          }}
+          onClose={() => setShowSend(false)}
+          onChanged={() => {
+            void load();
+            onChanged();
+          }}
+        />
+      )}
     </div>
   );
 }
