@@ -433,6 +433,29 @@ export function ensurePlatformSchema(): Promise<void> {
         INSERT INTO core.user_roles (email, role)
         VALUES ('ethan@cannycapitalpartners.com', 'admin')
         ON CONFLICT (email) DO NOTHING`;
+
+      // Focus & Theme system (Oct 26, 2026): workspace-wide Focus
+      // (singleton row, id 'workspace') + per-user Theme preferences.
+      // Focus defaults to 'ad' (Aerospace & Defense) per Ethan's spec —
+      // the row is materialized with defaults by lib/platform/focus.ts
+      // on first read, not here, so the taxonomy/NAICS defaults live in
+      // exactly one place.
+      await db`
+        CREATE TABLE IF NOT EXISTS core.focus_settings (
+          id TEXT PRIMARY KEY,
+          focus TEXT NOT NULL DEFAULT 'ad',
+          taxonomy JSONB NOT NULL DEFAULT '[]',
+          naics JSONB NOT NULL DEFAULT '[]',
+          matching_boost INTEGER NOT NULL DEFAULT 10,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_by TEXT NOT NULL DEFAULT ''
+        )`;
+      await db`
+        CREATE TABLE IF NOT EXISTS core.user_preferences (
+          email TEXT PRIMARY KEY,
+          theme TEXT NOT NULL DEFAULT 'desert',
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
     })().catch((err) => {
       schemaReady = null;
       throw err;

@@ -36,6 +36,7 @@ export const DATASETS = [
   "directory",
   "capital",
   "badge",
+  "focus_theme",
 ] as const;
 
 export type DatasetName = (typeof DATASETS)[number];

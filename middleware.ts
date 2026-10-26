@@ -40,6 +40,10 @@ export function middleware(req: NextRequest) {
     // + expiry + revocation) on every call; an email client fetching
     // the pixel has no session cookie.
     "/api/track",
+    // Focus mode probe (Focus & Theme, Oct 26, 2026): the login page
+    // is pre-auth and its tagline is focus-aware; the route returns
+    // only the mode string ("ad" | "all"), nothing else.
+    "/api/platform/focus-public",
   ];
   // PWA assets: browsers fetch the manifest, icons, splash images and the
   // service worker outside the page's auth context (notably iOS), and the
