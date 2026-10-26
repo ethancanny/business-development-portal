@@ -9,6 +9,11 @@
  * Arizona cities when a card names the city but carries no coords.
  * Cities with neither are listed (counted) but get no marker —
  * a marker is never placed at a guessed location.
+ *
+ * Stored city strings arrive un-normalized ("Phoenix", "Phoenix, AZ",
+ * "Phoenix, AZ, AZ", "phoenix"), so aggregation keys are normalized
+ * here at the read path — stored data itself is never rewritten —
+ * and fragments of one city merge into a single row/marker.
  */
 
 import { useMemo } from "react";
@@ -51,10 +56,43 @@ const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
   "bullhead city": { lat: 35.14, lng: -114.57 },
 };
 
+/** The outline path below is drawn inside this frame of the 100×116
+ * viewBox (its own bounding box: x 6–97, y 3–86). Lat/lng must project
+ * into the SAME frame — projecting onto the full viewBox instead put
+ * everything south of ~lat 32.75 below the drawn southern border
+ * (Tucson rendered outside the state entirely). */
+const FRAME = { xMin: 6, xMax: 97, yMin: 3, yMax: 86 };
+
 function project(lat: number, lng: number): { x: number; y: number } {
-  const x = ((lng - BOUNDS.lngMin) / (BOUNDS.lngMax - BOUNDS.lngMin)) * 100;
-  const y = (1 - (lat - BOUNDS.latMin) / (BOUNDS.latMax - BOUNDS.latMin)) * 116;
+  const x =
+    FRAME.xMin +
+    ((lng - BOUNDS.lngMin) / (BOUNDS.lngMax - BOUNDS.lngMin)) *
+      (FRAME.xMax - FRAME.xMin);
+  const y =
+    FRAME.yMin +
+    (1 - (lat - BOUNDS.latMin) / (BOUNDS.latMax - BOUNDS.latMin)) *
+      (FRAME.yMax - FRAME.yMin);
   return { x, y };
+}
+
+/** Normalize a stored city string to a merge key + display name:
+ * trim, collapse whitespace, drop any trailing state suffix
+ * (", AZ" / " AZ" / ", Arizona", repeated), fold case. */
+function normalizeCity(raw: string): { key: string; name: string } | null {
+  let s = raw.trim().replace(/\s+/g, " ");
+  for (;;) {
+    const next = s
+      .replace(/[,\s]+(az|arizona)$/i, "")
+      .trim()
+      .replace(/,+$/, "")
+      .trim();
+    if (next === s) break;
+    s = next;
+  }
+  if (!s) return null;
+  const key = s.toLowerCase();
+  const name = key.replace(/\b\w/g, (ch) => ch.toUpperCase());
+  return { key, name };
 }
 
 /** Simplified Arizona boundary (stylized, not a survey outline):
@@ -67,27 +105,38 @@ export default function ArizonaMap({ cards }: { cards: CompanyCard[] }) {
   const { cities, unmapped } = useMemo(() => {
     const byCity = new Map<
       string,
-      { count: number; lat: number | null; lng: number | null }
+      { name: string; count: number; lat: number | null; lng: number | null }
     >();
     for (const c of cards) {
-      const city = (c.city ?? "").trim();
-      if (!city) continue;
-      const cur = byCity.get(city) ?? { count: 0, lat: null, lng: null };
+      const norm = normalizeCity(c.city ?? "");
+      if (!norm) continue;
+      const cur = byCity.get(norm.key) ?? {
+        name: norm.name,
+        count: 0,
+        lat: null,
+        lng: null,
+      };
       cur.count += 1;
-      if (typeof c.lat === "number" && typeof c.lng === "number") {
+      // First stored coordinate pair for the merged city wins; fragments
+      // without coords fall through to the fallback table below.
+      if (
+        cur.lat === null &&
+        typeof c.lat === "number" &&
+        typeof c.lng === "number"
+      ) {
         cur.lat = c.lat;
         cur.lng = c.lng;
       }
-      byCity.set(city, cur);
+      byCity.set(norm.key, cur);
     }
     const list = Array.from(byCity.entries())
-      .map(([city, v]) => {
-        const fallback = CITY_COORDS[city.toLowerCase()];
+      .map(([key, v]) => {
+        const fallback = CITY_COORDS[key];
         const lat = v.lat ?? fallback?.lat ?? null;
         const lng = v.lng ?? fallback?.lng ?? null;
-        return { city, count: v.count, lat, lng };
+        return { city: v.name, count: v.count, lat, lng };
       })
-      .sort((a, b) => b.count - a.count);
+      .sort((a, b) => b.count - a.count || a.city.localeCompare(b.city));
     return {
       cities: list.slice(0, 10),
       unmapped: list.filter((c) => c.lat === null || c.lng === null).length,
