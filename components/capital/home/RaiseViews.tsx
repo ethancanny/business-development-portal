@@ -439,7 +439,7 @@ export default function RaiseViews({
   onStartRaise: (deal: ExtCapitalDeal) => void;
   startingDealId: string | null;
 }) {
-  const [view, setView] = useState<ViewKey>("cards");
+  const [view, setView] = useState<ViewKey>("table");
   const [noRaiseOpen, setNoRaiseOpen] = useState(false);
 
   useEffect(() => {
