@@ -4,19 +4,24 @@
  * Today header (Overview redesign §2, Oct 25, 2026).
  *
  * The hero IS the Today header: greeting by Phoenix time of day,
- * the full date, and the one-line data brief merged into the desert
- * banner (imagery lives only here per §11). The brief is built by
- * the caller from REAL counts only (meetings today, follow-ups due
+ * the full date, and the one-line data brief merged into the banner
+ * (imagery lives only here per §11). The brief is built by the
+ * caller from REAL counts only (meetings today, follow-ups due
  * today, overdue) — any piece that can't be derived is omitted.
+ *
+ * Photography (Ethan, Oct 26, 2026): the day/night theme transition
+ * stays, but both variants are now the realistic photographs the
+ * public website runs — the Luke AFB four-ship formation in day
+ * (light) mode, the Falcon 9 night-launch still in night (dark)
+ * mode — and the decorative lines/motif overlay is gone. The navy
+ * gradient is deepened a step (via /75, to /40) so the greeting
+ * text holds WCAG AA over the brightest region of either photo,
+ * desktop and mobile crops (worst measured: 4.59:1, the gold
+ * eyebrow over the day formation at phone width).
  */
 
-import { BANNER_DARK, BANNER_LIGHT } from "@/lib/sector-colors";
+import { OVERVIEW_HERO_DAY, OVERVIEW_HERO_NIGHT } from "@/lib/sector-colors";
 import { useFocus } from "@/components/focus/FocusProvider";
-import {
-  ContrailArc,
-  StarField,
-  TopoContours,
-} from "@/components/theme/DesertMotifs";
 
 export function phoenixHour(now = new Date()): number {
   const h = new Intl.DateTimeFormat("en-US", {
@@ -56,25 +61,20 @@ export default function TodayHero({
     <section className="relative mb-6 overflow-hidden rounded-2xl">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={BANNER_LIGHT}
+        src={OVERVIEW_HERO_DAY}
         alt=""
         loading="lazy"
         className="absolute inset-0 h-full w-full object-cover dark:hidden"
       />
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={BANNER_DARK}
+        src={OVERVIEW_HERO_NIGHT}
         alt=""
         loading="lazy"
         className="absolute inset-0 hidden h-full w-full object-cover dark:block"
       />
-      <div className="absolute inset-0 bg-gradient-to-r from-[#0d1f3c] via-[#0d1f3c]/60 to-[#0d1f3c]/15" />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#0d1f3c] via-[#0d1f3c]/75 to-[#0d1f3c]/40" />
       <div className="absolute inset-0 bg-gradient-to-t from-[#0d1f3c]/60 via-transparent to-transparent" />
-      <span className="text-white">
-        <TopoContours />
-        <StarField />
-        <ContrailArc />
-      </span>
       <div className="relative px-5 py-6 sm:px-6 sm:py-7">
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#d4b37a]">
           {focus === "ad"

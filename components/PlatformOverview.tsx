@@ -13,7 +13,7 @@
  *
  * Layout is now the spec's fixed asymmetric 12-column grid (the old
  * drag/hide widget-customization system is retired): main column =
- * Active deals (slot from the page), Pipeline funnel, Deal heat map,
+ * Active deals (slot from the page), Pipeline funnel,
  * Arizona footprint; right rail = Needs attention + the page's
  * Follow-ups / Important dates slot. Portfolio RAG + Activity pulse
  * sit below the grid — and when BOTH have no data they collapse into
@@ -25,14 +25,13 @@
  * by activity, Investors by last touch, Going quiet.
  */
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import CompanyMark from "@/components/identity/CompanyMark";
 import { EmptyState, SkeletonRows } from "@/components/ui";
 import CommandStrip from "@/components/overview/CommandStrip";
 import ArizonaMap from "@/components/overview/ArizonaMap";
 import { ragDot, type CompanyCard } from "@/components/CompanyCards";
-import { useTheme } from "@/components/ThemeProvider";
 import { fmtMoney, fmtMoneyCompact, fmtRelTime } from "@/lib/format";
 import { barGradient } from "@/lib/sector-colors";
 import type { OverviewSummary } from "@/lib/platform/types";
@@ -257,118 +256,6 @@ function FunnelWidget({ summary }: { summary: PlatformSummary }) {
   );
 }
 
-/* ---------------- Heat map (§7b) ----------------
- * Fits INSIDE its card: fluid grid, no min-width, no horizontal
- * scroll, no clipped columns (stage headers abbreviate with the
- * full name in the title). Clicking a cell filters the pipeline
- * (PipelineView honors ?stage= + ?industry= on load). */
-
-const STAGE_SHORT: Record<string, string> = {
-  Sourced: "Src",
-  IOI: "IOI",
-  Diligence: "Dil",
-  LOI: "LOI",
-  Financing: "Fin",
-  Closed: "Clo",
-  Passed: "Pas",
-  Sourcing: "Src",
-  "Initial Contact": "Init",
-  Negotiation: "Neg",
-  Closing: "Clo",
-  "Closed Won": "Won",
-  Intro: "Int",
-  "Partner Meeting": "PM",
-  "Term Sheet": "TS",
-};
-
-function HeatmapWidget({ summary }: { summary: PlatformSummary }) {
-  const { theme } = useTheme();
-  const dark = theme === "dark";
-  const { verticals, stages, cells } = summary.heatmap ?? {
-    verticals: [],
-    stages: [],
-    cells: {},
-  };
-  const max = Math.max(1, ...Object.values(cells ?? {}));
-  return (
-    <div className="card-surface p-4 sm:p-5">
-      <SectionHeading>Deal heat map</SectionHeading>
-      {!verticals.length || !stages.length ? (
-        <p className="text-sm text-caption">
-          Deal distribution by sector and stage will appear once deals are in the summary.
-        </p>
-      ) : (
-        <>
-          <div
-            className="grid w-full gap-1"
-            style={{
-              gridTemplateColumns: `minmax(0,1.3fr) repeat(${stages.length}, minmax(0,1fr))`,
-            }}
-          >
-            <span />
-            {stages.map((s) => (
-              <span
-                key={s}
-                className="truncate px-0.5 pb-1 text-center text-[10px] font-semibold uppercase leading-tight tracking-wide text-caption"
-                title={s}
-              >
-                {STAGE_SHORT[s] ?? s.slice(0, 3)}
-              </span>
-            ))}
-            {verticals.map((v) => (
-              <Fragment key={v}>
-                <span
-                  className="flex min-w-0 items-center pr-1.5 text-xs font-medium leading-tight text-slate-700 dark:text-white/80"
-                  title={v}
-                >
-                  <span className="truncate">{v}</span>
-                </span>
-                {stages.map((s) => {
-                  const n = cells[`${v}|${s}`] ?? 0;
-                  const intensity = n === 0 ? 0 : 0.15 + 0.85 * (n / max);
-                  return (
-                    <Link
-                      key={`${v}|${s}`}
-                      href={`/pipeline?stage=${encodeURIComponent(s)}&industry=${encodeURIComponent(v)}`}
-                      title={`${v} · ${s}: ${n} deal${n === 1 ? "" : "s"} — view in pipeline`}
-                      aria-label={`${v}, ${s}: ${n} deals. View in pipeline.`}
-                      className="tnum flex h-9 items-center justify-center rounded-md text-xs font-semibold transition hover:ring-2 hover:ring-[#b8975a]/60"
-                      style={{
-                        border: `1px solid ${dark ? "rgba(255,255,255,0.12)" : "rgba(13,31,60,0.12)"}`,
-                        backgroundColor:
-                          n === 0
-                            ? dark
-                              ? "rgba(232,223,200,0.07)"
-                              : "rgba(13,31,60,0.05)"
-                            : `rgba(184,151,90,${intensity.toFixed(2)})`,
-                        color:
-                          n === 0
-                            ? dark
-                              ? "rgba(232,223,200,0.55)"
-                              : "#0d1f3c"
-                            : intensity > 0.55
-                              ? "#ffffff"
-                              : dark
-                                ? "#e8dfc8"
-                                : "#0d1f3c",
-                      }}
-                    >
-                      {n > 0 ? n : "·"}
-                    </Link>
-                  );
-                })}
-              </Fragment>
-            ))}
-          </div>
-          <p className="mt-2 text-[11px] text-caption">
-            Gold intensity = deal count. Tap a cell for its exact count and to open the
-            filtered pipeline.
-          </p>
-        </>
-      )}
-    </div>
-  );
-}
 
 /* ---------------- Capital stacks (exported; PipelineView renders it) -------- */
 
@@ -871,7 +758,6 @@ export default function PlatformOverview({
             <div className="flex min-w-0 flex-col gap-4 lg:col-span-8">
               {activeDealsNode}
               <FunnelWidget summary={summary} />
-              <HeatmapWidget summary={summary} />
               <div className="card-surface p-4 sm:p-5">
                 <SectionHeading>Arizona footprint</SectionHeading>
                 <ArizonaMap cards={allCards} />

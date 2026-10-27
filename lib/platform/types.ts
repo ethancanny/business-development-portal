@@ -96,11 +96,6 @@ export interface OverviewSummary {
    * day the table shipped — never backfilled. Fewer than 2 points =
    * no trend is shown. */
   pipelineHistory?: { day: string; value: number }[];
-  heatmap: {
-    verticals: string[];
-    stages: string[];
-    cells: Record<string, number>; // key: `${vertical}|${stage}`
-  };
   capitalStacks: CapitalStack[];
   needsAttention: NeedsAttentionItem[];
   updatedAt: string | null;
@@ -239,7 +234,6 @@ export function emptyOverviewSummary(): OverviewSummary {
     capitalNeeded: 0,
     portfolioCount: 0,
     ragCounts: { green: 0, amber: 0, red: 0 },
-    heatmap: { verticals: [], stages: [], cells: {} },
     capitalStacks: [],
     needsAttention: [],
     updatedAt: null,

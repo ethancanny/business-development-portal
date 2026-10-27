@@ -171,24 +171,6 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
     };
   });
 
-  /* ---- heatmap: vertical (industry) × stage ---- */
-  const heatRows = await db`
-    SELECT industry, stage, count(*)::int AS n
-    FROM deals GROUP BY industry, stage`;
-  const verticalSet = new Set<string>();
-  const cells: Record<string, number> = {};
-  for (const r of heatRows) {
-    const rec = r as Record<string, unknown>;
-    const vertical = str(rec.industry) || "Unspecified";
-    verticalSet.add(vertical);
-    cells[`${vertical}|${str(rec.stage)}`] = num(rec.n);
-  }
-  const heatmap = {
-    verticals: Array.from(verticalSet).sort(),
-    stages: [...DEAL_STAGES],
-    cells,
-  };
-
   /* ---- portfolio RAG ----
    * Phase 1 heuristic ONLY (real KPI-based RAG arrives with Portfolio
    * Monitoring in Phase 8): a portfolio company is green when its latest
@@ -539,7 +521,6 @@ export async function refreshOverviewSummary(): Promise<OverviewSummary> {
     capitalNeeded,
     portfolioCount,
     ragCounts,
-    heatmap,
     capitalStacks,
     needsAttention,
     updatedAt: new Date().toISOString(),

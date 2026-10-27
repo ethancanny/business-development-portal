@@ -85,6 +85,19 @@ export function agingColor(days: number, warnAt = 30, badAt = 90): string {
 export const BANNER_LIGHT = "https://cannycapitalpartners.com/arizona-desert-hero.jpg";
 export const BANNER_DARK = "https://cannycapitalpartners.com/arizona-desert-landscape.jpg";
 
+/** Overview Today-hero photography (Ethan, Oct 26, 2026): the hero
+ * keeps the day/night theme transition, but both variants are the
+ * realistic photographs the public website already runs — the Luke
+ * AFB 944th FW four-ship formation by day (the Capital Leadership
+ * hero) and the Falcon 9 night-launch still at night (the Capital
+ * homepage hero poster). Referenced from the same Wikimedia CDN
+ * the website uses; no binaries in this repo. Other pages keep the
+ * desert banners above. */
+export const OVERVIEW_HERO_DAY =
+  "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fd/Col._Kurt_Gallegos%2C_the_944th_Fighter_Wing_commander%2C_leads_a_four-ship_formation_with_the_A-10_Thunderbolt_II%2C_F-35_Joint_Strike_Fighter_and_F-15_Strike_Eagle%2C_during_his_fini-flight_near_Luke_Air_Force_Base%2C_Ariz.%2C_June_2%2C_2017.jpg/1280px-thumbnail.jpg";
+export const OVERVIEW_HERO_NIGHT =
+  "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b1/Falcon_9_-_Starlink_10-41_Launch_%28998196%29.webm/1280px--Falcon_9_-_Starlink_10-41_Launch_%28998196%29.webm.jpg";
+
 /** Gradient fill for chart/density bars (Ethan asked for the gradient
  * bar look back, Oct 14, 2026): the solid hue sweeps into brand gold. */
 export function barGradient(color: string): string {
