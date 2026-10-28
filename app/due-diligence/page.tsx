@@ -8,10 +8,14 @@
  * - Value Creation Plans → /api/platform/hubs/dd-plans (+ New plan
  *   dialog rendering the shared StartPlanForm)
  * - Data Rooms (compact) → /api/platform/hubs/dd-rooms
+ * - Playbook & Ideas → compile-time static reference content
+ *   (components/diligence/PlaybookSection; no endpoint, no fetch —
+ *   curated diligence suggestions, kept separate from the live
+ *   workspaces' checklists; added Oct 27, 2026)
  * Ethan, Oct 23, 2026: hub tab bars are true tabs — only the selected
  * tab's section renders (so an unselected section never fetches);
  * the tab restores from the URL hash (#dd-workspaces / #dd-plans /
- * #dd-rooms).
+ * #dd-rooms / #dd-playbook).
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -20,6 +24,7 @@ import { useRouter } from "next/navigation";
 import PageHero from "@/components/PageHero";
 import { CardSkeleton, EmptyState, ErrorState, SkeletonRows } from "@/components/ui";
 import StartPlanForm from "@/components/valuecreation/StartPlanForm";
+import PlaybookSection from "@/components/diligence/PlaybookSection";
 import { cardCls, fmtDateShort } from "@/components/diligence/types";
 import { fmtMoney, fmtMoneyCompact, fmtRelTime } from "@/lib/format";
 
@@ -508,6 +513,7 @@ const SECTIONS = [
   { id: "dd-workspaces", label: "Diligence Workspaces" },
   { id: "dd-plans", label: "Value Creation Plans" },
   { id: "dd-rooms", label: "Data Rooms" },
+  { id: "dd-playbook", label: "Playbook & Ideas" },
 ] as const;
 
 export default function DueDiligencePage() {
@@ -574,6 +580,11 @@ export default function DueDiligencePage() {
           {active === "dd-rooms" && (
             <section id="dd-rooms">
               <RoomsSection />
+            </section>
+          )}
+          {active === "dd-playbook" && (
+            <section id="dd-playbook">
+              <PlaybookSection />
             </section>
           )}
         </div>
