@@ -54,6 +54,25 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
   // false and the list renders exactly as before.
   const { isOutOfFocus } = useFocus();
   const [showOutOfFocus, setShowOutOfFocus] = useState(false);
+  // State filter (Southwest spine expansion, Oct 28, 2026): the A&D
+  // spine now covers 8 states; every other sector is Arizona-only, so
+  // the selector renders only when this section's scope is exactly
+  // A&D. Defaults to Arizona — Ethan's existing workflow is unchanged
+  // until he picks another state. "ALL" sends no state parameter.
+  const SW_STATES: { code: string; label: string }[] = [
+    { code: "AZ", label: "Arizona" },
+    { code: "NM", label: "New Mexico" },
+    { code: "TX", label: "Texas" },
+    { code: "OK", label: "Oklahoma" },
+    { code: "NV", label: "Nevada" },
+    { code: "UT", label: "Utah" },
+    { code: "CO", label: "Colorado" },
+    { code: "CA", label: "California" },
+    { code: "ALL", label: "All states" },
+  ];
+  const isADOnly = sectorList.length === 1 && sectorList[0] === "Aerospace & Defense";
+  const [stateSel, setStateSel] = useState("AZ");
+  const stateParam = isADOnly && stateSel !== "ALL" ? `&state=${stateSel}` : "";
 
   useEffect(() => {
     let live = true;
@@ -61,7 +80,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       // Fits section (Ethan, Oct 16, 2026): the server owns the stage
       // query — active fits only, newest date_added first, capped —
       // so a dismissal here refetches and the next fit backfills.
-      fetch(`/api/market/companies?mode=fits&sectors=${encodeURIComponent(sectorList.join(","))}`)
+      fetch(`/api/market/companies?mode=fits&sectors=${encodeURIComponent(sectorList.join(","))}${stateParam}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { companies?: MiCompany[]; fitTotal?: number } | null) => {
           if (!live || !d) return;
@@ -73,7 +92,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       // Filtered Out (chain + institutional filters): flagged
       // companies are fetched alongside so the sibling view + its
       // count are ready.
-      fetch(`/api/market/companies?mode=filtered&sectors=${encodeURIComponent(sectorList.join(","))}`)
+      fetch(`/api/market/companies?mode=filtered&sectors=${encodeURIComponent(sectorList.join(","))}${stateParam}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { companies?: MiCompany[]; filteredTotal?: number; chainTotal?: number } | null) => {
           if (!live || !d) return;
@@ -87,7 +106,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
     }
     Promise.all(
       sectorList.map((s) =>
-        fetch(`/api/market/companies?sector=${encodeURIComponent(s)}&limit=800`)
+        fetch(`/api/market/companies?sector=${encodeURIComponent(s)}&limit=${isADOnly && stateSel !== "AZ" ? 5000 : 800}${stateParam}`)
           .then((r) => (r.ok ? r.json() : []))
           .catch(() => [])
       )
@@ -111,7 +130,7 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectorList.join("|"), fitOnly, refreshTick]);
+  }, [sectorList.join("|"), fitOnly, refreshTick, stateSel]);
 
   const visiblePreFocus = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -708,6 +727,20 @@ export default function CompanyTargets({ sector, sectors, fitOnly = false, headi
           placeholder="Search name, city, or sub-sector…"
           className="w-full max-w-sm rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#b8975a] dark:border-white/10 dark:bg-[#132847]/40 dark:text-white/85"
         />
+        {isADOnly && (
+          <select
+            value={stateSel}
+            onChange={(e) => setStateSel(e.target.value)}
+            aria-label="State"
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 outline-none focus:border-[#b8975a] dark:border-white/10 dark:bg-[#132847]/40 dark:text-white/85"
+          >
+            {SW_STATES.map((s) => (
+              <option key={s.code} value={s.code}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        )}
         <ShowOutOfFocusToggle
           show={showOutOfFocus}
           onChange={setShowOutOfFocus}

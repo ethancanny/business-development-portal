@@ -31,6 +31,19 @@ export const DATASETS = [
   "market_indicators",
   "market_tailwind",
   "market_companies",
+  /* Southwest spine expansion (Oct 28, 2026): per-state company
+     datasets for the 8 spine states. Their stamps are presence-aware
+     derived stamps over mi_companies (see STATE_COMPANY_DATASETS
+     below): a write in one state never moves another state's stamp,
+     so an Arizona reader's cached payload survives a Texas import. */
+  "market_companies_az",
+  "market_companies_nm",
+  "market_companies_tx",
+  "market_companies_ok",
+  "market_companies_nv",
+  "market_companies_ut",
+  "market_companies_co",
+  "market_companies_ca",
   "hospitality_settings",
   "candidates",
   "directory",
@@ -65,6 +78,26 @@ const DERIVED_TABLES: Partial<Record<DatasetName, string>> = {
 };
 
 /**
+ * Per-state company datasets → the state they version. A company's
+ * presence in a state is its `state` column OR any element of its
+ * consolidated details.states array (company identity is global — one
+ * row, multi-state presence), mirroring the read-path predicate in
+ * lib/market-db.ts. All 8 stamps come from ONE grouped aggregate per
+ * TTL window (below), so the per-state datasets cost the versions
+ * endpoint no more than the single global derived stamp did.
+ */
+const STATE_COMPANY_DATASETS: Partial<Record<DatasetName, string>> = {
+  market_companies_az: "AZ",
+  market_companies_nm: "NM",
+  market_companies_tx: "TX",
+  market_companies_ok: "OK",
+  market_companies_nv: "NV",
+  market_companies_ut: "UT",
+  market_companies_co: "CO",
+  market_companies_ca: "CA",
+};
+
+/**
  * Derived-stamp cache (CPU close-out, Oct 26, 2026): the derived
  * aggregate over mi_companies scans ~62K rows and sits on the hottest
  * read path in the app — every GET /api/platform/versions and every
@@ -86,6 +119,19 @@ const derivedCache = new Map<DatasetName, { stamp: number; at: number }>();
  * Returns 0 when the backing table cannot be read (a missing derived
  * stamp must never sink a version read).
  */
+/** count * 2^33 + epochSec(max(updated_at)) — see derivedStamp. */
+function stampOf(count: number, rawMax: unknown): number {
+  let epochSec = 0;
+  if (rawMax !== null && rawMax !== undefined && rawMax !== "") {
+    const ms =
+      rawMax instanceof Date
+        ? rawMax.getTime()
+        : new Date(String(rawMax)).getTime();
+    if (isFinite(ms)) epochSec = Math.floor(ms / 1000);
+  }
+  return count * 2 ** 33 + epochSec;
+}
+
 async function derivedStamp(name: DatasetName): Promise<number> {
   const table = DERIVED_TABLES[name];
   if (!table) return 0;
@@ -98,20 +144,58 @@ async function derivedStamp(name: DatasetName): Promise<number> {
     );
     if (!rows.length) return 0;
     const rec = rows[0] as Record<string, unknown>;
-    const count = num(rec.n);
-    const raw = rec.max_updated;
-    let epochSec = 0;
-    if (raw !== null && raw !== undefined && raw !== "") {
-      const ms =
-        raw instanceof Date ? raw.getTime() : new Date(String(raw)).getTime();
-      if (isFinite(ms)) epochSec = Math.floor(ms / 1000);
-    }
-    const stamp = count * 2 ** 33 + epochSec;
+    const stamp = stampOf(num(rec.n), rec.max_updated);
     derivedCache.set(name, { stamp, at: Date.now() });
     return stamp;
   } catch {
     return 0;
   }
+}
+
+let stateStampsCache: { stamps: Map<string, number>; at: number } | null =
+  null;
+
+/**
+ * Derived stamps for ALL per-state company datasets from one grouped
+ * aggregate (same 10s per-instance TTL discipline as derivedStamp;
+ * failures are not cached and read as 0). The UNION ALL expands each
+ * row once per state it is present in — the primary state column plus
+ * every element of details.states on consolidated rows — so a
+ * cross-state company's write moves each of its states' stamps and
+ * no others.
+ */
+async function derivedStateStamps(): Promise<Map<string, number>> {
+  if (
+    stateStampsCache &&
+    Date.now() - stateStampsCache.at < DERIVED_TTL_MS
+  ) {
+    return stateStampsCache.stamps;
+  }
+  const stamps = new Map<string, number>();
+  try {
+    const db = sql();
+    const rows = await db.query(
+      `SELECT u.st AS st, count(*)::int AS n, max(u.updated_at) AS max_updated
+       FROM (
+         SELECT state AS st, updated_at FROM mi_companies
+         UNION ALL
+         SELECT jsonb_array_elements_text(details::jsonb -> 'states') AS st,
+                updated_at
+         FROM mi_companies
+         WHERE details LIKE '{%'
+           AND jsonb_typeof(details::jsonb -> 'states') = 'array'
+       ) u
+       GROUP BY u.st`
+    );
+    for (const r of rows as Record<string, unknown>[]) {
+      const st = str(r.st).toUpperCase();
+      if (st) stamps.set(st, stampOf(num(r.n), r.max_updated));
+    }
+  } catch {
+    return stamps;
+  }
+  stateStampsCache = { stamps, at: Date.now() };
+  return stamps;
 }
 
 /**
@@ -152,6 +236,10 @@ export async function getDatasetVersions(): Promise<Record<string, number>> {
   for (const name of Object.keys(DERIVED_TABLES) as DatasetName[]) {
     out[name] += await derivedStamp(name);
   }
+  const stateStamps = await derivedStateStamps();
+  for (const [name, st] of Object.entries(STATE_COMPANY_DATASETS)) {
+    out[name] += stateStamps.get(st) ?? 0;
+  }
   return out;
 }
 
@@ -163,6 +251,10 @@ export async function getDatasetVersion(name: DatasetName): Promise<number> {
   const stored = rows.length
     ? num((rows[0] as Record<string, unknown>).version)
     : 1;
+  const stateCode = STATE_COMPANY_DATASETS[name];
+  if (stateCode) {
+    return stored + ((await derivedStateStamps()).get(stateCode) ?? 0);
+  }
   return stored + (await derivedStamp(name));
 }
 

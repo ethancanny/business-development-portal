@@ -445,6 +445,13 @@ export function ensureSchema(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS mi_companies_institutional_idx
         ON mi_companies (is_institutional) WHERE is_institutional`;
+      // Southwest spine expansion (Oct 28, 2026): state-filtered company
+      // reads and the per-state derived version stamps group by the
+      // state column — index it (the column itself has existed since
+      // the table was created; no data migration is needed).
+      await db`
+        CREATE INDEX IF NOT EXISTS mi_companies_state_idx
+        ON mi_companies (state)`;
       // Fix A (Oct 16, 2026): widen the mi_companies unique key to include
       // sector. CREATE TABLE IF NOT EXISTS does not migrate the live table,
       // whose (source, dedup_key) key made dual-sector USASpending

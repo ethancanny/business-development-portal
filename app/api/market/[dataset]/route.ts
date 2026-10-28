@@ -17,6 +17,7 @@ import {
   countCompanies,
   countFits,
   countUnscored,
+  COMPANY_STATES,
   getUpdates,
   setCompanyStatus,
   dismissCompany,
@@ -136,6 +137,20 @@ export async function GET(
       case "listings":
         return NextResponse.json(await getListings(sp.get("status") ?? undefined));
       case "companies": {
+        // State filter (Southwest spine expansion, Oct 28, 2026):
+        // state=XX restricts every mode below to companies present in
+        // that state (primary state column OR consolidated
+        // details.states), and the response is versioned under the
+        // per-state dataset so one state's writes never invalidate
+        // another state's cached reads. Absent/invalid = unchanged
+        // behavior under the global market_companies dataset.
+        const stateRaw = (sp.get("state") ?? "").toUpperCase();
+        const state = (COMPANY_STATES as readonly string[]).includes(stateRaw)
+          ? stateRaw
+          : undefined;
+        const companiesDataset = (state
+          ? `market_companies_${state.toLowerCase()}`
+          : "market_companies") as DatasetName;
         // Fit-stage feed (Ethan, Oct 16, 2026): active fits only,
         // newest date_added first, capped at FITS_DISPLAY_LIMIT, with
         // the uncapped active-fit total for the "Showing N of X fits"
@@ -147,10 +162,10 @@ export async function GET(
             .map((s) => s.trim())
             .filter(Boolean);
           return versionedJsonCached(
-            "market_companies",
-            "fits|" + sectors.join(","),
+            companiesDataset,
+            "fits|" + sectors.join(",") + "|" + (state ?? ""),
             async () => {
-              const { companies, fitTotal } = await getFitCompanies(sectors.length ? sectors : undefined);
+              const { companies, fitTotal } = await getFitCompanies(sectors.length ? sectors : undefined, state);
               return { companies, fitTotal, limit: FITS_DISPLAY_LIMIT, mode: "fits" };
             }
           );
@@ -166,10 +181,10 @@ export async function GET(
             .map((s) => s.trim())
             .filter(Boolean);
           return versionedJsonCached(
-            "market_companies",
-            "filtered|" + sectors.join(","),
+            companiesDataset,
+            "filtered|" + sectors.join(",") + "|" + (state ?? ""),
             async () => {
-              const { companies, chainTotal, institutionalTotal, filteredTotal } = await getFilteredCompanies(sectors.length ? sectors : undefined);
+              const { companies, chainTotal, institutionalTotal, filteredTotal } = await getFilteredCompanies(sectors.length ? sectors : undefined, state);
               return { companies, chainTotal, institutionalTotal, filteredTotal, mode: "filtered" };
             }
           );
@@ -178,14 +193,14 @@ export async function GET(
         const off = Number(sp.get("offset") ?? 0);
         const limit = Number(sp.get("limit") ?? 600);
         return versionedJsonCached(
-          "market_companies",
-          `list|${sector ?? ""}|${limit}|${off}`,
+          companiesDataset,
+          `list|${sector ?? ""}|${limit}|${off}|${state ?? ""}`,
           async () => {
             const [companies, total, fitTotal, unscoredTotal] = await Promise.all([
-              getCompanies(sector, limit, off),
-              countCompanies(sector),
-              countFits(sector),
-              countUnscored(sector),
+              getCompanies(sector, limit, off, state),
+              countCompanies(sector, state),
+              countFits(sector, state),
+              countUnscored(sector, state),
             ]);
             return { companies, total, fitTotal, unscoredTotal, offset: off };
           }

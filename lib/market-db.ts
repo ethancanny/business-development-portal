@@ -879,25 +879,31 @@ export async function runChainDetectionBatch(
  * so Ethan can override false positives. Institutional runs first:
  * a row carrying both flags lists once, and the UI shows the
  * institutional reason first. */
-export async function getFilteredCompanies(sectors?: string[]): Promise<{ companies: MiCompany[]; chainTotal: number; institutionalTotal: number; filteredTotal: number }> {
+export async function getFilteredCompanies(sectors?: string[], state?: string): Promise<{ companies: MiCompany[]; chainTotal: number; institutionalTotal: number; filteredTotal: number }> {
   await ensureSchema();
   const db = sql();
   const list = (sectors ?? []).filter(Boolean);
   const FILTERED = `is_chain = true OR is_institutional = true OR institutional_suspect = true`;
-  const totalRows = list.length
-    ? await db.query(`SELECT
+  const params: unknown[] = [];
+  const extra: string[] = [];
+  if (list.length) {
+    params.push(list);
+    extra.push(`sector = ANY($${params.length})`);
+  }
+  if (state) {
+    params.push(state);
+    extra.push(statePresenceSql(`$${params.length}`));
+  }
+  const where = `(${FILTERED})${extra.length ? ` AND ${extra.join(" AND ")}` : ""}`;
+  const totalRows = await db.query(`SELECT
         COUNT(*) FILTER (WHERE is_chain)::int AS chain,
         COUNT(*) FILTER (WHERE is_institutional OR institutional_suspect)::int AS inst,
         COUNT(*)::int AS total
-      FROM mi_companies WHERE (${FILTERED}) AND sector = ANY($1)`, [list])
-    : await db.query(`SELECT
-        COUNT(*) FILTER (WHERE is_chain)::int AS chain,
-        COUNT(*) FILTER (WHERE is_institutional OR institutional_suspect)::int AS inst,
-        COUNT(*)::int AS total
-      FROM mi_companies WHERE (${FILTERED})`);
-  const rows = list.length
-    ? await db.query(`SELECT * FROM mi_companies WHERE (${FILTERED}) AND sector = ANY($1) ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT 500`, [list])
-    : await db`SELECT * FROM mi_companies WHERE is_chain = true OR is_institutional = true OR institutional_suspect = true ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT 500`;
+      FROM mi_companies WHERE ${where}`, params);
+  const rows = await db.query(
+    `SELECT * FROM mi_companies WHERE ${where} ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT 500`,
+    params
+  );
   const t = (totalRows as unknown as Record<string, unknown>[])[0] ?? {};
   return {
     companies: (rows as unknown as Record<string, unknown>[]).map((r) => mapCompanyRow(r)),
@@ -1203,9 +1209,16 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     // Reset is scoped to the (source, sector) pairs present in this payload,
     // so one registry feeding several sector spines never wipes the others.
     const sectors = Array.from(new Set(clean.map((r) => r.sector).filter(Boolean)));
+    // State scoping (Southwest spine expansion, Oct 28, 2026): the reset
+    // replaces only rows in the states THIS payload carries — a Texas
+    // import must never delete Arizona's rows for the same
+    // source+sector. Builder payloads are single-state (one run = one
+    // state); the state set keeps a mixed payload correct too. For
+    // today's all-AZ payloads the selection is exactly what it was.
+    const states = Array.from(new Set(clean.map((r) => (r.state ?? "AZ").toUpperCase()).filter(Boolean)));
     const existing = sectors.length
-      ? await db`SELECT dedup_key, sector, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt, is_institutional, institutional_reason, institutional_suspect, institutional_exempt FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`
-      : await db`SELECT dedup_key, sector, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt, is_institutional, institutional_reason, institutional_suspect, institutional_exempt FROM mi_companies WHERE source = ${source}`;
+      ? await db`SELECT dedup_key, sector, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt, is_institutional, institutional_reason, institutional_suspect, institutional_exempt FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors}) AND state = ANY(${states})`
+      : await db`SELECT dedup_key, sector, status, first_seen, date_added, dismissed_at, dismissed_reason, is_chain, chain_reason, chain_suspect, chain_exempt, is_institutional, institutional_reason, institutional_suspect, institutional_exempt FROM mi_companies WHERE source = ${source} AND state = ANY(${states})`;
     // Carry-over is keyed by (dedup_key, sector) like the dedupe above:
     // a dual-sector pair carries each sector slice's OWN triage state
     // through a reset, never its twin's (Fix A follow-up, Oct 26, 2026).
@@ -1244,9 +1257,9 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
       ])
     );
     if (sectors.length) {
-      await db`DELETE FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors})`;
+      await db`DELETE FROM mi_companies WHERE source = ${source} AND sector = ANY(${sectors}) AND state = ANY(${states})`;
     } else {
-      await db`DELETE FROM mi_companies WHERE source = ${source}`;
+      await db`DELETE FROM mi_companies WHERE source = ${source} AND state = ANY(${states})`;
     }
     for (const r of clean) {
       const k = rowKey(r.dedupKey, r.sector);
@@ -1383,7 +1396,7 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
        VALUES ${values.join(", ")}
        ON CONFLICT (source, dedup_key, sector) DO UPDATE SET
          name = EXCLUDED.name, sector = EXCLUDED.sector, subsector = EXCLUDED.subsector, naics = EXCLUDED.naics,
-         city = EXCLUDED.city, address = EXCLUDED.address, zip = EXCLUDED.zip, contact_name = EXCLUDED.contact_name,
+         city = EXCLUDED.city, state = EXCLUDED.state, address = EXCLUDED.address, zip = EXCLUDED.zip, contact_name = EXCLUDED.contact_name,
          contact_title = EXCLUDED.contact_title, phone = EXCLUDED.phone, website = EXCLUDED.website,
          formed_date = EXCLUDED.formed_date, employees = EXCLUDED.employees, signal_value = EXCLUDED.signal_value,
          signal_label = EXCLUDED.signal_label, source_url = EXCLUDED.source_url, details = EXCLUDED.details,
@@ -1445,18 +1458,49 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
 }
 
 
+/** Spine states (Southwest expansion, Oct 28, 2026): the company spine
+ * covers these 8 states for A&D; every other sector stays AZ-only. */
+export const COMPANY_STATES = ["AZ", "NM", "TX", "OK", "NV", "UT", "CO", "CA"] as const;
+
+/** State-presence predicate for a `$n` state parameter: a company is
+ * "in" a state when its primary `state` column matches OR its
+ * consolidated details.states array lists the state — company identity
+ * is global (ONE row), presence is multi-state. The details cast is
+ * guarded exactly like the alsoSectors reads elsewhere (details LIKE
+ * '{%' + jsonb_typeof), so free-text details never reach the cast.
+ * Mirrors the per-state derived stamps in lib/platform/versions.ts. */
+export function statePresenceSql(param: string): string {
+  return `(state = ${param} OR (details LIKE '{%' AND jsonb_typeof(details::jsonb -> 'states') = 'array' AND (details::jsonb -> 'states') @> to_jsonb(ARRAY[${param}]::text[])))`;
+}
+
 /** Active fits = rows in the fit STAGE (status='fit'). Since Oct 16,
  * 2026 this — not the details stamp — is the count every surface
  * reconciles to (Fit Targets pills, the section counter, Overview
  * tiles, hospitality meta). details.fit stays the rule verdict that
  * feeds the stage at import/rescore time. */
-export async function countFits(sector?: string): Promise<number> {
+export async function countFits(sector?: string, state?: string): Promise<number> {
   await ensureSchema();
   await runFitStageMigration();
   const db = sql();
-  const rows = sector
-    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false`
-    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false`;
+  const conds = [
+    "status = 'fit'",
+    "is_chain = false",
+    "is_institutional = false",
+    "institutional_suspect = false",
+  ];
+  const params: unknown[] = [];
+  if (sector) {
+    params.push(sector);
+    conds.push(`sector = $${params.length}`);
+  }
+  if (state) {
+    params.push(state);
+    conds.push(statePresenceSql(`$${params.length}`));
+  }
+  const rows = await db.query(
+    `SELECT COUNT(*)::int AS c FROM mi_companies WHERE ${conds.join(" AND ")}`,
+    params
+  );
   return Number((rows as unknown as { c: number }[])[0]?.c ?? 0);
 }
 
@@ -1595,12 +1639,26 @@ export async function rescoreCompaniesByIds(ids: string[]): Promise<number> {
 
 /** Companies held in the "unscored" bucket (no derivable revenue estimate —
  * see the healthcare branch of computeFit). */
-export async function countUnscored(sector?: string): Promise<number> {
+export async function countUnscored(sector?: string, state?: string): Promise<number> {
   await ensureSchema();
   const db = sql();
-  const rows = sector
-    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE sector = ${sector} AND details LIKE '{%' AND (details::jsonb ->> 'fitUnscored') = 'true'`
-    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE details LIKE '{%' AND (details::jsonb ->> 'fitUnscored') = 'true'`;
+  const conds = [
+    "details LIKE '{%'",
+    "(details::jsonb ->> 'fitUnscored') = 'true'",
+  ];
+  const params: unknown[] = [];
+  if (sector) {
+    params.push(sector);
+    conds.push(`sector = $${params.length}`);
+  }
+  if (state) {
+    params.push(state);
+    conds.push(statePresenceSql(`$${params.length}`));
+  }
+  const rows = await db.query(
+    `SELECT COUNT(*)::int AS c FROM mi_companies WHERE ${conds.join(" AND ")}`,
+    params
+  );
   return Number((rows as unknown as { c: number }[])[0]?.c ?? 0);
 }
 
@@ -1707,13 +1765,24 @@ export async function getUpdates(): Promise<UpdateItem[]> {
   return items.slice(0, 14);
 }
 
-export async function countCompanies(sector?: string): Promise<number> {
+export async function countCompanies(sector?: string, state?: string): Promise<number> {
   await ensureSchema();
   const db = sql();
-  const rows = sector
-    ? await db`SELECT count(*)::int AS n FROM mi_companies WHERE sector = ${sector}`
-    : await db`SELECT count(*)::int AS n FROM mi_companies`;
-  return numOrNull(rows[0]?.n) ?? 0;
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (sector) {
+    params.push(sector);
+    conds.push(`sector = $${params.length}`);
+  }
+  if (state) {
+    params.push(state);
+    conds.push(statePresenceSql(`$${params.length}`));
+  }
+  const rows = await db.query(
+    `SELECT count(*)::int AS n FROM mi_companies${conds.length ? ` WHERE ${conds.join(" AND ")}` : ""}`,
+    params
+  );
+  return numOrNull((rows as unknown as Record<string, unknown>[])[0]?.n) ?? 0;
 }
 
 function mapCompanyRow(r: Record<string, unknown>): MiCompany {
@@ -1741,15 +1810,27 @@ function mapCompanyRow(r: Record<string, unknown>): MiCompany {
   };
 }
 
-export async function getCompanies(sector?: string, limit = 600, offset = 0): Promise<MiCompany[]> {
+export async function getCompanies(sector?: string, limit = 600, offset = 0, state?: string): Promise<MiCompany[]> {
   await ensureSchema();
   const db = sql();
   const lim = Math.min(Math.max(limit, 1), 5000);
   const off = Math.max(offset, 0);
-  const rows = sector
-    ? await db`SELECT * FROM mi_companies WHERE sector = ${sector} ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim} OFFSET ${off}`
-    : await db`SELECT * FROM mi_companies ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT ${lim} OFFSET ${off}`;
-  return rows.map((r) => mapCompanyRow(r as Record<string, unknown>));
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (sector) {
+    params.push(sector);
+    conds.push(`sector = $${params.length}`);
+  }
+  if (state) {
+    params.push(state);
+    conds.push(statePresenceSql(`$${params.length}`));
+  }
+  params.push(lim, off);
+  const rows = await db.query(
+    `SELECT * FROM mi_companies${conds.length ? ` WHERE ${conds.join(" AND ")}` : ""} ORDER BY signal_value DESC NULLS LAST, employees DESC NULLS LAST, name ASC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
+  );
+  return (rows as unknown as Record<string, unknown>[]).map((r) => mapCompanyRow(r));
 }
 
 export async function setCompanyStatus(id: string, status: MiCompany["status"]): Promise<void> {
@@ -1763,19 +1844,37 @@ export async function setCompanyStatus(id: string, status: MiCompany["status"]):
  * query always returns the current top-N, so when a fit leaves the
  * stage the next most recently added fit slides in on the next read.
  * fitTotal is the uncapped count of active fits in the same scope. */
-export async function getFitCompanies(sectors?: string[]): Promise<{ companies: MiCompany[]; fitTotal: number }> {
+export async function getFitCompanies(sectors?: string[], state?: string): Promise<{ companies: MiCompany[]; fitTotal: number }> {
   await ensureSchema();
   await runFitStageMigration();
   const db = sql();
   const list = (sectors ?? []).filter(Boolean);
-  const totalRows = list.length
-    ? await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false AND sector = ANY(${list})`
-    : await db`SELECT COUNT(*)::int AS c FROM mi_companies WHERE status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false`;
-  const rows = list.length
-    ? await db`SELECT * FROM mi_companies WHERE status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false AND sector = ANY(${list}) ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`
-    : await db`SELECT * FROM mi_companies WHERE status = 'fit' AND is_chain = false AND is_institutional = false AND institutional_suspect = false ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`;
+  const conds = [
+    "status = 'fit'",
+    "is_chain = false",
+    "is_institutional = false",
+    "institutional_suspect = false",
+  ];
+  const params: unknown[] = [];
+  if (list.length) {
+    params.push(list);
+    conds.push(`sector = ANY($${params.length})`);
+  }
+  if (state) {
+    params.push(state);
+    conds.push(statePresenceSql(`$${params.length}`));
+  }
+  const where = conds.join(" AND ");
+  const totalRows = await db.query(
+    `SELECT COUNT(*)::int AS c FROM mi_companies WHERE ${where}`,
+    params
+  );
+  const rows = await db.query(
+    `SELECT * FROM mi_companies WHERE ${where} ORDER BY date_added DESC NULLS LAST, first_seen DESC, id DESC LIMIT ${FITS_DISPLAY_LIMIT}`,
+    params
+  );
   return {
-    companies: rows.map((r) => mapCompanyRow(r as Record<string, unknown>)),
+    companies: (rows as unknown as Record<string, unknown>[]).map((r) => mapCompanyRow(r)),
     fitTotal: Number((totalRows as unknown as { c: number }[])[0]?.c ?? 0),
   };
 }
