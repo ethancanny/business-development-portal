@@ -15,6 +15,14 @@
  * (aerospace-tech-dd-summary-2026-10-27); the Sources expansion
  * carries the full reference list from the source plan so nothing
  * from the original is lost.
+ *
+ * "Where the Profit Pools Are" block added later the same day
+ * (Ethan ask, Oct 27, 2026): where aerospace margin concentrates,
+ * cross-referenced Oct 2026 against Deloitte / McKinsey /
+ * AlixPartners / GE Aerospace segment reporting. The full
+ * annotated note is workspace-only
+ * (aerospace-profit-pools-note-2026-10-27) and is not portal
+ * content; only the condensed block below renders here.
  */
 
 import { cardCls, tdCls } from "@/components/diligence/types";
@@ -158,6 +166,59 @@ const GATES: Array<{ gate: string; minimum: string; verify: string }> = [
     verify: "Customer SLA terms (defect penalties ~$1,000/defect)",
   },
 ];
+
+/* --------------------- where the profit pools are -------------------- */
+
+interface ProfitPool {
+  segment: string;
+  margin: string;
+  model: string;
+  engine: string;
+  caveat?: string;
+}
+
+const PROFIT_INTRO =
+  "Margin in aerospace is polarized: it concentrates where proprietary systems and the aftermarket isolate a supplier from pure manufacturing risk. Industry context for weighting diligence findings.";
+
+const PROFIT_POOLS: ProfitPool[] = [
+  {
+    segment: "Propulsion & Engine Aftermarket",
+    margin: "Industry ~19–20% operating margins; the leading engine franchise runs 25%+",
+    model: "Engines sell at/near cost to win the program.",
+    engine:
+      "The profit is 30–40 years of certified spares and overhauls on the installed base.",
+  },
+  {
+    segment: "Proprietary Avionics & Mission Systems",
+    margin: "~15–25%",
+    model: "Holds the IP for flight-critical systems and software architectures.",
+    engine:
+      "Re-certification makes switching costs extreme, so updates, integrations, and replacements price at a premium.",
+  },
+  {
+    segment: "Aftermarket & Proprietary Spares",
+    margin: "High double digits — with proprietary content",
+    model: "Proprietary spare parts and certified component repair, sold on availability.",
+    engine:
+      "A grounded aircraft burns roughly $100 a minute, so operators pay massive markups for immediate availability.",
+    caveat:
+      "Independent MRO service labor runs ~7% margins — the margin follows proprietary parts, licenses, and certified repair capability, not service volume.",
+  },
+  {
+    segment: "Specialized Tier-3 Advanced Materials",
+    margin: "Highly variable; top quartile 20%+",
+    model:
+      "Engineered coatings, carbon fibers, and specialized alloys for extreme heat, pressure, and friction.",
+    engine:
+      "Top performers price on capacity constraints; commodity material suppliers are squeezed to single digits.",
+  },
+];
+
+const PROFIT_READ =
+  "Underwriting read: in MRO and services targets, underwrite the proprietary share of revenue, not the service volume.";
+
+const PROFIT_SOURCES =
+  "Cross-referenced Oct 2026: Deloitte 2026 A&D Outlook · McKinsey, The Aerospace Supplier Split (2026) · AlixPartners aerospace earnings divide · GE Aerospace segment reporting.";
 
 const SOURCE_GROUPS: Array<{
   heading: string;
@@ -329,6 +390,55 @@ export default function PlaybookSection() {
           </article>
         ))}
       </div>
+
+      <h3 className="mt-8 font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
+        Where the Profit Pools Are
+      </h3>
+      <p className="mt-0.5 max-w-3xl text-sm leading-relaxed text-slate-500 dark:text-white/50">
+        {PROFIT_INTRO}
+      </p>
+      <div className="mt-3 grid gap-4 md:grid-cols-2">
+        {PROFIT_POOLS.map((pool) => (
+          <article key={pool.segment} className={cardCls}>
+            <h4 className="font-display text-lg font-semibold text-[#0d1f3c] dark:text-white">
+              {pool.segment}
+            </h4>
+            <p className="mt-2">
+              <span className="inline-block rounded-full border border-[#b8975a]/50 bg-[#b8975a]/10 px-2.5 py-0.5 text-[13px] font-semibold text-[#0d1f3c] dark:text-white">
+                {pool.margin}
+              </span>
+            </p>
+            <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-white/70">
+              <span className="font-semibold text-[#0d1f3c] dark:text-white">
+                Model
+              </span>{" "}
+              — {pool.model}
+            </p>
+            <p className="mt-1.5 text-sm leading-relaxed text-slate-600 dark:text-white/70">
+              <span className="font-semibold text-[#0d1f3c] dark:text-white">
+                Profit engine
+              </span>{" "}
+              — {pool.engine}
+            </p>
+            {pool.caveat && (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-[13px] leading-relaxed dark:border-white/10 dark:bg-white/5">
+                <p className="text-slate-600 dark:text-white/70">
+                  <span className="font-semibold text-amber-700 dark:text-amber-300">
+                    Caveat:
+                  </span>{" "}
+                  {pool.caveat}
+                </p>
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+      <p className="mt-4 max-w-3xl text-sm font-medium leading-relaxed text-slate-600 dark:text-white/70">
+        {PROFIT_READ}
+      </p>
+      <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-400 dark:text-white/40">
+        {PROFIT_SOURCES}
+      </p>
 
       <h3 className="mt-8 font-display text-xl font-semibold text-[#0d1f3c] dark:text-white">
         Non-Negotiable Gates
