@@ -85,16 +85,35 @@ export async function upsertIndicatorObsBulk(rows: IndicatorInput[]): Promise<nu
   return rows.length;
 }
 
-export async function getIndicatorSeries(seriesIds: string[]): Promise<MiIndicatorObs[]> {
+export async function getIndicatorSeries(
+  seriesIds: string[],
+  tailPerSeries?: number
+): Promise<MiIndicatorObs[]> {
   await ensureSchema();
   const db = sql();
   if (!seriesIds.length) return [];
-  const rows = await db`
-    SELECT id, source, series_id, title, units, frequency,
-           to_char(obs_date, 'YYYY-MM-DD') AS obs_date, value
-    FROM mi_indicators
-    WHERE series_id = ANY(${seriesIds})
-    ORDER BY obs_date ASC`;
+  // tailPerSeries (Overview market strip): only the newest N observations
+  // per series — the strip reads the last two, so it must not pull the
+  // full FRED history (1.66 MB for the four rate series) to get them.
+  const rows = tailPerSeries
+    ? await db`
+        SELECT id, source, series_id, title, units, frequency,
+               to_char(obs_date, 'YYYY-MM-DD') AS obs_date, value
+        FROM (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY series_id ORDER BY obs_date DESC
+          ) AS rn
+          FROM mi_indicators
+          WHERE series_id = ANY(${seriesIds})
+        ) ranked
+        WHERE rn <= ${tailPerSeries}
+        ORDER BY obs_date ASC`
+    : await db`
+        SELECT id, source, series_id, title, units, frequency,
+               to_char(obs_date, 'YYYY-MM-DD') AS obs_date, value
+        FROM mi_indicators
+        WHERE series_id = ANY(${seriesIds})
+        ORDER BY obs_date ASC`;
   return rows.map((r) => ({
     id: str(r.id),
     source: str(r.source) as MiIndicatorSource,

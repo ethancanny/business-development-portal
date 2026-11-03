@@ -249,7 +249,7 @@ export default function Overview() {
       const indP = (async (): Promise<number> => {
         const r = await loadDataset<MiIndicatorObs[]>(
           "market_indicators",
-          "/api/market/indicators?series=DPRIME,SOFR,DGS10,DGS2"
+          "/api/market/indicators?series=DPRIME,SOFR,DGS10,DGS2&tail=2"
         );
         // Market strip: latest observation per series plus the change
         // vs the previous observation (the rates endpoint returns

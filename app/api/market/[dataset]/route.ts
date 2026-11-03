@@ -128,8 +128,19 @@ export async function GET(
     switch (dataset) {
       case "indicators": {
         const series = (sp.get("series") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-        return versionedJsonCached("market_indicators", series.join(","), () =>
-          getIndicatorSeries(series)
+        // tail=N: newest N observations per series (the Overview market
+        // strip passes tail=2). Absent/invalid = full history, unchanged
+        // (Market Intel charts rely on it). The window is part of the
+        // cache key so the two shapes never share a cached body.
+        const tailRaw = Number(sp.get("tail"));
+        const tail =
+          Number.isFinite(tailRaw) && tailRaw >= 1
+            ? Math.min(Math.floor(tailRaw), 5000)
+            : undefined;
+        return versionedJsonCached(
+          "market_indicators",
+          series.join(",") + "|tail=" + (tail ?? "all"),
+          () => getIndicatorSeries(series, tail)
         );
       }
       case "latest":
