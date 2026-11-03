@@ -13,8 +13,19 @@ export async function GET(req: NextRequest) {
   if (!getSessionUser()) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  await ensurePlatform();
-  const all = await getDatasetVersions();
+  // Light path (perf, Nov 2, 2026): this map gates every dataset load
+  // on every page, so it must not pay ensurePlatform's cold-instance
+  // schema/backfill battery on the happy path. The versions read is a
+  // single SELECT plus TTL-cached derived stamps; only if it throws
+  // (virgin deployment, schema not yet created) do we run the ensure
+  // and retry once.
+  let all: Record<string, number>;
+  try {
+    all = await getDatasetVersions();
+  } catch {
+    await ensurePlatform();
+    all = await getDatasetVersions();
+  }
   const filter = (req.nextUrl.searchParams.get("datasets") ?? "")
     .split(",")
     .map((s) => s.trim())

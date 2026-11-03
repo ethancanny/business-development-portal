@@ -313,9 +313,17 @@ export default function Overview() {
         return r.status;
       })();
 
-      const [meStatus, dealsStatus, , tasksStatus] = await Promise.all([
-        meP, dealsP, execsP, tasksP, ixP, flowP, calP, invP, multP, ratesP,
-        indP, candP, platP, bdP,
+      // Perf (Nov 2, 2026): the full-page skeleton lifts when the
+      // spine lands — session, deals, tasks, and the platform summary
+      // (hero numbers, active deals, follow-ups). The remaining
+      // loaders keep running and stream into their sections; each
+      // applies only its own state slice when it resolves. Loaders
+      // never reject by design; the catch is belt-and-braces.
+      void Promise.all([
+        execsP, ixP, flowP, calP, invP, multP, ratesP, indP, candP, bdP,
+      ]).catch(() => {});
+      const [meStatus, dealsStatus, tasksStatus] = await Promise.all([
+        meP, dealsP, tasksP, platP,
       ]);
       if (meStatus === 401 || dealsStatus === 401 || tasksStatus === 401) {
         router.replace("/login");
