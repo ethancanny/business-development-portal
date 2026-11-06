@@ -77,6 +77,12 @@ export interface DirectoryItem {
   touchCount90d?: number | null;
   openTaskCount?: number | null;
   tags?: string[];
+  /* Investor criteria shown on the Directory overview (Ethan,
+   * Nov 6, 2026): EBITDA range, industry preferences, investment
+   * type — in place of next-contact timing. */
+  ebitdaSize?: string | null;
+  industryFocus?: string | null;
+  investmentType?: string | null;
   title?: string | null;
   types: string[];
   email?: string | null;
@@ -273,16 +279,18 @@ export default function DirectoryGrid({
                 {item.updatedAt ? `Updated ${fmtDate(item.updatedAt)}` : ""}
               </span>
             </span>
-            {(item.tier || item.stage || item.lastTouchAt || item.nextTouchDue) && (
+            {(item.tier || item.stage || item.lastTouchAt) && (
               <span className="mt-1 flex flex-wrap gap-x-2 text-[11px] text-slate-400 dark:text-white/35">
                 {item.tier ? <span>Tier {item.tier}</span> : null}
                 {item.stage ? <span>{item.stage}</span> : null}
                 {item.lastTouchAt ? <span>Last touch {fmtDate(item.lastTouchAt)}</span> : null}
-                {item.nextTouchDue ? (
-                  <span className={isOverdueItem(item) ? "font-semibold text-red-600 dark:text-red-300" : ""}>
-                    Next due {fmtDate(item.nextTouchDue)}
-                  </span>
-                ) : null}
+              </span>
+            )}
+            {(item.ebitdaSize || item.industryFocus || item.investmentType) && (
+              <span className="mt-1 flex flex-wrap gap-x-2 text-[11px] text-slate-400 dark:text-white/35">
+                {item.ebitdaSize ? <span>EBITDA {item.ebitdaSize}</span> : null}
+                {item.industryFocus ? <span>{item.industryFocus}</span> : null}
+                {item.investmentType ? <span>{item.investmentType}</span> : null}
               </span>
             )}
             {item.source && (
@@ -370,8 +378,10 @@ export function DirectoryTable({
             <th className={th}>Type</th>
             <th className={th}>Tier</th>
             <th className={th}>Stage</th>
+            <th className={th}>EBITDA range</th>
+            <th className={th}>Industries</th>
+            <th className={th}>Investment type</th>
             <th className={th}>{onSort ? sortHeader("Last touch", "lastTouch") : "Last touch"}</th>
-            <th className={th}>{onSort ? sortHeader("Next due", "nextDue") : "Next due"}</th>
             <th className={th}>Tags</th>
             <th className={th}>{onSort ? sortHeader("Updated", "updated") : "Updated"}</th>
           </tr>
@@ -379,7 +389,6 @@ export function DirectoryTable({
         <tbody>
           {items.map((item) => {
             const active = selectedId === item.id;
-            const overdue = isOverdueItem(item);
             return (
               <tr
                 key={`${item.kind}-${item.id}`}
@@ -431,16 +440,11 @@ export function DirectoryTable({
                 </td>
                 <td className={td}>{item.tier || "—"}</td>
                 <td className={td}>{item.stage || "—"}</td>
+                <td className={td}>{item.ebitdaSize || "—"}</td>
+                <td className={td}>{item.industryFocus || "—"}</td>
+                <td className={td}>{item.investmentType || "—"}</td>
                 <td className={`${td} whitespace-nowrap`}>
                   {item.lastTouchAt ? fmtDate(item.lastTouchAt) : "—"}
-                </td>
-                <td
-                  className={`${td} whitespace-nowrap ${
-                    overdue ? "font-semibold text-red-600 dark:text-red-300" : ""
-                  }`}
-                >
-                  {item.nextTouchDue ? fmtDate(item.nextTouchDue) : "—"}
-                  {overdue ? " · overdue" : ""}
                 </td>
                 <td className={td}>
                   <span className="flex flex-wrap gap-1">

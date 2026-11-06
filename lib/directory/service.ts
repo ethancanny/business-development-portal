@@ -127,6 +127,14 @@ export interface DirectoryListItem {
   touchCount90d: number;
   openTaskCount: number;
   tags: string[];
+  /* Investor criteria (public.investors, joined via legacy_investor_id):
+   * EBITDA range, industry preferences, and investment type. The
+   * Directory overview shows these in place of next-contact timing
+   * (Ethan, Nov 6, 2026). Empty strings for non-investors and for
+   * investors whose sheet row left them blank. */
+  ebitdaSize: string;
+  industryFocus: string;
+  investmentType: string;
 }
 
 export type DirectoryListSort = "name" | "updated" | "lastTouch" | "nextDue";
@@ -200,7 +208,8 @@ export async function listDirectory(
       u.photo_url, u.organization_name, u.website, u.updated_at,
       u.linked_deal_count, u.types, u.logo_version,
       u.tier, u.stage, u.rel_owner, u.last_touch_at, u.next_touch_due,
-      u.touch_count_90d, u.open_task_count, u.tags
+      u.touch_count_90d, u.open_task_count, u.tags,
+      u.ebitda_size, u.industry_focus, u.investment_type
     FROM (
       SELECT 'person'::text AS kind, p.id, p.name, p.title,
         p.kind AS core_kind, p.email, p.phone, p.photo_url,
@@ -220,7 +229,13 @@ export async function listDirectory(
         coalesce(rp.open_task_count, 0) AS open_task_count,
         (SELECT coalesce(array_agg(tg.tag ORDER BY tg.tag), ARRAY[]::text[])
           FROM directory.tags tg
-          WHERE tg.entity_kind = 'person' AND tg.entity_id = p.id) AS tags
+          WHERE tg.entity_kind = 'person' AND tg.entity_id = p.id) AS tags,
+        coalesce((SELECT inv.ebitda_size FROM investors inv
+          WHERE inv.id = p.legacy_investor_id), '') AS ebitda_size,
+        coalesce((SELECT inv.industry FROM investors inv
+          WHERE inv.id = p.legacy_investor_id), '') AS industry_focus,
+        coalesce((SELECT inv.investment_type FROM investors inv
+          WHERE inv.id = p.legacy_investor_id), '') AS investment_type
       FROM core.people p
       LEFT JOIN directory.relationship_profiles rp
         ON rp.entity_kind = 'person' AND rp.entity_id = p.id
@@ -263,7 +278,9 @@ export async function listDirectory(
         coalesce(rp.open_task_count, 0) AS open_task_count,
         (SELECT coalesce(array_agg(tg.tag ORDER BY tg.tag), ARRAY[]::text[])
           FROM directory.tags tg
-          WHERE tg.entity_kind = 'organization' AND tg.entity_id = o.id) AS tags
+          WHERE tg.entity_kind = 'organization' AND tg.entity_id = o.id) AS tags,
+        ''::text AS ebitda_size, ''::text AS industry_focus,
+        ''::text AS investment_type
       FROM core.organizations o
       LEFT JOIN directory.relationship_profiles rp
         ON rp.entity_kind = 'organization' AND rp.entity_id = o.id
@@ -327,6 +344,9 @@ export async function listDirectory(
       tags: Array.isArray(rec.tags)
         ? rec.tags.map((t) => String(t)).filter(Boolean)
         : parseTypes(rec.tags),
+      ebitdaSize: str(rec.ebitda_size),
+      industryFocus: str(rec.industry_focus),
+      investmentType: str(rec.investment_type),
     };
   });
 

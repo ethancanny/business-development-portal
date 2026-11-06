@@ -681,36 +681,10 @@ textarea:focus-visible,
   background-color: #0a1a2f;
 }
 
-/* Desert motifs (spec §3): present in markup, rendered ONLY under
-   the Desert theme (and the star field only in its dark mode) so
-   Classic is untouched. All motifs are small inline SVGs — see
-   components/theme/DesertMotifs.tsx. */
-.motif { display: none; }
-[data-theme="desert"] .motif { display: block; }
-.motif-dark { display: none; }
-[data-theme="desert"].dark .motif-dark { display: block; }
-
-/* Instrument tick marks + corner brackets on key metric tiles
-   (Desert only): four copper corner ticks drawn as background
-   gradients — no extra markup, no layout shift. */
-[data-theme="desert"] .tile-brackets {
-  background-image:
-    linear-gradient(var(--copper), var(--copper)),
-    linear-gradient(var(--copper), var(--copper)),
-    linear-gradient(var(--copper), var(--copper)),
-    linear-gradient(var(--copper), var(--copper)),
-    linear-gradient(var(--copper), var(--copper)),
-    linear-gradient(var(--copper), var(--copper)),
-    linear-gradient(var(--copper), var(--copper)),
-    linear-gradient(var(--copper), var(--copper));
-  background-repeat: no-repeat;
-  background-size: 10px 2px, 2px 10px, 10px 2px, 2px 10px, 10px 2px, 2px 10px, 10px 2px, 2px 10px;
-  background-position:
-    left 6px top 6px, left 6px top 6px,
-    right 6px top 6px, right 6px top 6px,
-    left 6px bottom 6px, left 6px bottom 6px,
-    right 6px bottom 6px, right 6px bottom 6px;
-}
+/* Desert line motifs (contours, contrail, blueprint grid, star
+   field) and the tile corner-bracket ticks were removed Nov 6,
+   2026 at Ethan's direction — heroes and the login/lock screens
+   now carry the desert photo and gradients only. */
 
 /* Mono/tabular data figures (spec §3 typography): instrument-grade
    numbers for metric values and table figures. */

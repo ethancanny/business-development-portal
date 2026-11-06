@@ -4,12 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { startAuthentication } from "@simplewebauthn/browser";
 import { useTheme } from "@/components/ThemeProvider";
-import {
-  BlueprintGrid,
-  ContrailArc,
-  StarField,
-  TopoContours,
-} from "@/components/theme/DesertMotifs";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -131,12 +125,6 @@ export default function LoginPage() {
         backgroundPosition: "center",
       }}
     >
-      <span className="text-white">
-        <TopoContours />
-        <BlueprintGrid />
-        <ContrailArc />
-        <StarField />
-      </span>
       <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-2xl dark:border-white/10 dark:bg-[#132847]/95 dark:backdrop-blur">
         <img
           src={theme === "dark" ? "https://cannycapitalpartners.com/canny-logo-white.png" : "https://cannycapitalpartners.com/canny-logo.png"}
