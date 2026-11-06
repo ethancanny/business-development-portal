@@ -2099,6 +2099,24 @@ export async function ingestSusbSizes(): Promise<number> {
 
 export type IngestSource = "indicators" | "filings" | "news" | "econ_events" | "bankruptcy_news" | "warn" | "entities" | "multiples" | "defense" | "census" | "county_permits" | "permits_ci" | "sector_counts" | "commodity_spot" | "susb_sizes" | "intel_news" | "hospitality" | "adhs" | "tailwind" | "signals" | "all";
 
+// Retired sources (Ethan's directive, Nov 5, 2026): macroeconomic data is no
+// longer tracked in the portal — those sections are off the site and the
+// underlying sources (BLS WARN, bankruptcy feeds, commodity benchmarks,
+// Census/FRED series) are read directly when needed. Retired sources are
+// skipped at the door like Focus-paused ones: no fetch, no compute, whether
+// reached via source="all" or requested directly. Tailwind keeps running on
+// its remaining inputs (permits, ADHS).
+const RETIRED_SOURCES = new Set<string>([
+  "indicators",
+  "econ_events",
+  "warn",
+  "bankruptcy_news",
+  "commodity_spot",
+  "census",
+  "sector_counts",
+  "susb_sizes",
+]);
+
 export async function runMarketIngest(
   source: IngestSource,
   opts?: { tailwind?: TailwindIngestOpts }
@@ -2144,6 +2162,18 @@ export async function runMarketIngest(
   ];
   for (const [name, fn] of jobs) {
     if (source !== "all" && source !== name) continue;
+    // Retired sources — skipped AT THE DOOR, same hard rule as the Focus
+    // pause below: no fetch and no compute, logged as "skipped".
+    if (RETIRED_SOURCES.has(name)) {
+      await logSync(
+        name,
+        "skipped",
+        0,
+        "Skipped — retired Nov 5, 2026 (macro data no longer tracked)"
+      );
+      out[name] = 0;
+      continue;
+    }
     // Focus pause — skipped AT THE DOOR (hard CPU rule): the check
     // runs before the job fn is invoked, so a paused source performs
     // no fetch and no compute at all (~zero CPU), whether it was
