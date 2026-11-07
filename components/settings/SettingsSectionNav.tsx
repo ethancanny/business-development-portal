@@ -56,7 +56,10 @@ const SECTION_GROUPS: SectionGroup[] = [
   },
   {
     label: "System",
-    sections: [{ id: "settings-background-jobs", label: "Background jobs" }],
+    sections: [
+      { id: "settings-background-jobs", label: "Background jobs" },
+      { id: "settings-data-hygiene", label: "Data hygiene" },
+    ],
   },
 ];
 

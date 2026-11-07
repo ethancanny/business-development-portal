@@ -22,6 +22,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   const prev = items[idx];
+  // Retention (Nov 7, 2026): dismissing a Deal Flow item deletes it
+  // outright — dismissed items are not stored.
+  if (body.status === "dismissed") {
+    items.splice(idx, 1);
+    await saveDealFlow(items);
+    pushBadgeUpdate(user.email).catch(() => undefined);
+    return NextResponse.json({ ok: true, removed: true });
+  }
   const updated = {
     ...prev,
     status: STATUSES.includes(body.status) ? body.status : prev.status,

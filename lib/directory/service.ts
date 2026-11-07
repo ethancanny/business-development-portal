@@ -1200,23 +1200,35 @@ export async function deleteRecord(
   await ensureDirectory();
   if (!id) return false;
   const db = sql();
-  const rows =
+  const existing =
     kind === "person"
-      ? await db`
-          UPDATE core.people
-          SET deleted_at = now(), updated_at = now()
-          WHERE id = ${id} AND deleted_at IS NULL
-          RETURNING id`
-      : await db`
-          UPDATE core.organizations
-          SET deleted_at = now(), updated_at = now()
-          WHERE id = ${id} AND deleted_at IS NULL
-          RETURNING id`;
-  if (!rows.length) return false;
+      ? await db`SELECT id FROM core.people WHERE id = ${id}`
+      : await db`SELECT id FROM core.organizations WHERE id = ${id}`;
+  if (!existing.length) return false;
+  // Retention (Nov 7, 2026): delete is final — the record and its
+  // link rows are hard-deleted, not soft-deleted. The audit-log entry
+  // below is the only trace kept. (The retention purge in
+  // lib/retention.ts removes any pre-existing soft-deleted records
+  // the same way.)
+  if (kind === "person") {
+    await db`DELETE FROM directory.interaction_participants WHERE person_id = ${id}`;
+    await db`DELETE FROM directory.list_members WHERE entity_kind = 'person' AND entity_id = ${id}`;
+    await db`DELETE FROM directory.relationship_profiles WHERE entity_kind = 'person' AND entity_id = ${id}`;
+    await db`DELETE FROM directory.email_links WHERE person_id = ${id}`;
+    await db`DELETE FROM core.deal_participants WHERE entity_kind = 'person' AND entity_id = ${id}`;
+    await db`DELETE FROM core.people WHERE id = ${id}`;
+  } else {
+    await db`UPDATE core.people SET organization_id = NULL WHERE organization_id = ${id}`;
+    await db`DELETE FROM directory.list_members WHERE entity_kind = 'organization' AND entity_id = ${id}`;
+    await db`DELETE FROM directory.relationship_profiles WHERE entity_kind = 'organization' AND entity_id = ${id}`;
+    await db`DELETE FROM directory.email_links WHERE organization_id = ${id}`;
+    await db`DELETE FROM core.deal_participants WHERE entity_kind = 'organization' AND entity_id = ${id}`;
+    await db`DELETE FROM core.organizations WHERE id = ${id}`;
+  }
   await db`
     INSERT INTO core.audit_log (entity_kind, entity_id, actor, action, changes)
     VALUES (${kind}, ${id}, ${actor}, 'delete',
-      ${JSON.stringify({ deleted_at: { from: null, to: "soft-deleted" } })}::jsonb)`;
+      ${JSON.stringify({ deleted: { from: "present", to: "hard-deleted" } })}::jsonb)`;
   await publishEvent("contact_updated", {
     entityKind: kind,
     entityId: id,

@@ -5,6 +5,7 @@ import HospitalityFitSettings from "@/components/HospitalityFitSettings";
 import ChainFilterSettings from "@/components/ChainFilterSettings";
 import ManualSourcesSettings from "@/components/ManualSourcesSettings";
 import JobQueuePanel from "@/components/JobQueuePanel";
+import DataHygieneSettings from "@/components/settings/DataHygieneSettings";
 import ValuationParamsSettings from "@/components/ValuationParamsSettings";
 import MatchingWeightsCard from "@/components/capital/MatchingWeightsCard";
 import SettingsNav from "@/components/settings/SettingsNav";
@@ -250,6 +251,21 @@ export default function SettingsPage() {
             handlers. Retry a failed job or run a queued one now.
           </p>
           <JobQueuePanel />
+        </section>
+
+        <section
+          id="settings-data-hygiene"
+          className="scroll-mt-[104px] rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#132847]/60 sm:p-6"
+        >
+          <h2 className="text-lg font-bold text-[#0d1f3c] dark:text-white">
+            Data hygiene
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-slate-500 dark:text-white/50">
+            What the portal is still storing that it should not be —
+            retired-source data, dismissed and deleted records — and the
+            purge that removes it.
+          </p>
+          <DataHygieneSettings />
         </section>
           </div>
         </div>

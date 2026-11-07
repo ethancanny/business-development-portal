@@ -537,14 +537,17 @@ export async function applyNewsAction(
     return { ok: true };
   }
   if (action === "dismiss") {
-    await db`UPDATE mi_news SET dismissed = TRUE WHERE id = ${id}`;
+    // Retention (Nov 7, 2026): dismiss is final — the story is
+    // deleted, not flagged and kept.
+    await db`DELETE FROM mi_news WHERE id = ${id}`;
     return { ok: true };
   }
   if (action === "not-relevant") {
-    // Hides the story (same permanence as dismiss) AND teaches the
+    // Deletes the story (same permanence as dismiss) AND teaches the
     // scorer: source −4, up to three distinctive headline topics −2.
-    await db`UPDATE mi_news SET dismissed = TRUE WHERE id = ${id}`;
+    // The feedback lives in its own table and survives the deletion.
     await recordNotRelevantFeedback(str(item.source_name), str(item.headline));
+    await db`DELETE FROM mi_news WHERE id = ${id}`;
     return { ok: true };
   }
   if (action === "sector") {

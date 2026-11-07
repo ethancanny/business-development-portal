@@ -1212,6 +1212,26 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
     const acc = accIdOfDetails(str(d.details));
     if (acc) dismissedByKey.set(`${nm}|acc:${acc}`, entry);
   }
+  // Retention blocklist (Nov 7, 2026): tombstones of dismissed
+  // companies whose full rows were purged join the same no-resurface
+  // index, and their (source, dedup key, sector) identities
+  // force-dismiss in the insert loop below. Additive only — a
+  // blocklist read failure never fails an import.
+  const blocklistRowKeys = new Set<string>();
+  try {
+    await ensureDismissedBlocklist(db);
+    const tomb =
+      await db`SELECT source, dedup_key, sector, name_key, domain, acc_id, dismissed_at, reason FROM mi_dismissed_blocklist`;
+    for (const t of tomb) {
+      const nm = str(t.name_key);
+      const entry = { at: t.dismissed_at, reason: str(t.reason) };
+      if (nm && str(t.domain)) dismissedByKey.set(`${nm}|${str(t.domain)}`, entry);
+      if (nm && str(t.acc_id)) dismissedByKey.set(`${nm}|acc:${str(t.acc_id)}`, entry);
+      if (str(t.dedup_key)) blocklistRowKeys.add(rowKey(str(t.dedup_key), str(t.sector)));
+    }
+  } catch {
+    /* blocklist is additive protection */
+  }
   const dismissedMatch = (r: CompanyInput): { at: unknown; reason: string } | undefined => {
     const nm = normCompanyName(r.name);
     if (!nm) return undefined;
@@ -1315,7 +1335,13 @@ export async function importCompanies(source: string, rows: CompanyInput[], rese
       // survives; otherwise the stage follows this import's fit
       // verdict — fit rows enter the stage, rows that stop fitting
       // fall back to 'new'.
-      const guard = rx._status === "dismissed" ? undefined : dismissedMatch(r);
+      const guard =
+        rx._status === "dismissed"
+          ? undefined
+          : (dismissedMatch(r) ??
+            (blocklistRowKeys.has(rowKey(r.dedupKey, r.sector))
+              ? { at: null as unknown, reason: "" }
+              : undefined));
       const status =
         rx._status === "dismissed"
           ? "dismissed"
@@ -1901,14 +1927,72 @@ export async function getFitCompanies(sectors?: string[], state?: string): Promi
 /** Dismiss a company (fit-stage exit with tracking): stamps
  * dismissed_at + the optional reason. Dismissal is sticky — see the
  * guards in importCompanies. */
+/* Dismissed-company blocklist (data retention, Nov 7, 2026). Ethan's
+ * rule: the portal does not store anything that has been cleared,
+ * dismissed, or deleted. Dismissal is therefore final — the full
+ * company row is deleted and only this slim tombstone remains
+ * (identity keys only, no payload), so the company can never resurface
+ * as a fit on a later import while nothing else about it is kept. */
+export async function ensureDismissedBlocklist(
+  db: ReturnType<typeof sql> = sql()
+): Promise<void> {
+  await db`
+    CREATE TABLE IF NOT EXISTS mi_dismissed_blocklist (
+      source TEXT NOT NULL DEFAULT '',
+      dedup_key TEXT NOT NULL DEFAULT '',
+      sector TEXT NOT NULL DEFAULT '',
+      name_key TEXT NOT NULL DEFAULT '',
+      domain TEXT NOT NULL DEFAULT '',
+      acc_id TEXT NOT NULL DEFAULT '',
+      dismissed_at TIMESTAMPTZ,
+      reason TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (source, dedup_key, sector)
+    )`;
+}
+
+/** Record tombstones for company rows about to be deleted. Computes
+ * the same identity keys the import no-resurface guard matches on
+ * (normalized name + domain, normalized name + ACC entity ID). */
+export async function tombstoneCompanyRows(
+  rows: Record<string, unknown>[],
+  reason = ""
+): Promise<number> {
+  const db = sql();
+  await ensureDismissedBlocklist(db);
+  let n = 0;
+  for (const r of rows) {
+    const nm = normCompanyName(str(r.name));
+    if (!nm) continue;
+    const at =
+      r.dismissed_at instanceof Date
+        ? r.dismissed_at.toISOString()
+        : str(r.dismissed_at) || new Date().toISOString();
+    await db`
+      INSERT INTO mi_dismissed_blocklist
+        (source, dedup_key, sector, name_key, domain, acc_id, dismissed_at, reason)
+      VALUES (${str(r.source)}, ${str(r.dedup_key)}, ${str(r.sector)}, ${nm},
+        ${domainOf(str(r.website))}, ${accIdOfDetails(str(r.details))},
+        ${at}, ${str(r.dismissed_reason) || reason})
+      ON CONFLICT (source, dedup_key, sector) DO NOTHING`;
+    n++;
+  }
+  return n;
+}
+
 export async function dismissCompany(id: string, reason = ""): Promise<void> {
   await ensureSchema();
   await runFitStageMigration();
-  await sql()`
-    UPDATE mi_companies
-    SET status = 'dismissed', dismissed_at = NOW(),
-        dismissed_reason = ${reason.trim().slice(0, 300)}, updated_at = NOW()
-    WHERE id = ${id}`;
+  const db = sql();
+  const rows = (await db`
+    SELECT * FROM mi_companies WHERE id = ${id}`) as unknown as Record<
+    string,
+    unknown
+  >[];
+  if (!rows.length) return;
+  // Retention (Nov 7, 2026): dismissal is final — tombstone the
+  // identity so it can never resurface, then delete the full row.
+  await tombstoneCompanyRows(rows, reason.trim().slice(0, 300));
+  await db`DELETE FROM mi_companies WHERE id = ${id}`;
 }
 
 /** Restore a dismissed company: back to status='fit' when its fit
@@ -2554,9 +2638,23 @@ export async function getEntities(status?: string): Promise<MiEntity[]> {
 
 /* ---------------- Sync log ---------------- */
 
+let lastSyncLogPrune = 0;
+
 export async function logSync(job: string, status: "ok" | "error" | "skipped" | "check", added: number, message: string): Promise<void> {
   await ensureSchema();
   await sql()`INSERT INTO mi_sync_log (id, job, status, added, message) VALUES (${newId()}, ${job}, ${status}, ${added}, ${message})`;
+  // Retention (Nov 7, 2026): the sync log is the audit trail for
+  // recent cross-check verdicts, not an archive — rows older than 30
+  // days are pruned on write, throttled to once per 6 hours per
+  // process.
+  if (Date.now() - lastSyncLogPrune > 6 * 3600_000) {
+    lastSyncLogPrune = Date.now();
+    try {
+      await sql()`DELETE FROM mi_sync_log WHERE ran_at < NOW() - INTERVAL '30 days'`;
+    } catch {
+      /* pruning never fails a sync */
+    }
+  }
 }
 
 /** Latest sync-log row per job — feeds the Market Intel "Updated" labels
