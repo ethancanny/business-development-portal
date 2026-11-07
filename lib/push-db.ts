@@ -22,9 +22,29 @@ function sql(): Sql {
 }
 
 let ensured = false;
+
+/** Cold-start sentinel (Nov 7, 2026): see LEGACY_SCHEMA_EPOCH in
+ * lib/db-postgres.ts. MAINTENANCE RULE: any change to the DDL in
+ * this ensure MUST bump PUSH_SCHEMA_EPOCH. */
+const PUSH_SCHEMA_EPOCH = 1;
+
 async function ensure(): Promise<void> {
   if (ensured) return;
   const q = sql();
+  try {
+    const probe = await q`
+      SELECT epoch FROM public.schema_ensures WHERE name = 'push'`;
+    if (
+      probe.length &&
+      Number((probe[0] as Record<string, unknown>).epoch) ===
+        PUSH_SCHEMA_EPOCH
+    ) {
+      ensured = true;
+      return;
+    }
+  } catch {
+    /* sentinel table not created yet — run the full batch */
+  }
   await q`CREATE TABLE IF NOT EXISTS push_config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
@@ -97,6 +117,17 @@ async function ensure(): Promise<void> {
     dismissed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (item_kind, item_id, state_key)
   )`;
+  await q`
+    CREATE TABLE IF NOT EXISTS public.schema_ensures (
+      name TEXT PRIMARY KEY,
+      epoch INT NOT NULL,
+      ensured_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`;
+  await q`
+    INSERT INTO public.schema_ensures (name, epoch)
+    VALUES ('push', ${PUSH_SCHEMA_EPOCH})
+    ON CONFLICT (name) DO UPDATE
+      SET epoch = EXCLUDED.epoch, ensured_at = now()`;
   ensured = true;
 }
 

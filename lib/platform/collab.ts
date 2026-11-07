@@ -1,6 +1,6 @@
 import { sql, newId, str, num, isoOrNull } from "./db";
 import { logUsage } from "./usage";
-import { getDealFlow, getTasks } from "../db";
+import { getTasks } from "../db";
 
 /**
  * Collaboration service (Phase 2, workstream D) — comments + @mentions,
@@ -442,13 +442,49 @@ export async function listNotifications(
   // Unread only — see the header note. Returning read rows here is
   // what made the center impossible to empty: clearing stamped
   // read_at, but the rows kept rendering (dimmed) forever.
-  const rows = await db`
-    SELECT id, kind, title, body, href, read_at, created_at,
-      entity_kind, entity_id
-    FROM core.notifications
-    WHERE (user_email = ${email} OR user_email = '') AND read_at IS NULL
-    ORDER BY created_at DESC
-    LIMIT ${lim}`;
+  // CPU slimming (Nov 7, 2026): the three independent reads — the
+  // notification rows, their unread count, and the unread Activity
+  // items — run in parallel instead of sequentially, and the Activity
+  // merge reads only the unread deal_flow rows it needs (narrow
+  // columns) instead of loading and mapping the whole table.
+  const activityPromise = (async (): Promise<NotificationItem[]> => {
+    try {
+      const flowRows = await db`
+        SELECT id, kind, title, why, source, source_detail, created_at
+        FROM deal_flow
+        WHERE status = 'new' AND read_at IS NULL
+        ORDER BY created_at DESC`;
+      return flowRows.map((r) => {
+        const rec = r as Record<string, unknown>;
+        return {
+          id: str(rec.id),
+          source: "activity" as const,
+          kind: str(rec.kind),
+          title: str(rec.title),
+          body:
+            str(rec.why) || str(rec.source_detail) || str(rec.source) || "",
+          href: "/activity",
+          read: false,
+          createdAt: isoOrNull(rec.created_at) ?? "",
+        };
+      });
+    } catch {
+      /* deal_flow unavailable — platform notifications still render */
+      return [];
+    }
+  })();
+  const [rows, countRows] = await Promise.all([
+    db`
+      SELECT id, kind, title, body, href, read_at, created_at,
+        entity_kind, entity_id
+      FROM core.notifications
+      WHERE (user_email = ${email} OR user_email = '') AND read_at IS NULL
+      ORDER BY created_at DESC
+      LIMIT ${lim}`,
+    db`
+      SELECT count(*)::int AS n FROM core.notifications
+      WHERE (user_email = ${email} OR user_email = '') AND read_at IS NULL`,
+  ]);
   const platform: NotificationItem[] = rows.map((r) => {
     const rec = r as Record<string, unknown>;
     return {
@@ -515,33 +551,14 @@ export async function listNotifications(
   } catch {
     /* mark enrichment is decorative */
   }
-  const countRows = await db`
-    SELECT count(*)::int AS n FROM core.notifications
-    WHERE (user_email = ${email} OR user_email = '') AND read_at IS NULL`;
   const platformUnread = countRows.length
     ? num((countRows[0] as Record<string, unknown>).n)
     : 0;
 
   // Unread deal_flow items — the existing notification concept
-  // (lib/badge.ts). Presented, never marked read here.
-  let activity: NotificationItem[] = [];
-  try {
-    const flow = await getDealFlow();
-    activity = flow
-      .filter((i) => i.status === "new" && !i.readAt)
-      .map((i) => ({
-        id: i.id,
-        source: "activity" as const,
-        kind: i.kind,
-        title: i.title,
-        body: i.why || i.sourceDetail || i.source || "",
-        href: "/activity",
-        read: false,
-        createdAt: i.createdAt,
-      }));
-  } catch {
-    /* deal_flow unavailable — platform notifications still render */
-  }
+  // (lib/badge.ts). Presented, never marked read here. (Fetched in
+  // parallel with the platform rows above.)
+  const activity = await activityPromise;
 
   const items = [...platform, ...activity]
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))

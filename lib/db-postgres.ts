@@ -19,11 +19,34 @@ function sql() {
 
 let schemaReady: Promise<void> | null = null;
 
+/** Cold-start sentinel (Nov 7, 2026): this ensure batch is ~78 DDL
+ * statements; a cold instance used to pay all of them before its
+ * first real query. The batch now records a schema epoch in
+ * public.schema_ensures when it completes, and later instances skip
+ * straight past the batch when the recorded epoch matches.
+ * MAINTENANCE RULE: any change to the DDL in this ensure MUST bump
+ * LEGACY_SCHEMA_EPOCH, or existing databases will skip the batch and
+ * never apply the change. */
+export const LEGACY_SCHEMA_EPOCH = 1;
+
 /** Idempotent schema setup — safe to call on every operation (serverless). */
 export function ensureSchema(): Promise<void> {
   if (!schemaReady) {
     schemaReady = (async () => {
       const db = sql();
+      try {
+        const probe = await db`
+          SELECT epoch FROM public.schema_ensures WHERE name = 'legacy'`;
+        if (
+          probe.length &&
+          Number((probe[0] as Record<string, unknown>).epoch) ===
+            LEGACY_SCHEMA_EPOCH
+        ) {
+          return;
+        }
+      } catch {
+        /* sentinel table not created yet — run the full batch */
+      }
       await db`
         CREATE TABLE IF NOT EXISTS deals (
           id TEXT PRIMARY KEY,
@@ -496,6 +519,17 @@ export function ensureSchema(): Promise<void> {
             END IF;
           END $$`,
       ]);
+      await db`
+        CREATE TABLE IF NOT EXISTS public.schema_ensures (
+          name TEXT PRIMARY KEY,
+          epoch INT NOT NULL,
+          ensured_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
+      await db`
+        INSERT INTO public.schema_ensures (name, epoch)
+        VALUES ('legacy', ${LEGACY_SCHEMA_EPOCH})
+        ON CONFLICT (name) DO UPDATE
+          SET epoch = EXCLUDED.epoch, ensured_at = now()`;
     })().catch((err) => {
       schemaReady = null;
       throw err;

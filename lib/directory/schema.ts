@@ -38,11 +38,29 @@ export const DIRECTORY_TOPUP_KEY = "phase2-directory-topup";
 
 let schemaReady: Promise<void> | null = null;
 
+/** Cold-start sentinel (Nov 7, 2026): see LEGACY_SCHEMA_EPOCH in
+ * lib/db-postgres.ts. MAINTENANCE RULE: any change to the DDL in
+ * this ensure MUST bump DIRECTORY_SCHEMA_EPOCH. */
+export const DIRECTORY_SCHEMA_EPOCH = 1;
+
 export function ensureDirectorySchema(): Promise<void> {
   if (!schemaReady) {
     schemaReady = (async () => {
       await ensurePlatformSchema();
       const db = sql();
+      try {
+        const probe = await db`
+          SELECT epoch FROM public.schema_ensures WHERE name = 'directory'`;
+        if (
+          probe.length &&
+          Number((probe[0] as Record<string, unknown>).epoch) ===
+            DIRECTORY_SCHEMA_EPOCH
+        ) {
+          return;
+        }
+      } catch {
+        /* sentinel table not created yet — run the full batch */
+      }
       await db`CREATE SCHEMA IF NOT EXISTS directory`;
 
       await db`
@@ -92,6 +110,17 @@ export function ensureDirectorySchema(): Promise<void> {
       await db`
         CREATE INDEX IF NOT EXISTS directory_email_links_company_idx
         ON directory.email_links (company_id, created_at DESC)`;
+      await db`
+        CREATE TABLE IF NOT EXISTS public.schema_ensures (
+          name TEXT PRIMARY KEY,
+          epoch INT NOT NULL,
+          ensured_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
+      await db`
+        INSERT INTO public.schema_ensures (name, epoch)
+        VALUES ('directory', ${DIRECTORY_SCHEMA_EPOCH})
+        ON CONFLICT (name) DO UPDATE
+          SET epoch = EXCLUDED.epoch, ensured_at = now()`;
     })().catch((err) => {
       schemaReady = null;
       throw err;

@@ -3,7 +3,6 @@ import { getSessionUser } from "@/lib/auth";
 import { getDealFlow, saveDealFlow } from "@/lib/db";
 import { dismissCurrentlyDueFollowups } from "@/lib/badge";
 import { pushBadgeUpdate } from "@/lib/push";
-import { ensurePlatform } from "@/lib/platform/service";
 import {
   listNotifications,
   markAllNotificationsRead,
@@ -24,7 +23,11 @@ export async function GET(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  await ensurePlatform();
+  // No ensurePlatform() here (CPU slimming, Nov 7, 2026): on a cold
+  // instance that call pays the whole platform bootstrap (schema
+  // ensures, backfill, job drains) — it was most of this route's
+  // 3.4s. Every callee below ensures its own schema, and the platform
+  // bootstrap still runs on the first true platform route call.
   const raw = Number(req.nextUrl.searchParams.get("limit") ?? 50);
   const limit = Math.min(50, Math.max(1, isFinite(raw) ? raw : 50));
   const data = await listNotifications(user.email, limit);
@@ -36,7 +39,6 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  await ensurePlatform();
   const body = (await req.json().catch(() => ({}))) as {
     id?: unknown;
     all?: unknown;

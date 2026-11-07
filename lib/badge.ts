@@ -1,5 +1,16 @@
+import { neon } from "@neondatabase/serverless";
 import { getDealFlow, getTasks } from "@/lib/db";
 import { dismissBadgeItem, getBadgeDismissals, phoenixDate } from "@/lib/push-db";
+
+let cachedSql: ReturnType<typeof neon> | null = null;
+function sql() {
+  if (!cachedSql) {
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("DATABASE_URL is not set");
+    cachedSql = neon(url);
+  }
+  return cachedSql;
+}
 
 /**
  * THE app-icon badge computation (Oct 16, 2026) — the single source of
@@ -46,6 +57,40 @@ export function followupStateKey(dueDate: string, today: string): string {
 
 export async function computeBadgeCount(): Promise<BadgeBreakdown> {
   const today = phoenixDate();
+  // CPU slimming (Nov 7, 2026): in Postgres mode the count comes from
+  // two narrow queries — open tasks due today/overdue (id + due_date
+  // only, dismissal check unchanged) and a COUNT of unread deal_flow
+  // rows — instead of loading and mapping both full tables through
+  // the legacy store. The JSON-file fallback below keeps the original
+  // path for DATABASE_URL-less runs.
+  if (process.env.DATABASE_URL) {
+    const q = sql();
+    const [taskRowsRaw, flowRowsRaw, dismissed] = await Promise.all([
+      q`
+        SELECT id, due_date FROM tasks
+        WHERE done = FALSE AND due_date <> '' AND due_date <= ${today}`,
+      q`
+        SELECT COUNT(*)::int AS n FROM deal_flow
+        WHERE status = 'new' AND read_at IS NULL`,
+      getBadgeDismissals("followup").catch(() => new Set<string>()),
+    ]);
+    const taskRows = taskRowsRaw as unknown as Record<string, unknown>[];
+    const flowRows = flowRowsRaw as unknown as Record<string, unknown>[];
+    const dueFollowups = taskRows.filter((rec) => {
+      const dueDate = String(rec.due_date ?? "");
+      return !dismissed.has(
+        `${String(rec.id ?? "")}|${followupStateKey(dueDate, today)}`
+      );
+    }).length;
+    const unreadNotifications = flowRows.length
+      ? Number(flowRows[0].n ?? 0)
+      : 0;
+    return {
+      count: dueFollowups + unreadNotifications,
+      dueFollowups,
+      unreadNotifications,
+    };
+  }
   const [tasks, flow, dismissed] = await Promise.all([
     getTasks(),
     getDealFlow(),

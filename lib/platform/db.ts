@@ -91,10 +91,29 @@ export function iso(v: unknown): string {
 
 let schemaReady: Promise<void> | null = null;
 
+/** Cold-start sentinel (Nov 7, 2026): see LEGACY_SCHEMA_EPOCH in
+ * lib/db-postgres.ts. This batch is ~43 DDL statements; instances
+ * skip it when the recorded epoch matches. MAINTENANCE RULE: any
+ * change to the DDL in this ensure MUST bump PLATFORM_SCHEMA_EPOCH. */
+export const PLATFORM_SCHEMA_EPOCH = 1;
+
 export function ensurePlatformSchema(): Promise<void> {
   if (!schemaReady) {
     schemaReady = (async () => {
       const db = sql();
+      try {
+        const probe = await db`
+          SELECT epoch FROM public.schema_ensures WHERE name = 'platform'`;
+        if (
+          probe.length &&
+          Number((probe[0] as Record<string, unknown>).epoch) ===
+            PLATFORM_SCHEMA_EPOCH
+        ) {
+          return;
+        }
+      } catch {
+        /* sentinel table not created yet — run the full batch */
+      }
       await db`CREATE SCHEMA IF NOT EXISTS core`;
 
       // SQL twin of normalizeName() so backfills can normalize in-place.
@@ -456,6 +475,17 @@ export function ensurePlatformSchema(): Promise<void> {
           theme TEXT NOT NULL DEFAULT 'desert',
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`;
+      await db`
+        CREATE TABLE IF NOT EXISTS public.schema_ensures (
+          name TEXT PRIMARY KEY,
+          epoch INT NOT NULL,
+          ensured_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
+      await db`
+        INSERT INTO public.schema_ensures (name, epoch)
+        VALUES ('platform', ${PLATFORM_SCHEMA_EPOCH})
+        ON CONFLICT (name) DO UPDATE
+          SET epoch = EXCLUDED.epoch, ensured_at = now()`;
     })().catch((err) => {
       schemaReady = null;
       throw err;
