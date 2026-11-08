@@ -186,8 +186,22 @@ export async function scheduleUpcomingEventPushJobs(
 }
 
 /** Drain due jobs (the queue's execution trigger — see the module
- * header for the call sites). Never throws. */
+ * header for the call sites). Never throws.
+ *
+ * CPU CAP (Ethan, Nov 7, 2026): opportunistic drains are DISABLED by
+ * default. Every platform API call, calendar webhook, ingest call
+ * and deal-flow write used to execute whatever background jobs were
+ * due, inside the request — invisible CPU burn (and page latency)
+ * that grows with the backlog. Ethan's budget: the portal must not
+ * exceed 18 minutes of Fluid Active CPU per month, so request paths
+ * never execute background jobs. Jobs still get ENQUEUED as before
+ * (cheap row writes) and execute only when a runner deliberately
+ * calls runDueJobs — the manual /api/push/check exerciser, the
+ * data-room upload and document-restore routes (user-initiated), or
+ * a future agent runner — or when PORTAL_JOBS_ENABLED=1 is set in
+ * the environment to restore opportunistic draining. */
 export async function drainPushJobs(limit = 5): Promise<void> {
+  if (process.env.PORTAL_JOBS_ENABLED !== "1") return;
   try {
     await runDueJobs(limit);
   } catch {

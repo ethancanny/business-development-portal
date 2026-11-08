@@ -2,6 +2,20 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
+  // CPU emergency brake (Ethan, Nov 7, 2026): with PORTAL_FROZEN=1
+  // in the project's environment, EVERY request is refused here in
+  // middleware — no page render, no API route, no database touch —
+  // so the project's Fluid Active CPU stays at effectively zero
+  // while the site is down. Ethan's budget is 18 minutes of CPU per
+  // month; this is the hard stop behind it. Remove the variable and
+  // redeploy to unfreeze.
+  if (process.env.PORTAL_FROZEN === "1") {
+    return new NextResponse(
+      "Portal paused. It will be back shortly.",
+      { status: 503, headers: { "content-type": "text/plain" } }
+    );
+  }
+
   const { pathname } = req.nextUrl;
 
   // Public routes: login page, auth API (login needs no session), and brand assets.
